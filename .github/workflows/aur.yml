@@ -1,0 +1,102 @@
+name: aur
+
+# Publishes the source package (rsdm) and the prebuilt-binary package (rsdm-bin)
+# to the AUR after a GitHub release is published, so the release assets the
+# rsdm-bin sums reference already exist.
+#
+# Required repository secrets:
+#   AUR_SSH_PRIVATE_KEY - private key whose public half is registered on the AUR
+#                         account that owns the rsdm / rsdm-bin packages
+# Optional:
+#   AUR_USERNAME, AUR_EMAIL - git author for the AUR commits
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish"
+        required: true
+
+jobs:
+  publish:
+    name: publish ${{ matrix.pkg }}
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pkg: rsdm
+            dir: packaging/arch
+          - pkg: rsdm-bin
+            dir: packaging/arch/rsdm-bin
+    steps:
+      - name: Install tooling
+        run: pacman -Syu --noconfirm git openssh pacman-contrib
+
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          ref="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "version=${ref#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify release matches Cargo version
+        run: |
+          expected="${{ steps.ver.outputs.version }}"
+          actual="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\([^"]*\)"/\1/p;}' Cargo.toml | head -n1)"
+          test -n "$actual" && test "$actual" = "$expected" || {
+            echo "release version $expected does not match Cargo version ${actual:-<missing>}" >&2
+            exit 1
+          }
+
+      - name: Configure SSH for the AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          install -dm700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519,rsa aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            User aur
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+          EOF
+
+      - name: Build PKGBUILD + .SRCINFO
+        run: |
+          set -euo pipefail
+          ver="${{ steps.ver.outputs.version }}"
+          # base-devel cannot run makepkg as root; do the work as a build user.
+          useradd -m builder
+          chown -R builder "${{ matrix.dir }}"
+          sed -i "s/^pkgver=.*/pkgver=${ver}/" "${{ matrix.dir }}/PKGBUILD"
+          sed -i "s/^pkgrel=.*/pkgrel=1/" "${{ matrix.dir }}/PKGBUILD"
+          sudo -u builder bash -c "cd '${{ matrix.dir }}' && updpkgsums && makepkg --printsrcinfo > .SRCINFO"
+
+      - name: Push to the AUR
+        run: |
+          set -euo pipefail
+          name="${{ matrix.pkg }}"
+          git config --global user.name "${{ secrets.AUR_USERNAME || 'rsdm-ci' }}"
+          git config --global user.email "${{ secrets.AUR_EMAIL || 'rsdm-ci@users.noreply.github.com' }}"
+          git config --global --add safe.directory '*'
+          git clone "ssh://aur@aur.archlinux.org/${name}.git" aur-repo
+          # Carry over only the AUR-relevant files.
+          cp "${{ matrix.dir }}/PKGBUILD" "${{ matrix.dir }}/.SRCINFO" aur-repo/
+          if [ -f "${{ matrix.dir }}/rsdm.install" ]; then
+            cp "${{ matrix.dir }}/rsdm.install" aur-repo/
+          fi
+          cd aur-repo
+          git add -A
+          if git diff --cached --quiet; then
+            echo "no changes to publish"
+          else
+            git commit -m "Update ${name} to ${{ steps.ver.outputs.version }}"
+            git push
+          fi

@@ -1,0 +1,7 @@
+# PAM stack for the rsdm greeter on Debian and Ubuntu. This is a complete login
+# stack: pam_systemd is reached through common-session and binds the session to
+# its VT/seat. Add an optional keyring module here if the system uses one.
+@include common-auth
+@include common-account
+@include common-password
+@include common-session

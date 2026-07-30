@@ -1,0 +1,48 @@
+# rsdm documentation
+
+`rsdm` is a standalone Rust display manager (TTY/TUI greeter) and screen locker
+for Wayland sessions. No greetd, GTK, Qt, webview, or Electron. One binary,
+`rsdm`, with a few subcommands:
+
+| command                 | what it does                                        |
+|-------------------------|-----------------------------------------------------|
+| `rsdm dm`               | the greeter, on the configured VT                   |
+| `rsdm lock`             | lock the current Wayland session                    |
+| `rsdm idle`             | lock after compositor-reported inactivity           |
+| `rsdm unlock`           | privileged emergency unlock of a live rsdm locker   |
+| `rsdm logs`             | open the system/user journal interactively          |
+| `rsdm status`           | show config and live lock state                     |
+| `rsdm session start`    | run a compositor as a systemd `--user` session      |
+| `rsdm session finalize` | export env + activate the session from a compositor |
+| `rsdm app -- <cmd>`     | launch a program into the graphical session         |
+| `rsdm validate-config`  | check `rsdm.toml`                                   |
+
+All commands take a global `--config <path>` (default `/etc/rsdm.toml`,
+also `RSDM_CONFIG`).
+
+## Guides
+
+- [Installation: Arch](installation/arch.md)
+- [Installation: Fedora](installation/fedora.md)
+- [Installation: NixOS](installation/nixos.md)
+- [Installation: Ubuntu](installation/ubuntu.md)
+- [Configuration reference](configuration.md)
+- [Display manager (greeter)](display-manager.md)
+- [Lock screen](lock.md)
+- [Idle locking](idle.md)
+- [Keyrings](keyrings.md)
+- [Session manager](session-manager.md)
+- [Troubleshooting](troubleshooting.md)
+
+## Compositors
+
+`rsdm` is compositor-agnostic. Setup notes for the common ones:
+
+- [niri](compositors/niri.md)
+- [Hyprland](compositors/hyprland.md)
+
+## See also
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) - crate layout and runtime paths
+- [SECURITY.md](SECURITY.md) - PAM, privilege handling, lock guarantees
+- [rsdm.toml](../rsdm.toml) - practical commented configuration example

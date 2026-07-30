@@ -1,0 +1,13 @@
+[package]
+name = "rsdm-ui"
+description = "Shared, medium-independent UI for rsdm: the one design rendered by both the TTY greeter and the framebuffer locker."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+rsdm-core = { path = "../rsdm-core" }
+figrs.workspace = true
+time.workspace = true
+tracing.workspace = true

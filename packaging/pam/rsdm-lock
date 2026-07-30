@@ -1,0 +1,4 @@
+# PAM stack for the rsdm lock screen. It only verifies the seated user's
+# password: no session, credential, or token changes happen here.
+auth      include   system-login
+account   include   system-login

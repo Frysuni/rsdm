@@ -1,0 +1,23 @@
+# PAM stack for the rsdm greeter. This is the login: it authenticates the user,
+# opens a logind session (pam_systemd, via system-login, binds the seat/VT), and
+# in the same session unlocks the keyring with the password just typed - exactly
+# how /etc/pam.d/login does it. The keyring module drops to the user itself and
+# starts its agent; rsdm carries the agent's environment into the session.
+#
+# The keyring lines below cover the two common keyrings and are `optional`, so a
+# module that is not installed is simply ignored. For a custom or non-standard
+# keyring, replace them with your module - rsdm is keyring-agnostic and only runs
+# whatever this stack contains. To disable keyring unlock, delete them.
+auth      include   system-login
+auth      optional  pam_gnome_keyring.so
+auth      optional  pam_kwallet5.so
+
+account   include   system-login
+
+password  include   system-login
+password  optional  pam_gnome_keyring.so
+password  optional  pam_kwallet5.so
+
+session   include   system-login
+session   optional  pam_gnome_keyring.so auto_start
+session   optional  pam_kwallet5.so auto_start

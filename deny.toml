@@ -1,0 +1,40 @@
+[graph]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+]
+
+[advisories]
+ignore = [
+  # Both are quick-xml parser DoS issues (quadratic duplicate-attribute check,
+  # unbounded NsReader allocation), fixed only in quick-xml >= 0.41 which
+  # wayland-scanner 0.31 does not accept yet. quick-xml is used exclusively by
+  # wayland-scanner at BUILD time to parse the Wayland protocol XML shipped
+  # inside the wayland-* crates themselves - trusted input, never runtime data.
+  # Drop these once wayland-rs releases a scanner on quick-xml >= 0.41.
+  "RUSTSEC-2026-0194",
+  "RUSTSEC-2026-0195",
+]
+
+[licenses]
+allow = [
+  "Apache-2.0",
+  "GPL-3.0-only",
+  "MIT",
+  "Unicode-3.0",
+  "Zlib",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

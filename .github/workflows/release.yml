@@ -1,0 +1,102 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          ref="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "version=${ref#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpam0g-dev libwayland-dev libxkbcommon-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify tag matches Cargo version
+        run: |
+          expected="${{ steps.ver.outputs.version }}"
+          actual="$(cargo metadata --no-deps --format-version=1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "rsdm"))')"
+          test "$actual" = "$expected" || {
+            echo "release tag version $expected does not match Cargo version $actual" >&2
+            exit 1
+          }
+
+      - name: Build
+        run: cargo build --release --locked -p rsdm
+
+      - name: Stage release tarball
+        run: |
+          set -euo pipefail
+          ver="${{ steps.ver.outputs.version }}"
+          stage="rsdm-${ver}-${{ matrix.target }}"
+          mkdir -p "$stage"
+          install -m755 target/release/rsdm "$stage/rsdm"
+          # SECURITY.md and ARCHITECTURE.md live inside docs/, which is copied
+          # wholesale; only the root-level files are staged individually.
+          cp -r packaging docs "$stage/"
+          cp LICENSE README.md rsdm.toml "$stage/"
+          tar -C "$stage" -czf "${stage}.tar.gz" .
+          sha256sum "${stage}.tar.gz" | tee "${stage}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rsdm-${{ matrix.target }}
+          path: |
+            rsdm-*.tar.gz
+            rsdm-*.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: publish github release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -l dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256

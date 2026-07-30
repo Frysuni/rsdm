@@ -1,0 +1,3 @@
+# Locker: verify the current user only; never open a new PAM session.
+@include common-auth
+@include common-account

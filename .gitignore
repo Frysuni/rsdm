@@ -1,0 +1,14 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+
+# Nix
+/result
+/result-*
+
+# Logs and editor cruft
+*.log
+*~
+*.bak
+*.orig
+*.swp

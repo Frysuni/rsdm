@@ -1,0 +1,14 @@
+[Unit]
+Description=rsdm Wayland idle monitor
+Documentation=https://github.com/Frysuni/rsdm/blob/main/docs/idle.md
+PartOf=graphical-session.target
+After=graphical-session-pre.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/rsdm idle --config /etc/rsdm.toml
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

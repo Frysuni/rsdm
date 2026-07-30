@@ -1,0 +1,22 @@
+[package]
+name = "rsdm-lock"
+description = "Wayland TUI-styled lock screen for rsdm."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+font8x8.workspace = true
+image.workspace = true
+libc.workspace = true
+rsdm-core = { path = "../rsdm-core" }
+rsdm-infra = { path = "../rsdm-infra" }
+rsdm-ui = { path = "../rsdm-ui" }
+smithay-client-toolkit.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tracing.workspace = true
+wayland-protocols.workspace = true
+zeroize.workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "rsdm-idle"
+description = "Wayland idle monitor for rsdm."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+rsdm-core = { path = "../rsdm-core" }
+rsdm-infra = { path = "../rsdm-infra" }
+tracing.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true

@@ -1,0 +1,6 @@
+# PAM stack for the rsdm greeter on Fedora. `login` carries Fedora's authselect
+# policy, limits, keyring hooks, and pam_systemd session registration.
+auth      include   login
+account   include   login
+password  include   login
+session   include   login

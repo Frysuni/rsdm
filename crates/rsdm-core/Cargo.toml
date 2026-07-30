@@ -1,0 +1,12 @@
+[package]
+name = "rsdm-core"
+description = "Domain and use-case contracts for rsdm."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true

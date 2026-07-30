@@ -1,0 +1,26 @@
+[package]
+name = "rsdm"
+description = "Standalone Linux TTY/TUI Wayland display manager and screen locker."
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+libc.workspace = true
+rsdm-core = { path = "../rsdm-core" }
+rsdm-idle = { path = "../rsdm-idle" }
+rsdm-infra = { path = "../rsdm-infra" }
+rsdm-lock = { path = "../rsdm-lock" }
+rsdm-tui = { path = "../rsdm-tui" }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[[bin]]
+name = "rsdm"
+path = "src/main.rs"

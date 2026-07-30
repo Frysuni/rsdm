@@ -1,0 +1,18 @@
+[package]
+name = "rsdm-tui"
+description = "Terminal UI for rsdm."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+crossterm.workspace = true
+libc.workspace = true
+ratatui.workspace = true
+rsdm-core = { path = "../rsdm-core" }
+rsdm-ui = { path = "../rsdm-ui" }
+thiserror.workspace = true
+tracing.workspace = true
+time.workspace = true
+zeroize.workspace = true

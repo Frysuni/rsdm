@@ -1,0 +1,27 @@
+[Unit]
+Description=rsdm display manager
+Documentation=https://github.com/Frysuni/rsdm
+Conflicts=getty@tty1.service
+After=systemd-user-sessions.service getty@tty1.service
+
+[Service]
+ExecStart=/usr/bin/rsdm dm --config /etc/rsdm.toml
+Restart=always
+RestartSec=1
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+# Deliberately NO TTYReset/TTYVHangup/TTYVTDisallocate: systemd applies them
+# before AND after the unit runs, and after a login the same VT belongs to the
+# user's compositor (its own logind session survives this unit). The "after"
+# teardown would vhangup/disallocate the live compositor's VT and force an
+# out-of-band console modeset. The greeter claims and resets the VT itself.
+CacheDirectory=rsdm
+CacheDirectoryMode=0700
+LogsDirectory=rsdm
+LogsDirectoryMode=0750
+
+[Install]
+Alias=display-manager.service
+WantedBy=graphical.target

@@ -1,0 +1,87 @@
+# rsdm configuration example.
+#
+# Default path: /etc/rsdm.toml. Override it with --config or RSDM_CONFIG.
+# Every field is optional: an omitted field uses the default shown in its
+# right-hand comment. Unknown fields are rejected by `rsdm validate-config`.
+#
+# Metadata format:
+#   optional | TYPE | default: VALUE | values: ALLOWED VALUES
+#
+# This is a practical example, not an exhaustive schema. It includes the
+# settings normally changed during installation and the easy-to-misunderstand
+# ones. See docs/configuration.md for the complete reference.
+
+[session_manager]
+# Wrap the compositor in a systemd --user graphical session and supervise it.
+enabled = true # optional | bool | default: true | values: true, false
+# Extra environment variable names exported after the Wayland socket appears.
+extra_env = [] # optional | array<string> | default: [] | values: environment variable names
+ready_timeout_secs = 10 # optional | integer | default: 10 | values: >= 0, seconds
+
+[logging]
+level = "info" # optional | string | default: "info" | values: error, warn, info, debug, trace
+# Adds a plain-text file; journald remains enabled. The path must be absolute.
+# file = "/var/log/rsdm/rsdm.log" # optional | string or unset | default: unset | values: absolute paths
+
+[security]
+deny_root = true # optional | bool | default: true | values: true, false
+# When non-empty, a user must belong to at least one listed group.
+allowed_groups = [] # optional | array<string> | default: [] | values: local group names
+max_failed_attempts = 5 # optional | integer | default: 5 | values: 1..255
+failure_delay_ms = 1200 # optional | integer | default: 1200 | values: >= 0, milliseconds
+
+[dm]
+enable = true # optional | bool | default: true | values: true, false
+# PAM service means the matching /etc/pam.d/<name> stack, not a library path.
+pam_service = "rsdm" # optional | string | default: "rsdm" | values: PAM service names
+# Fixes one session and hides the picker. Leave unset to discover .desktop files.
+# fixed_session = "niri-session" # optional | string or unset | default: unset | values: desktop id, session name, command
+
+[dm.tty]
+path = "/dev/tty1" # optional | string | default: "/dev/tty1" | values: /dev/ttyN
+seat = "seat0" # optional | string | default: "seat0" | values: logind seat names
+
+[dm.fallback]
+# Hands the VT to a console login if the greeter cannot start.
+enabled = true # optional | bool | default: true | values: true, false
+# Empty auto-detects the system getty; set argv only to override that behavior.
+command = [] # optional | array<string> | default: [] | values: executable followed by arguments
+
+[dm.design]
+theme = "monochrome" # optional | string | default: "monochrome" | values: minimal, monochrome, cyberpunk, catppuccin, gruvbox, nord, dracula, tokyo-night, material, solarized, eldritch, rama, dark, trans-is-hard-job
+border_style = "classic" # optional | string | default: "classic" | values: classic, modern, minimal, ascii1, ascii2, ascii3, ascii4, wave, pulse
+background = "none" # optional | string | default: "none" | values: none, matrix, fire, rain, plasma, starfield
+background_speed = 5 # optional | integer | default: 5 | values: 0..10
+# "custom" uses title_text; "preset-logo" uses title_preset.
+title_mode = "custom" # optional | string | default: "custom" | values: custom, hostname, os-release, session-name, preset-logo
+title_text = "RSDM" # optional | string or unset | default: unset (renders "RSDM") | values: any text
+password_mode = "hidden" # optional | string | default: "hidden" | canonical values: hidden, asterisks
+menu = true # optional | bool | default: true | values: true, false
+
+[lock]
+enable = false # optional | bool | default: false | values: true, false
+pam_service = "rsdm-lock" # optional | string | default: "rsdm-lock" | values: PAM service names
+# Unset selects the connected output with the largest pixel area.
+# primary_output = "DP-1" # optional | string or unset | default: unset | values: Wayland output names
+# "off" currently powers outputs down through niri IPC and falls back to black.
+secondary_output = "background" # optional | string | default: "background" | values: background, black, off
+# Unset chooses a TTY-like glyph size automatically.
+# size = 2 # optional | integer or unset | default: unset | values: 1..12
+
+[lock.design]
+# Lock design is independent from dm.design; omitted fields use their own defaults.
+theme = "monochrome" # optional | string | default: "monochrome" | values: same as dm.design.theme
+background = "none" # optional | string | default: "none" | values: none, matrix, fire, rain, plasma, starfield
+# wallpaper = "/etc/rsdm-wallpaper.png" # optional | string or unset | default: unset | values: absolute PNG or JPEG paths
+wallpaper_dim = 6 # optional | integer | default: 6 | values: 0 (black)..10 (unchanged)
+background_opacity = 8 # optional | integer | default: 8 | values: 0 (wallpaper only)..10 (opaque effect)
+
+[idle]
+enable = false # optional | bool | default: false | values: true, false
+timeout = 300 # optional | integer | default: 300 | values: 1..4294967, seconds
+ignore_inhibitors = false # optional | bool | default: false | values: true, false
+# Empty invokes this rsdm binary's built-in lock command without shell parsing.
+lock_command = [] # optional | array<string> | default: [] | values: executable followed by arguments
+# Hooks are shell commands and therefore must be treated as trusted configuration.
+on_lock = [] # optional | array<string> | default: [] | values: shell command strings
+on_unlock = [] # optional | array<string> | default: [] | values: shell command strings

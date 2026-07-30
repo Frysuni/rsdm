@@ -1,0 +1,21 @@
+[package]
+name = "rsdm-infra"
+description = "Infrastructure adapters for rsdm."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+camino.workspace = true
+libc.workspace = true
+rsdm-core = { path = "../rsdm-core" }
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+toml_edit.workspace = true
+tracing.workspace = true
+zeroize.workspace = true
+
+[build-dependencies]
+pkg-config = "0.3.32"
