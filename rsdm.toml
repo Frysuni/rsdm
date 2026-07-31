@@ -1,4 +1,4 @@
-# rsdm configuration example.
+# Complete rsdm configuration example.
 #
 # Default path: /etc/rsdm.toml. Override it with --config or RSDM_CONFIG.
 # Every field is optional: an omitted field uses the default shown in its
@@ -7,9 +7,8 @@
 # Metadata format:
 #   optional | TYPE | default: VALUE | values: ALLOWED VALUES
 #
-# This is a practical example, not an exhaustive schema. It includes the
-# settings normally changed during installation and the easy-to-misunderstand
-# ones. See docs/configuration.md for the complete reference.
+# Every supported field is listed below. Fields whose default is unset remain
+# commented because TOML has no null value.
 
 [session_manager]
 # Wrap the compositor in a systemd --user graphical session and supervise it.
@@ -30,16 +29,29 @@ allowed_groups = [] # optional | array<string> | default: [] | values: local gro
 max_failed_attempts = 5 # optional | integer | default: 5 | values: 1..255
 failure_delay_ms = 1200 # optional | integer | default: 1200 | values: >= 0, milliseconds
 
+[paths]
+cache_dir = "/var/cache/rsdm" # optional | string | default: "/var/cache/rsdm" | values: absolute paths
+
 [dm]
 enable = true # optional | bool | default: true | values: true, false
 # PAM service means the matching /etc/pam.d/<name> stack, not a library path.
 pam_service = "rsdm" # optional | string | default: "rsdm" | values: PAM service names
 # Fixes one session and hides the picker. Leave unset to discover .desktop files.
 # fixed_session = "niri-session" # optional | string or unset | default: unset | values: desktop id, session name, command
+# Directories are searched in order when fixed_session is unset.
+session_dirs = [
+  "/run/current-system/sw/share/wayland-sessions",
+  "/usr/share/wayland-sessions",
+  "/usr/local/share/wayland-sessions",
+] # optional | array<string> | default: paths shown above | values: absolute paths
 
 [dm.tty]
 path = "/dev/tty1" # optional | string | default: "/dev/tty1" | values: /dev/ttyN
 seat = "seat0" # optional | string | default: "seat0" | values: logind seat names
+
+[dm.remember]
+username = true # optional | bool | default: true | values: true, false
+session = true # optional | bool | default: true | values: true, false
 
 [dm.fallback]
 # Hands the VT to a console login if the greeter cannot start.
@@ -54,9 +66,19 @@ background = "none" # optional | string | default: "none" | values: none, matrix
 background_speed = 5 # optional | integer | default: 5 | values: 0..10
 # "custom" uses title_text; "preset-logo" uses title_preset.
 title_mode = "custom" # optional | string | default: "custom" | values: custom, hostname, os-release, session-name, preset-logo
-title_text = "RSDM" # optional | string or unset | default: unset (renders "RSDM") | values: any text
-password_mode = "hidden" # optional | string | default: "hidden" | canonical values: hidden, asterisks
+# Unset custom title text renders "RSDM".
+# title_text = "RSDM" # optional | string or unset | default: unset | values: any text
+title_preset = "rsdm" # optional | string | default: "rsdm" | values: minimal, block, rsdm, rustty, waytty, niri, hyprland, kde, gnome, nixos, arch, tux
+title_font = "ANSI Shadow" # optional | string | default: "ANSI Shadow" | values: figrs/FIGlet font names
+show_clock = true # optional | bool | default: true | values: true, false
+show_hostname = true # optional | bool | default: true | values: true, false
+password_mode = "hidden" # optional | string | default: "hidden" | values: hidden, asterisks
 menu = true # optional | bool | default: true | values: true, false
+# These wallpaper fields are accepted here because both fronts share the same
+# design schema, but the TTY Greeter ignores them.
+# wallpaper = "/etc/rsdm-wallpaper.png" # optional | string or unset | default: unset | values: absolute PNG or JPEG paths
+wallpaper_dim = 6 # optional | integer | default: 6 | values: 0 (black)..10 (unchanged)
+background_opacity = 8 # optional | integer | default: 8 | values: 0 (wallpaper only)..10 (opaque effect)
 
 [lock]
 enable = false # optional | bool | default: false | values: true, false
@@ -70,8 +92,21 @@ secondary_output = "background" # optional | string | default: "background" | va
 
 [lock.design]
 # Lock design is independent from dm.design; omitted fields use their own defaults.
-theme = "monochrome" # optional | string | default: "monochrome" | values: same as dm.design.theme
+theme = "monochrome" # optional | string | default: "monochrome" | values: minimal, monochrome, cyberpunk, catppuccin, gruvbox, nord, dracula, tokyo-night, material, solarized, eldritch, rama, dark, trans-is-hard-job
+border_style = "classic" # optional | string | default: "classic" | values: classic, modern, minimal, ascii1, ascii2, ascii3, ascii4, wave, pulse
 background = "none" # optional | string | default: "none" | values: none, matrix, fire, rain, plasma, starfield
+background_speed = 5 # optional | integer | default: 5 | values: 0..10
+# "custom" uses title_text; "preset-logo" uses title_preset.
+title_mode = "custom" # optional | string | default: "custom" | values: custom, hostname, os-release, session-name, preset-logo
+# Unset custom title text renders "RSDM".
+# title_text = "RSDM" # optional | string or unset | default: unset | values: any text
+title_preset = "rsdm" # optional | string | default: "rsdm" | values: minimal, block, rsdm, rustty, waytty, niri, hyprland, kde, gnome, nixos, arch, tux
+title_font = "ANSI Shadow" # optional | string | default: "ANSI Shadow" | values: figrs/FIGlet font names
+show_clock = true # optional | bool | default: true | values: true, false
+show_hostname = true # optional | bool | default: true | values: true, false
+password_mode = "hidden" # optional | string | default: "hidden" | values: hidden, asterisks
+menu = true # optional | bool | default: true | values: true, false
+# Wallpaper is a base layer under the optional animated background.
 # wallpaper = "/etc/rsdm-wallpaper.png" # optional | string or unset | default: unset | values: absolute PNG or JPEG paths
 wallpaper_dim = 6 # optional | integer | default: 6 | values: 0 (black)..10 (unchanged)
 background_opacity = 8 # optional | integer | default: 8 | values: 0 (wallpaper only)..10 (opaque effect)
