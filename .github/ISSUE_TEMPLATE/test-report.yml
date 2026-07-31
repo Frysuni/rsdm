@@ -1,0 +1,136 @@
+name: Test Report
+description: Report your experience testing RSDM
+title: "[Test Report]: "
+labels:
+  - test-report
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing RSDM!
+
+        Successful tests are just as valuable as bug reports.
+        Please remove passwords, tokens, usernames, and other sensitive data from logs.
+
+  - type: input
+    id: rsdm-version
+    attributes:
+      label: RSDM version
+      description: Provide the release version or commit hash.
+      placeholder: "v0.1.0 or commit abc1234"
+    validations:
+      required: true
+
+  - type: input
+    id: distribution
+    attributes:
+      label: Distribution
+      placeholder: "NixOS 26.05, Fedora 43, Arch Linux..."
+    validations:
+      required: true
+
+  - type: input
+    id: compositor
+    attributes:
+      label: Wayland compositor or desktop environment
+      placeholder: "niri, Hyprland, KDE Plasma..."
+    validations:
+      required: true
+
+  - type: input
+    id: keyring
+    attributes:
+      label: Keyring
+      placeholder: "GNOME Keyring, KDE Wallet, none..."
+    validations:
+      required: true
+
+  - type: input
+    id: installation
+    attributes:
+      label: Installation method
+      placeholder: "NixOS module, package, built from source..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: result
+    attributes:
+      label: Overall result
+      options:
+        - Everything works
+        - Partially works
+        - Does not work
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: tested-components
+    attributes:
+      label: Tested components
+      description: Select everything you tested.
+      options:
+        - label: PAM authentication
+        - label: Session startup
+        - label: Environment setup
+        - label: Keyring unlocking
+        - label: Idle handling
+        - label: Screen locking
+        - label: Logout and session cleanup
+        - label: Reboot and shutdown
+
+  - type: textarea
+    id: worked
+    attributes:
+      label: What worked?
+      placeholder: Describe everything that worked correctly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: failed
+    attributes:
+      label: What did not work?
+      description: Leave this empty if everything worked.
+      placeholder: Describe errors, unexpected behavior, or incomplete integrations.
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Required when something did not work.
+      placeholder: |
+        1. Start RSDM
+        2. Authenticate
+        3. Select a session
+        4. Observe...
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste relevant logs after removing sensitive information.
+      render: shell
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Relevant configuration
+      description: Include only the configuration needed to understand the test.
+      render: text
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      placeholder: Hardware details, unusual setup, screenshots, or other useful information.
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I tested RSDM on Wayland, not X11.
+          required: true
+        - label: I removed passwords, tokens, and other sensitive information.
+          required: true

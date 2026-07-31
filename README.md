@@ -1,4 +1,15 @@
-# rsdm
+# RSDM
+
+> [!TIP]
+> What happens when you take the evolution of [**greetd**](https://github.com/kennylevinsen/greetd) → [**tuigreet**](https://github.com/apognu/tuigreet) → [**sysc-greet**](https://github.com/Nomadcxx/sysc-greet), combine it with [**uwsm**](https://github.com/Vladimir-csp/uwsm), the responsibilities of a full display manager, [**hypridle**](https://github.com/hyprwm/hypridle), and [**hyprlock**](https://github.com/hyprwm/hyprlock), then rebuild the entire stack as one lightweight Rust binary?
+>
+> You get a deeply integrated system that handles native PAM authentication, session startup, environment management, idle behavior, and screen locking directly at the system level.
+>
+> No fragile chains of loosely connected tools. No endless configuration. No critical details left for the user to figure out.
+>
+> **One binary. One coherent login stack. Everything thoughtfully integrated.**
+>
+> **That is how RSDM was born.**
 
 A standalone Rust display manager (TTY/TUI greeter) and screen locker for
 Wayland sessions. No greetd, GTK, Qt, webview, or Electron - one small binary
@@ -18,6 +29,27 @@ compositor.
   session.
 - Runs on Arch (AUR) and NixOS (flake module). GPL-3.0.
 
+> [!WARNING]
+> RSDM is still experimental. Expect bugs, incomplete integrations, and breaking changes.
+
+## Compatibility
+
+| Platform / component               | Status                            |
+| ---------------------------------- | --------------------------------- |
+| NixOS                              | ✅ Tested                          |
+| niri                               | ✅ Tested                          |
+| GNOME Keyring                      | ✅ Tested                          |
+| Fedora                             | 🟡 Ready, not tested              |
+| Ubuntu                             | 🟡 Ready, not tested              |
+| Arch Linux                         | 🟡 Ready, not tested              |
+| Hyprland                           | 🟡 Ready, not tested              |
+| KWallet                            | 🟡 Ready, not tested              |
+| Other distributions                | ⚪ Not supported yet, but possible |
+| Other Wayland desktop environments | ⚪ Not supported yet, but possible |
+| X11                                | ❌ Will never be supported         |
+
+Tested RSDM on a new setup? Please [submit a test report](../../issues/new/choose) with your distribution, compositor, keyring, configuration, and results.
+
 ## Commands
 
 ```sh
@@ -31,9 +63,6 @@ rsdm session start -- niri   # run a compositor as a systemd --user session
 rsdm app -- waybar           # launch a program into the graphical session
 rsdm validate-config         # check the config
 ```
-
-All commands take `--config <path>` (default `/etc/rsdm.toml`, or
-`RSDM_CONFIG`).
 
 ## Install
 
@@ -112,3 +141,6 @@ Dependencies: Rust (edition 2024, >= 1.88), `pam`, `wayland`, `libxkbcommon`,
 ## License
 
 Licensed under [GNU GPLv3](LICENSE).
+
+> [!NOTE]
+> **RSDM is built with AI as an engineering tool.**
