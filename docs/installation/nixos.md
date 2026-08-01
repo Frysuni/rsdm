@@ -1,16 +1,18 @@
 # Installation: NixOS
 
-`rsdm` ships a flake with a NixOS module and two package variants:
+`rsdm` ships a flake with a NixOS module and two installation modes:
 
-| package         | what it is                                                      |
-|-----------------|-----------------------------------------------------------------|
-| `rsdm-unstable` | builds from the exact flake source on your machine               |
-| `rsdm-stable`   | compatibility alias for `rsdm-unstable` until release assets are pinned |
-| `default`       | alias for `rsdm-unstable`                                       |
+| package          | what it is                                                     |
+|------------------|----------------------------------------------------------------|
+| `rsdm-prebuilt`  | downloads the release binary and patches it for the Nix store  |
+| `rsdm-source`    | builds from the exact flake source with Crane                  |
+| `rsdm-stable`    | compatibility alias for `rsdm-prebuilt`                       |
+| `rsdm-unstable`  | compatibility alias for `rsdm-source`                         |
+| `default`        | alias for `rsdm-prebuilt`                                     |
 
-Pin the flake input to a tag or commit for a stable deployment. All current
-variants use the same reproducible source build and Nix cache normally avoids
-recompiling an unchanged pin.
+The prebuilt package is the default and does not compile Rust locally. Select
+`rsdm-source` when you explicitly want to build and run the input revision from
+source. Pin the flake input to a tag or commit for a stable deployment.
 
 ## Flake module
 
@@ -26,7 +28,11 @@ recompiling an unchanged pin.
           services.rsdm = {
             enable = true;
 
-            package = rsdm.packages.x86_64-linux.default;
+            # Default: release binary, no Rust compilation.
+            package = rsdm.packages.x86_64-linux.rsdm-prebuilt;
+
+            # Build the selected flake revision from source instead:
+            # package = rsdm.packages.x86_64-linux.rsdm-source;
 
             dm = {
               tty = "tty1";

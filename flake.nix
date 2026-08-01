@@ -20,9 +20,19 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       pkgsFor = system: import nixpkgs { inherit system; };
+      stableVersion = "1.0.0";
+      stableReleases = {
+        x86_64-linux = {
+          target = "x86_64-unknown-linux-gnu";
+          hash = "sha256-TiXIoDo/Fd2otUOdXECoUYsKt2bQLD067FwJMiV8ie0=";
+        };
+        aarch64-linux = {
+          target = "aarch64-unknown-linux-gnu";
+          hash = "sha256-azXEYmavmyPxzsVIgjjIP10kmdrrRTWY0IJKdwsruGQ=";
+        };
+      };
 
-      # Built from the flake source on the user's machine (tracks whatever this
-      # flake input points at). This is the `default`.
+      # Built from the exact flake source on the user's machine.
       mkUnstable =
         system:
         let
@@ -44,6 +54,51 @@
           };
         in
         craneLib.buildPackage (commonArgs // { cargoArtifacts = craneLib.buildDepsOnly commonArgs; });
+
+      # Installs the matching binary from the latest stable GitHub release.
+      # autoPatchelf rewrites the generic GNU/Linux interpreter and library
+      # references to their Nix store paths; no Rust compilation is involved.
+      mkStable =
+        system:
+        let
+          pkgs = pkgsFor system;
+          release = stableReleases.${system};
+        in
+        pkgs.stdenvNoCC.mkDerivation {
+          pname = "rsdm";
+          version = stableVersion;
+          src = pkgs.fetchurl {
+            url = "https://github.com/Frysuni/rsdm/releases/download/v${stableVersion}/rsdm-${stableVersion}-${release.target}.tar.gz";
+            inherit (release) hash;
+          };
+          sourceRoot = ".";
+          strictDeps = true;
+          nativeBuildInputs = [ pkgs.autoPatchelfHook ];
+          buildInputs = [
+            pkgs.libxkbcommon
+            pkgs.pam
+            pkgs.stdenv.cc.cc.lib
+            pkgs.wayland
+          ];
+          dontConfigure = true;
+          dontBuild = true;
+          installPhase = ''
+            runHook preInstall
+
+            install -Dm755 rsdm "$out/bin/rsdm"
+            install -Dm644 LICENSE README.md rsdm.toml -t "$out/share/doc/rsdm"
+            cp -r docs "$out/share/doc/rsdm/guide"
+
+            runHook postInstall
+          '';
+          meta = {
+            description = "Standalone Rust TTY/TUI Wayland display manager and screen locker";
+            homepage = "https://github.com/Frysuni/rsdm";
+            license = pkgs.lib.licenses.gpl3Only;
+            mainProgram = "rsdm";
+            platforms = systems;
+          };
+        };
 
       # Evaluate the module in both supported deployment shapes. In particular,
       # lock/idle-only installs must not create a restart-looping greeter service
@@ -88,13 +143,11 @@
     in
     {
       packages = forAllSystems (system: rec {
-        rsdm-unstable = mkUnstable system;
-        # Keep the public name usable before the first release assets exist.
-        # Pinning the flake input to a tag/revision provides stable source; a
-        # fake-output-hash prebuilt derivation would make flake checks pass but
-        # fail every real user build.
-        rsdm-stable = rsdm-unstable;
-        default = rsdm-unstable;
+        rsdm-source = mkUnstable system;
+        rsdm-prebuilt = mkStable system;
+        rsdm-unstable = rsdm-source;
+        rsdm-stable = rsdm-prebuilt;
+        default = rsdm-prebuilt;
       });
 
       apps = forAllSystems (system: rec {
