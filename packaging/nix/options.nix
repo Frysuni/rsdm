@@ -1,4 +1,6 @@
 {
+  binaryCachePublicKey,
+  binaryCacheUrl,
   defaultPackage,
   lib,
   mkDesignOptions,
@@ -13,6 +15,16 @@
     type = lib.types.package;
     default = defaultPackage;
     defaultText = lib.literalExpression "inputs.rsdm.packages.${pkgs.system}.default";
+  };
+
+  binaryCache.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    description = ''
+      Add the public rsdm binary cache (${binaryCacheUrl}) and its trusted
+      signing key (${binaryCachePublicKey}) to the system Nix daemon. Disable
+      this to prevent future rebuilds from substituting rsdm from that cache.
+    '';
   };
 
   sessionManager = lib.mkOption {

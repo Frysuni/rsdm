@@ -27,6 +27,7 @@ source. Pin the flake input to a tag or commit for a stable deployment.
         {
           services.rsdm = {
             enable = true;
+            binaryCache.enable = true;
 
             # Default: release binary, no Rust compilation.
             package = rsdm.packages.x86_64-linux.rsdm-prebuilt;
@@ -76,6 +77,44 @@ source. Pin the flake input to a tag or commit for a stable deployment.
 sudo nixos-rebuild switch
 ```
 
+## Binary cache and source builds
+
+The default `rsdm-prebuilt` package is the fastest installation path: it
+downloads the stable release binary and does not compile Rust. The public,
+signed Nix cache at `https://frysuni.github.io/rsdm` additionally stores the
+exact `rsdm-source` outputs built by CI for x86_64 and aarch64.
+
+`services.rsdm.binaryCache.enable = true` adds that cache and its public key to
+the system Nix daemon for subsequent rebuilds. Keep it enabled and select
+`rsdm-source` to use the cached source derivation when available:
+
+```nix
+services.rsdm = {
+  enable = true;
+  binaryCache.enable = true;
+  package = rsdm.packages.x86_64-linux.rsdm-source;
+};
+```
+
+To insist on a local source build, disable the project cache and disable
+substitution for that rebuild:
+
+```nix
+services.rsdm = {
+  enable = true;
+  binaryCache.enable = false;
+  package = rsdm.packages.x86_64-linux.rsdm-source;
+};
+```
+
+```sh
+sudo nixos-rebuild switch --option substitute false
+```
+
+The cache option takes effect after the first successful switch. On a new
+machine the default prebuilt package avoids the expensive first Rust build;
+later source-mode upgrades can be substituted from the Nix cache.
+
 The module:
 
 - writes `/etc/rsdm.toml` from the options below (escape hatch:
@@ -101,6 +140,7 @@ each look under its own `.design`.
 |---------------------------------------|----------------------------------------------------|
 | `enable`                              | turn rsdm on                                       |
 | `package`                             | rsdm package to install                            |
+| `binaryCache.enable`                  | trust and use the public rsdm Nix cache            |
 | `dm.enable`                           | run the greeter (default `true`)                   |
 | `dm.tty` / `dm.seat`                  | VT the greeter owns (e.g. `"tty1"`) and logind seat |
 | `dm.fixedSession`                     | always launch one session, hide the picker (or `null`) |

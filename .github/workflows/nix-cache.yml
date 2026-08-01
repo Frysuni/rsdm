@@ -1,0 +1,91 @@
+name: nix cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/nix-cache.yml"
+      - "crates/**"
+      - "packaging/nix/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "flake.lock"
+      - "flake.nix"
+  workflow_dispatch:
+
+concurrency:
+  group: nix-cache
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build ${{ matrix.system }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Build source package
+        id: build
+        run: |
+          output="$(nix build .#rsdm-source --no-link --print-out-paths)"
+          echo "output=$output" >> "$GITHUB_OUTPUT"
+
+      - name: Create signed binary cache
+        env:
+          CACHE_PRIVATE_KEY: ${{ secrets.RSDM_NIX_CACHE_PRIVATE_KEY }}
+        run: |
+          test -n "$CACHE_PRIVATE_KEY" || {
+            echo "RSDM_NIX_CACHE_PRIVATE_KEY is not configured" >&2
+            exit 1
+          }
+
+          key_file="$RUNNER_TEMP/rsdm-cache-private-key"
+          printf '%s\n' "$CACHE_PRIVATE_KEY" > "$key_file"
+          chmod 600 "$key_file"
+          nix copy \
+            --to "file://$PWD/cache?compression=zstd&priority=30&secret-key=$key_file" \
+            "${{ steps.build.outputs.output }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rsdm-nix-cache-${{ matrix.system }}
+          path: cache
+          if-no-files-found: error
+
+  deploy:
+    name: deploy public cache
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rsdm-nix-cache-*
+          path: public
+          merge-multiple: true
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

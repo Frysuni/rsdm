@@ -1,5 +1,7 @@
 {
   baseConfig,
+  binaryCachePublicKey,
+  binaryCacheUrl,
   cfg,
   config,
   displayManagerAlias,
@@ -46,6 +48,11 @@ lib.mkIf cfg.enable {
     lib.recursiveUpdate (lib.recursiveUpdate baseConfig cfg.config) cfg.extraConfig
   );
   environment.systemPackages = [ cfg.package ];
+
+  nix.settings = lib.mkIf cfg.binaryCache.enable {
+    extra-substituters = [ binaryCacheUrl ];
+    extra-trusted-public-keys = [ binaryCachePublicKey ];
+  };
 
   services.logrotate.settings.rsdm = lib.mkIf (cfg.logging.file != null) {
     files = [ cfg.logging.file ];
