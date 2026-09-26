@@ -1,5 +1,8 @@
 name: ci
 
+# Project policy: no cargo fmt/rustfmt, cargo clippy, or actionlint in workflows,
+# including indirect invocations. See .github/CONTRIBUTING.md.
+
 on:
   push:
     branches: [main]
