@@ -47,6 +47,8 @@ jobs:
         run: pacman -Syu --noconfirm git openssh pacman-contrib sudo
 
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Resolve version
         id: ver
