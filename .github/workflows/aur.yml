@@ -32,7 +32,7 @@ on:
 jobs:
   publish:
     name: publish ${{ matrix.pkg }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     container: archlinux:base-devel
     strategy:
       fail-fast: false

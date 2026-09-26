@@ -25,9 +25,9 @@ jobs:
       matrix:
         include:
           - system: x86_64-linux
-            runner: ubuntu-latest
+            runner: ubuntu-26.04
           - system: aarch64-linux
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -65,7 +65,7 @@ jobs:
   deploy:
     name: deploy public cache
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       pages: write
