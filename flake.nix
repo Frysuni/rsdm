@@ -20,15 +20,15 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       pkgsFor = system: import nixpkgs { inherit system; };
-      stableVersion = "1.0.0";
+      stableVersion = "1.1.0";
       stableReleases = {
         x86_64-linux = {
           target = "x86_64-unknown-linux-gnu";
-          hash = "sha256-TiXIoDo/Fd2otUOdXECoUYsKt2bQLD067FwJMiV8ie0=";
+          hash = "sha256-I6xHWwz1EXTdgMBiZDG9aiX6DLn16A/tpTbPL/cY3hw=";
         };
         aarch64-linux = {
           target = "aarch64-unknown-linux-gnu";
-          hash = "sha256-azXEYmavmyPxzsVIgjjIP10kmdrrRTWY0IJKdwsruGQ=";
+          hash = "sha256-Q/39IpIdB7Bnqql94QL+zKllzFMgSG8d1JlfrPiPHmU=";
         };
       };
 

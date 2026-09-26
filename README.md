@@ -102,8 +102,9 @@ services.rsdm = {
 };
 ```
 
-The flake builds from its pinned source. `rsdm-stable` is currently a
-compatibility alias; pin the input to a tag/revision for a stable deployment.
+The default package downloads the pinned release binary. `rsdm-stable` aliases
+`rsdm-prebuilt`; select `rsdm-source` to build the exact flake revision instead.
+Pin the input to a tag/revision for a stable deployment.
 See [docs/installation/nixos.md](docs/installation/nixos.md).
 
 ## Documentation
