@@ -64,6 +64,7 @@ struct LockSurface {
     viewport: Option<WpViewport>,
     _fractional_scale: Option<WpFractionalScaleV1>,
     scale_120: u32,
+    preferred_scale_120: Option<u32>,
     width: u32,
     height: u32,
     buffer: Option<Buffer>,
@@ -152,14 +153,17 @@ pub fn run(config: &AppConfig, config_path: &Path) -> Result<()> {
         .lock(&queue_handle)
         .map_err(|_| anyhow::anyhow!("compositor does not support ext-session-lock-v1"))?;
     app.session_lock = Some(lock);
+    // A compositor may wait for our first frames before confirming the lock.
+    app.choose_primary_output();
+    app.create_surfaces(&queue_handle);
     run_event_loop(&connection, &mut queue, &mut app)?;
 
     if !app.unlocked {
         anyhow::bail!("compositor ended or refused the Wayland session lock");
     }
-    if let Err(error) = connection.roundtrip() {
-        tracing::warn!(%error, "failed to flush session unlock to the compositor");
-    }
+    connection
+        .roundtrip()
+        .context("confirming session unlock with the compositor")?;
     Ok(())
 }
 

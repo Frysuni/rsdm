@@ -29,8 +29,9 @@ on_unlock = ["notify-send 'rsdm unlocked'"]
   locker's protocol state, so `on_lock` runs after the foreground process starts.
 - `on_lock` and `on_unlock` are shell commands, run in order as the desktop
   user. `on_unlock` runs only for a lock cycle whose activation reached the
-  configured readiness point, and also runs after a privileged emergency
-  unlock. Do not put untrusted config text in these fields.
+  configured readiness point and whose locker exited successfully. It also runs
+  after a privileged emergency unlock, but never after a crash, signal, nonzero
+  exit, or wait failure. Do not put untrusted config text in these fields.
 
 The daemon never unlocks on pointer movement or resume. Activity only resets
 the next idle timeout; authentication still belongs to `rsdm lock`.

@@ -70,7 +70,7 @@ impl Dispatch<WpFractionalScaleV1, wl_surface::WlSurface> for App {
             .iter_mut()
             .find(|entry| entry.surface.wl_surface() == surface)
         {
-            entry.scale_120 = scale.max(1);
+            entry.preferred_scale_120 = Some(scale.max(1));
             state.needs_redraw = true;
         }
     }

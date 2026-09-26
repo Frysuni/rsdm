@@ -116,9 +116,8 @@ impl CompositorHandler for App {
             .iter_mut()
             .find(|entry| entry.surface.wl_surface() == surface)
         {
-            // Fractional-scale will refine this value (for example from 240 to
-            // 180 for 1.5x). Until then, the integer scale is still a crisp and
-            // protocol-correct fallback.
+            // Keep the integer fallback separate: it may arrive after the
+            // preferred fractional scale and must not overwrite that value.
             entry.scale_120 = factor.max(1) as u32 * 120;
             self.needs_redraw = true;
         }

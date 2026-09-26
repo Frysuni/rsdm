@@ -15,9 +15,10 @@ greeter login itself - see [keyrings.md](keyrings.md) - not here.)
 ## What `rsdm session start` does
 
 - Exports to `systemctl --user` and the D-Bus activation environment only what it
-  actually owns: `PATH`, `XDG_RUNTIME_DIR`, `XDG_SEAT`/`XDG_VTNR`, plus the
-  keyring agent variables the login published (`SSH_AUTH_SOCK`, ...) which it
-  inherited from the session environment. rsdm never invents
+  manages: existing `PATH`, `LANG`, `XDG_RUNTIME_DIR`, session identity and
+  `XDG_SEAT`/`XDG_VTNR`. Other PAM values are passed to the compositor;
+  use explicit finalize arguments or `extra_env` to export additional values
+  to activated services. rsdm never invents
   `WAYLAND_DISPLAY`/`DISPLAY` - the compositor publishes those.
 - Decides who owns the graphical session:
   - A compositor that brings up `graphical-session.target` itself (niri does this
@@ -28,9 +29,14 @@ greeter login itself - see [keyrings.md](keyrings.md) - not here.)
     starting on the next login.
   - A bare compositor that does not is given `graphical-session.target` and
     `xdg-desktop-autostart.target`, anchored by rsdm - but only after the
-    environment is published (once `WAYLAND_DISPLAY` shows up in
+    environment is published (a new `WAYLAND_DISPLAY` assignment appears in
     `systemctl --user show-environment`), so panels and portals start with a
-    ready display.
+    ready display. A timeout leaves the targets inactive; it does not start
+    portals and panels without a published display. A late explicit finalize
+    can still activate them.
+    Automatic detection ignores the display assignment present before launch.
+    If a compositor republishes the same address, use explicit finalize or its
+    own target activation; an old assignment cannot prove readiness.
 - Holds the graphical session exactly as long as the compositor lives. When it
   exits, the targets rsdm raised are stopped, related transient units get a clean
   systemd stop, the exported variables are unset, and the user is dropped back to
@@ -38,6 +44,16 @@ greeter login itself - see [keyrings.md](keyrings.md) - not here.)
   unit, so the same cascade (anchor -> `graphical-session.target` ->
   `rsdm app` units) fires inside systemd even if the supervisor process is
   killed before it can tear anything down.
+
+Starting another managed session while the graphical target or rsdm anchor is
+active is rejected before changing their state. Logout retains `PATH`, `LANG`,
+and `XDG_RUNTIME_DIR` in the user manager for services outside the graphical
+session.
+
+The DM takes `PATH` from PAM. If PAM does not supply it, rsdm uses libc's
+standard utility path (`confstr(_CS_PATH)`) rather than adding guessed Nix or
+user profile directories. Distribution-specific login paths belong in PAM;
+the NixOS module uses the system PAM environment.
 
 ## Launching apps into the session
 
@@ -71,6 +87,17 @@ auto-detection:
 rsdm session finalize          # export the live env and raise the targets
 ```
 
+Finalize returns a nonzero status if target activation fails and leaves an
+already active compositor-owned target under the compositor's control.
+
+Finalize also exports `XAUTHORITY` when present in the compositor's environment,
+alongside `DISPLAY`, so activated applications receive its XWayland credentials.
+Cursor settings remain owned by the compositor and desktop configuration;
+use `extra_env` or explicit finalize arguments to publish those values if needed.
+
+Transient session and application units also explicitly exclude `DISPLAY`,
+`WAYLAND_DISPLAY`, and `XAUTHORITY` when absent from their caller's environment.
+
 Pass extra environment variable names to also export them:
 
 ```sh
@@ -85,7 +112,7 @@ rsdm session finalize MY_VAR ANOTHER_VAR
 [session_manager]
 enabled = true
 extra_env = []           # extra env var NAMES to export once the compositor is up
-ready_timeout_secs = 10  # how long to wait for the Wayland socket before activating anyway
+ready_timeout_secs = 10  # readiness deadline; on timeout, use explicit finalize
 ```
 
 Disable the wrapper entirely with `enabled = false` (or

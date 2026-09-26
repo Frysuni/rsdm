@@ -69,6 +69,13 @@ impl App {
         if self.ctx.secondary_output != SecondaryOutput::Off {
             return;
         }
+        if !self
+            .session_lock
+            .as_ref()
+            .is_some_and(|lock| lock.is_locked())
+        {
+            return;
+        }
         let Some(primary) = self.primary_output.clone() else {
             return;
         };

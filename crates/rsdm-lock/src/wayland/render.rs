@@ -31,6 +31,7 @@ impl App {
             self.surfaces.push(LockSurface {
                 output_name: self.output_name(&output),
                 scale_120: self.output_scale_120(&output),
+                preferred_scale_120: None,
                 output,
                 surface: lock_surface,
                 viewport,
@@ -58,12 +59,16 @@ impl App {
 
         let logical_width = surface.width;
         let logical_height = surface.height;
-        let scale_120 = surface.scale_120.max(120);
         let fractional = surface.viewport.is_some();
         let primary = self.primary_output.as_ref() == Some(&surface.output);
         let output_name = surface.output_name.clone();
-        let (width, height, buffer_scale) =
-            buffer_dimensions(logical_width, logical_height, scale_120, fractional);
+        let (width, height, buffer_scale) = buffer_dimensions(
+            logical_width,
+            logical_height,
+            surface.scale_120,
+            surface.preferred_scale_120,
+            fractional,
+        );
         if !valid_buffer_dimensions(width, height) {
             tracing::error!(output = %output_name, width, height, "invalid lock buffer dimensions");
             return;
@@ -199,8 +204,15 @@ struct BufferGeometry {
     scale: i32,
 }
 
-fn buffer_dimensions(width: u32, height: u32, scale_120: u32, fractional: bool) -> (u32, u32, i32) {
+fn buffer_dimensions(
+    width: u32,
+    height: u32,
+    scale_120: u32,
+    preferred_scale_120: Option<u32>,
+    fractional: bool,
+) -> (u32, u32, i32) {
     if fractional {
+        let scale_120 = preferred_scale_120.unwrap_or(scale_120).max(1);
         return (
             scaled_dimension(width, scale_120),
             scaled_dimension(height, scale_120),
@@ -236,6 +248,24 @@ fn scaled_dimension(logical: u32, scale_120: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preferred_scale_survives_later_integer_events() {
+        for integer_scale in [120, 240, 360] {
+            assert_eq!(
+                buffer_dimensions(800, 600, integer_scale, Some(180), true),
+                (1200, 900, 1)
+            );
+        }
+        assert_eq!(
+            buffer_dimensions(800, 600, 240, Some(90), true),
+            (600, 450, 1)
+        );
+        assert_eq!(
+            buffer_dimensions(800, 600, 240, None, false),
+            (1600, 1200, 2)
+        );
+    }
 
     #[test]
     fn fractional_dimensions_round_half_up() {

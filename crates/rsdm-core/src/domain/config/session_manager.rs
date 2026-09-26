@@ -13,8 +13,8 @@ pub struct SessionManagerConfig {
     /// D-Bus once the compositor is up, in addition to the built-in
     /// Wayland/XDG set.
     pub extra_env: Vec<String>,
-    /// How long to wait for the compositor's Wayland socket before activating
-    /// the graphical session anyway.
+    /// How long to wait for the compositor to publish its Wayland environment.
+    /// On timeout, targets remain inactive until an explicit finalize.
     pub ready_timeout_secs: u64,
 }
 

@@ -4,6 +4,7 @@
 //! units are bound to one lifetime and torn down together.
 
 mod env;
+mod readiness;
 mod systemd;
 mod unit_name;
 
@@ -22,12 +23,14 @@ use rsdm_core::domain::SessionManagerConfig;
 use thiserror::Error;
 
 use env::{
-    collect_present, command_environment, export, manager_env_contains, unset_environment_command,
+    collect_present, command_environment, export, manager_wayland_display,
+    unset_environment_command,
 };
+use readiness::{SessionOwnership, wait_and_anchor};
 use systemd::{
-    ManagedUnitKind, SESSION_TARGET, anchor_graphical_session, anchored_teardown_commands,
-    best_effort_owned, exit_status_code, release_anchor, release_anchor_commands, stop_unit,
-    systemd_run_args, unit_is_active,
+    ANCHOR_UNIT, ManagedUnitKind, SESSION_TARGET, anchor_graphical_session,
+    anchored_teardown_commands, best_effort_owned, exit_status_code, release_anchor,
+    release_anchor_commands, stop_unit, systemd_run_args, unit_is_active,
 };
 use unit_name::unique_unit_name;
 
@@ -37,6 +40,10 @@ static TERMINATE: AtomicBool = AtomicBool::new(false);
 pub enum SessionError {
     #[error("no compositor command was given")]
     EmptyCommand,
+    #[error("a graphical session is already active; refusing to replace it")]
+    SessionAlreadyActive,
+    #[error("failed to activate the graphical session")]
+    ActivationFailed,
     #[error("failed to spawn compositor: {0}")]
     Spawn(std::io::Error),
     #[error("failed to wait for compositor: {0}")]
@@ -51,6 +58,9 @@ pub enum SessionError {
 /// Returns the compositor's exit code.
 pub fn start(compositor: &[String], cfg: &SessionManagerConfig) -> Result<i32, SessionError> {
     let program = compositor.first().ok_or(SessionError::EmptyCommand)?;
+    if unit_is_active(SESSION_TARGET) || unit_is_active(ANCHOR_UNIT) {
+        return Err(SessionError::SessionAlreadyActive);
+    }
     TERMINATE.store(false, Ordering::SeqCst);
     install_signal_handlers();
     tracing::info!(
@@ -71,6 +81,7 @@ pub fn start(compositor: &[String], cfg: &SessionManagerConfig) -> Result<i32, S
         "captured compositor environment"
     );
     export(&collect_present(&[], &[]));
+    let previous_display = manager_wayland_display();
     let unit = unique_unit_name(ManagedUnitKind::Session, program);
     let mut child = Command::new("systemd-run")
         .args(systemd_run_args(
@@ -87,7 +98,9 @@ pub fn start(compositor: &[String], cfg: &SessionManagerConfig) -> Result<i32, S
     let ready_running = Arc::clone(&session_running);
     let ready_cfg = cfg.clone();
     let ready_unit = format!("{unit}.service");
-    let ready = thread::spawn(move || wait_and_anchor(&ready_cfg, &ready_unit, &ready_running));
+    let ready = thread::spawn(move || {
+        wait_and_anchor(&ready_cfg, &ready_unit, &ready_running, previous_display)
+    });
 
     let result = supervise_systemd_run(&mut child, &unit);
     if result.is_err() {
@@ -109,12 +122,6 @@ pub fn start(compositor: &[String], cfg: &SessionManagerConfig) -> Result<i32, S
     }
     teardown(cfg, ownership);
     result
-}
-
-/// Export the current compositor environment and activate the session.
-pub fn finalize(cfg: &SessionManagerConfig, extra_names: &[String]) {
-    tracing::info!(extra_names = ?extra_names, "finalizing graphical session from compositor");
-    do_finalize(cfg, extra_names);
 }
 
 /// Run `argv` in a transient unit tied to `graphical-session.target`.
@@ -161,72 +168,8 @@ fn wait_for_graphical_session() -> Result<(), SessionError> {
     Err(SessionError::NoGraphicalSession)
 }
 
-/// Who owns `graphical-session.target` for teardown.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessionOwnership {
-    Anchored,
-    External,
-    Unmanaged,
-}
-
-/// Let a self-managing compositor own the target; otherwise anchor it after its
-/// Wayland environment appears.
-fn wait_and_anchor(
-    cfg: &SessionManagerConfig,
-    session_unit: &str,
-    session_running: &AtomicBool,
-) -> SessionOwnership {
-    let deadline = Instant::now() + Duration::from_secs(cfg.ready_timeout_secs);
-    const SELF_MANAGE_GRACE: Duration = Duration::from_secs(2);
-    let mut env_live_since: Option<Instant> = None;
-    tracing::debug!(
-        timeout_secs = cfg.ready_timeout_secs,
-        "waiting for the compositor to become ready"
-    );
-    loop {
-        if !session_running.load(Ordering::SeqCst) {
-            tracing::debug!("compositor exited before the graphical session was ready");
-            return SessionOwnership::Unmanaged;
-        }
-        if unit_is_active(SESSION_TARGET) {
-            tracing::info!(
-                "compositor activated graphical-session.target itself; leaving it to manage the session"
-            );
-            return SessionOwnership::External;
-        }
-        if manager_env_contains("WAYLAND_DISPLAY") {
-            let since = *env_live_since.get_or_insert_with(Instant::now);
-            if since.elapsed() >= SELF_MANAGE_GRACE {
-                tracing::info!(
-                    "compositor published its environment but did not start graphical-session.target; anchoring it"
-                );
-                return anchor_ownership(session_unit);
-            }
-        }
-        if Instant::now() >= deadline {
-            if unit_is_active(SESSION_TARGET) {
-                return SessionOwnership::External;
-            }
-            tracing::warn!(
-                "compositor did not signal readiness before timeout; anchoring the graphical session anyway"
-            );
-            return anchor_ownership(session_unit);
-        }
-        thread::sleep(Duration::from_millis(200));
-    }
-}
-
-fn anchor_ownership(session_unit: &str) -> SessionOwnership {
-    if anchor_graphical_session(Some(session_unit)) {
-        SessionOwnership::Anchored
-    } else if unit_is_active(SESSION_TARGET) {
-        SessionOwnership::External
-    } else {
-        SessionOwnership::Unmanaged
-    }
-}
-
-fn do_finalize(cfg: &SessionManagerConfig, extra_names: &[String]) {
+/// Export the current compositor environment and activate the session.
+pub fn finalize(cfg: &SessionManagerConfig, extra_names: &[String]) -> Result<(), SessionError> {
     let pairs = collect_present(&cfg.extra_env, extra_names);
     tracing::debug!(
         exported_names = ?pairs.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
@@ -234,11 +177,20 @@ fn do_finalize(cfg: &SessionManagerConfig, extra_names: &[String]) {
     );
     export(&pairs);
     // The anchor wants both targets independently to avoid an ordering cycle.
-    anchor_graphical_session(None);
+    if !unit_is_active(SESSION_TARGET) && !anchor_graphical_session(None) {
+        return Err(SessionError::ActivationFailed);
+    }
     tracing::info!("graphical session activated");
+    Ok(())
 }
 
 fn teardown(cfg: &SessionManagerConfig, ownership: SessionOwnership) {
+    // Finalize may create our anchor after the readiness timeout expired.
+    let ownership = if ownership == SessionOwnership::Unmanaged && unit_is_active(ANCHOR_UNIT) {
+        SessionOwnership::Anchored
+    } else {
+        ownership
+    };
     let commands = match ownership {
         SessionOwnership::Anchored => anchored_teardown_commands(cfg),
         SessionOwnership::External => release_anchor_commands(),

@@ -47,25 +47,24 @@ impl SessionDiscoverer for DesktopSessionDiscoverer {
                 "session directory scanned"
             );
             for path in files {
+                let Some(id) = session_id(&path) else {
+                    continue;
+                };
+                // Even a hidden or unavailable override masks lower-priority entries.
+                if !seen_ids.insert(id) {
+                    continue;
+                }
                 let Some(session) = parse_session_file(&path)? else {
                     continue;
                 };
-                if seen_ids.insert(session.id.clone()) {
-                    tracing::debug!(
-                        id = %session.id,
-                        name = %session.name,
-                        exec = %session.exec,
-                        source = %session.source_path,
-                        "desktop session discovered"
-                    );
-                    sessions.push(session);
-                } else {
-                    tracing::debug!(
-                        id = %session.id,
-                        source = %session.source_path,
-                        "duplicate desktop session ignored"
-                    );
-                }
+                tracing::debug!(
+                    id = %session.id,
+                    name = %session.name,
+                    exec = %session.exec,
+                    source = %session.source_path,
+                    "desktop session discovered"
+                );
+                sessions.push(session);
             }
         }
 
@@ -164,4 +163,30 @@ fn is_executable(path: &Path) -> bool {
 #[cfg(not(unix))]
 fn is_executable(path: &Path) -> bool {
     path.is_file()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hidden_override_masks_lower_priority_session() {
+        let root = env::temp_dir().join(format!("rsdm-session-priority-{}", std::process::id()));
+        let high = root.join("high");
+        let low = root.join("low");
+        fs::create_dir_all(&high).unwrap();
+        fs::create_dir_all(&low).unwrap();
+        fs::write(high.join("test.desktop"), "[Desktop Entry]\nHidden=true\n").unwrap();
+        fs::write(
+            low.join("test.desktop"),
+            "[Desktop Entry]\nName=Test\nExec=test\n",
+        )
+        .unwrap();
+        let discoverer = DesktopSessionDiscoverer::new([high.clone(), low]);
+        assert!(discoverer.discover().unwrap().is_empty());
+
+        fs::remove_file(high.join("test.desktop")).unwrap();
+        assert_eq!(discoverer.discover().unwrap().len(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
 }

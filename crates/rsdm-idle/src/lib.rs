@@ -2,13 +2,12 @@
 
 use std::{
     path::{Path, PathBuf},
-    process::{Child, Command, ExitStatus},
+    process::Command,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
-    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result};
@@ -23,7 +22,10 @@ use wayland_protocols::ext::idle_notify::v1::client::{
     ext_idle_notifier_v1::ExtIdleNotifierV1,
 };
 
-const LOCK_READY_TIMEOUT: Duration = Duration::from_secs(10);
+mod hooks;
+mod readiness;
+use hooks::run_hooks;
+
 static SCOPE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 struct IdleApp {
@@ -157,7 +159,7 @@ fn run_lock_cycle(config: IdleConfig, config_path: PathBuf, active: Arc<AtomicBo
     } else {
         config.lock_command.iter().map(Into::into).collect()
     };
-    let (mut command, scoped) = lock_command(&argv);
+    let (mut command, scope) = lock_command(&argv);
 
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -167,8 +169,7 @@ fn run_lock_cycle(config: IdleConfig, config_path: PathBuf, active: Arc<AtomicBo
         }
     };
     let ready = if built_in {
-        let expected_pid = (!scoped).then_some(child.id());
-        wait_until_ready(&mut child, expected_pid)
+        readiness::wait_until_ready(&mut child, scope.as_deref())
     } else {
         // A custom locker has no rsdm readiness handshake. Starting it is the
         // strongest guarantee available, and this limitation is documented.
@@ -190,22 +191,13 @@ fn run_lock_cycle(config: IdleConfig, config_path: PathBuf, active: Arc<AtomicBo
         }
     };
 
-    match child.wait() {
-        Ok(status) if status.success() => tracing::info!("idle locker exited after unlock"),
-        Ok(status) => tracing::error!(%status, "idle locker exited unsuccessfully"),
-        Err(error) => tracing::error!(%error, "failed waiting for idle locker"),
-    }
-    if lock_confirmed {
-        run_hooks("on_unlock", &config.on_unlock);
-    } else {
-        tracing::warn!("skipping on_unlock hooks because lock activation was never confirmed");
-    }
+    hooks::finish_lock_cycle(child.wait(), lock_confirmed, &config.on_unlock);
 }
 
 /// A service-managed idle monitor places its locker in a distinct transient
 /// scope. Stopping/restarting rsdm-idle can then use systemd's safe default
 /// KillMode=control-group without killing the session-lock owner.
-fn lock_command(argv: &[std::ffi::OsString]) -> (Command, bool) {
+fn lock_command(argv: &[std::ffi::OsString]) -> (Command, Option<String>) {
     if std::env::var_os("INVOCATION_ID").is_some() {
         let sequence = SCOPE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let unit = format!("rsdm-lock-{}-{sequence}.scope", std::process::id());
@@ -217,44 +209,11 @@ fn lock_command(argv: &[std::ffi::OsString]) -> (Command, bool) {
             .arg(&unit)
             .arg("--");
         command.args(argv);
-        (command, true)
+        (command, Some(unit))
     } else {
         let mut command = Command::new(&argv[0]);
         command.args(&argv[1..]);
-        (command, false)
-    }
-}
-
-/// `Ok(None)` means ready; `Ok(Some(status))` means it exited first.
-fn wait_until_ready(child: &mut Child, expected_pid: Option<u32>) -> Result<Option<ExitStatus>> {
-    let deadline = Instant::now() + LOCK_READY_TIMEOUT;
-    let uid = rsdm_infra::lock_control::current_uid();
-    while Instant::now() < deadline {
-        if let Some(status) = child.try_wait().context("checking idle locker status")? {
-            return Ok(Some(status));
-        }
-        if rsdm_infra::lock_control::lock_state(uid)
-            .ok()
-            .flatten()
-            .is_some_and(|state| expected_pid.is_none_or(|pid| state.pid == pid))
-        {
-            return Ok(None);
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    anyhow::bail!("no compositor lock confirmation within 10 seconds")
-}
-
-fn run_hooks(phase: &str, hooks: &[String]) {
-    for hook in hooks {
-        tracing::info!(%phase, command = %hook, "running idle hook");
-        match Command::new("sh").arg("-c").arg(hook).status() {
-            Ok(status) if status.success() => {}
-            Ok(status) => tracing::warn!(%phase, %status, command = %hook, "idle hook failed"),
-            Err(error) => {
-                tracing::warn!(%phase, %error, command = %hook, "could not start idle hook")
-            }
-        }
+        (command, None)
     }
 }
 

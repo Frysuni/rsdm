@@ -135,6 +135,9 @@ mod tests {
         for length in 0..bytes.len() {
             assert!(ConsoleFont::from_snapshot(&bytes[..length]).is_err());
         }
+        let mut unmapped = bytes[..40].to_vec();
+        unmapped[20..24].copy_from_slice(&0_u32.to_le_bytes());
+        assert!(ConsoleFont::from_snapshot(&unmapped).is_err());
         for (offset, value) in [
             (8, 0_u32),
             (12, 129),

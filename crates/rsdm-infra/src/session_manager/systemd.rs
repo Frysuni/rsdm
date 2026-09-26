@@ -7,7 +7,7 @@ use std::{
 
 use rsdm_core::domain::SessionManagerConfig;
 
-use super::env::{unset_environment_command, valid_environment_name};
+use super::env::{DISPLAY_VARS, unset_environment_command, valid_environment_name};
 
 pub(super) const APP_SLICE: &str = "app-graphical.slice";
 pub(super) const SESSION_SLICE: &str = "session.slice";
@@ -69,6 +69,16 @@ pub(super) fn systemd_run_args(
         }
     }
 
+    // --setenv only overrides present names; absent display variables would
+    // otherwise leak in from systemd's shared environment (including rsdm app).
+    let absent: Vec<_> = DISPLAY_VARS
+        .iter()
+        .copied()
+        .filter(|name| !environment.iter().any(|(key, _)| key == name))
+        .collect();
+    if !absent.is_empty() {
+        args.push(format!("--property=UnsetEnvironment={}", absent.join(" ")));
+    }
     args.push("--".to_string());
     args
 }
@@ -219,7 +229,34 @@ mod tests {
         assert!(contains_property(&args, &format!("After={PRE_TARGET}")));
         assert!(contains_property(&args, &format!("Wants={PRE_TARGET}")));
         assert!(contains_arg(&args, "--setenv=WAYLAND_DISPLAY=wayland-1"));
+        assert!(contains_property(
+            &args,
+            "UnsetEnvironment=DISPLAY XAUTHORITY"
+        ));
         assert_eq!(args.last().map(String::as_str), Some("--"));
+    }
+
+    #[test]
+    fn xwayland_app_keeps_its_credentials_without_inheriting_a_wayland_display() {
+        let args = systemd_run_args(
+            ManagedUnitKind::App,
+            "app-rsdm-test",
+            &[
+                ("DISPLAY".into(), ":2".into()),
+                ("XAUTHORITY".into(), "/run/user/1000/xauth".into()),
+                ("XCURSOR_THEME".into(), "Adwaita".into()),
+                ("XCURSOR_SIZE".into(), "32".into()),
+            ],
+        );
+        assert!(contains_property(&args, "UnsetEnvironment=WAYLAND_DISPLAY"));
+        for assignment in [
+            "DISPLAY=:2",
+            "XAUTHORITY=/run/user/1000/xauth",
+            "XCURSOR_THEME=Adwaita",
+            "XCURSOR_SIZE=32",
+        ] {
+            assert!(contains_arg(&args, &format!("--setenv={assignment}")));
+        }
     }
 
     #[test]

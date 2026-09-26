@@ -3,6 +3,7 @@ mod fallback;
 mod getty_query;
 mod group;
 mod launcher;
+mod session_environment;
 mod session_leader;
 mod shutdown;
 mod user;

@@ -41,6 +41,7 @@ impl ConsoleFont {
         let size = (self.width.div_ceil(8) * self.height) as usize;
         let count = self.bitmap.len() / size;
         if count == 0
+            || self.unicode.is_empty()
             || count > 512
             || !self.bitmap.len().is_multiple_of(size)
             || self.unicode.values().any(|&index| index >= count)

@@ -262,7 +262,8 @@ fn run_session(path: &Path, action: SessionAction) -> Result<()> {
             std::process::exit(code);
         }
         SessionAction::Finalize { names } => {
-            rsdm_infra::session_manager::finalize(&config.session_manager, &names);
+            rsdm_infra::session_manager::finalize(&config.session_manager, &names)
+                .context("finalizing the graphical session")?;
             Ok(())
         }
     }

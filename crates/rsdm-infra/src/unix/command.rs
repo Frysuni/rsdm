@@ -78,7 +78,7 @@ fn split_exec(input: &str) -> Result<Vec<String>, SessionLaunchError> {
     }
     push_arg(&mut args, &mut current, &mut arg_started);
 
-    if args.is_empty() {
+    if args.first().is_none_or(String::is_empty) {
         Err(SessionLaunchError::Setup(
             "session command is empty".to_string(),
         ))
@@ -127,6 +127,14 @@ mod tests {
     #[test]
     fn rejects_empty_command() {
         assert!(PreparedCommand::new_wrapped(&[], "   ").is_err());
+        assert!(PreparedCommand::new_wrapped(&[], r#""" --session"#).is_err());
+        assert!(PreparedCommand::new_wrapped(&["wrapper".into()], r#""""#).is_err());
+    }
+
+    #[test]
+    fn preserves_empty_arguments_after_the_program() {
+        let command = PreparedCommand::new_wrapped(&[], r#"program "" value"#).unwrap();
+        assert_eq!(argv_strings(&command), ["program", "", "value"]);
     }
 
     #[test]

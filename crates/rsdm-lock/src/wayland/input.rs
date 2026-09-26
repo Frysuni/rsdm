@@ -14,6 +14,13 @@ use crate::auth::{Attempt, Authenticator};
 
 impl App {
     pub(super) fn unlock(&mut self) {
+        if !self
+            .session_lock
+            .as_ref()
+            .is_some_and(|lock| lock.is_locked())
+        {
+            return;
+        }
         if let Some(lock) = self.session_lock.take() {
             lock.unlock();
             self.unlocked = true;
