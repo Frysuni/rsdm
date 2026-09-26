@@ -46,7 +46,7 @@ jobs:
       - name: Install tooling
         run: pacman -Syu --noconfirm git openssh pacman-contrib sudo
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve version
         id: ver
