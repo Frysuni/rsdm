@@ -14,7 +14,7 @@ use rsdm_ui::{Design, LockScene, Menu, Surface, banner};
 
 use crate::{
     model::LockModel,
-    render::{Canvas, FbSurface, Wallpaper, resolve_zoom, tint},
+    render::{Canvas, FbSurface, Font, Wallpaper, resolve_zoom, tint},
 };
 
 /// Lock every output until the seated user authenticates.
@@ -36,6 +36,7 @@ pub(crate) fn compose_lock_base(
     canvas: &mut Canvas,
     design: &Design,
     wallpaper: Option<&Wallpaper>,
+    font: &Font,
     zoom: u32,
     frame: u64,
 ) -> bool {
@@ -51,7 +52,7 @@ pub(crate) fn compose_lock_base(
             255
         };
         let p = design.palette();
-        let mut surface = FbSurface::with_opacity(canvas, zoom, opacity);
+        let mut surface = FbSurface::with_opacity(canvas, font, zoom, opacity);
         let area = surface.area();
         rsdm_ui::render_lock_background(&mut surface, design, area, p, frame);
     }
@@ -74,7 +75,8 @@ pub fn preview_png(
     );
     let design = Design::from_config(&config.lock.design);
     let p = design.palette();
-    let zoom = resolve_zoom(height, config.lock.size);
+    let font = Font::load(&config.dm.tty.path);
+    let zoom = resolve_zoom(config.lock.size);
     let mut canvas = Canvas::try_new(width, height, p.bg_base.argb(0xff))
         .context("allocating preview framebuffer")?;
 
@@ -88,6 +90,7 @@ pub fn preview_png(
         &mut canvas,
         &design,
         wallpaper.as_ref(),
+        &font,
         zoom,
         animation_frame,
     );
@@ -112,7 +115,7 @@ pub fn preview_png(
         hibernate_available: false,
     };
     {
-        let mut surface = FbSurface::new(&mut canvas, zoom);
+        let mut surface = FbSurface::new(&mut canvas, &font, zoom);
         let area = surface.area();
         rsdm_ui::render_lock_content(
             &mut surface,

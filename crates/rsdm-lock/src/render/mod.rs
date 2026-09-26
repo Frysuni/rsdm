@@ -11,5 +11,6 @@ pub mod surface;
 mod wallpaper;
 
 pub use canvas::Canvas;
+pub use font::Font;
 pub use surface::{FbSurface, resolve_zoom};
 pub use wallpaper::{Wallpaper, tint};

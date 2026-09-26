@@ -65,10 +65,22 @@ The locker uses Wayland fractional-scale and viewporter protocols when present,
 so a scale such as `1.5` is rendered at the compositor's preferred buffer size
 instead of enlarging a logical-resolution framebuffer.
 
-`size` is an optional integer from `1` to `12`: it is the exact integer zoom of
-the locker's 8x8 bitmap glyph. When omitted (the default), rsdm targets about 68
-rows, close to normal Linux-console density (`size = 2` at 1080p). This is based
-on the physical pixel buffer after fractional scaling, so glyphs remain crisp.
+DM snapshots the Greeter's actual console bitmap font and Unicode mapping before
+launching the session. Lock reads that snapshot from
+`/run/rsdm/console-font-<tty>.bin`, using the same `dm.tty.path`. Its text, borders
+and title art use the font's native width and height in physical pixels rather
+than square cells or a resolution-dependent zoom.
+
+`size` is an optional integer from `1` to `12`. Unset (the default) and `1`
+match the console font's native pixel size; larger values multiply both
+dimensions. Remove an old explicit `size` override to match the Greeter.
+After installing the update, start the updated DM before logging in (for
+example, reboot) so the Greeter can publish its font.
+Without a snapshot (for example, Lock used without DM), Lock logs a warning and
+uses a fallback 8x16 font; an exact console match is then unavailable.
+
+Greeter and Lock retain independent design settings. To match the title art,
+set the same `title_font`, `title_mode` and title content in both designs.
 
 ## Idle locking (`[idle]`)
 

@@ -43,6 +43,7 @@ mod render;
 const ANIMATION_FRAME: Duration = Duration::from_millis(66);
 
 struct LockContext {
+    font: crate::render::Font,
     design: Design,
     wallpaper: Option<Wallpaper>,
     username: String,
@@ -237,6 +238,7 @@ fn build_context(config: &AppConfig, config_path: &Path) -> Result<LockContext> 
     let username = util::current_username().context("could not determine the current lock user")?;
 
     Ok(LockContext {
+        font: crate::render::Font::load(&config.dm.tty.path),
         design,
         wallpaper,
         username,

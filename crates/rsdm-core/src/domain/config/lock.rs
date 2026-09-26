@@ -23,10 +23,9 @@ pub struct LockConfig {
     pub primary_output: Option<String>,
     /// What secondary outputs show while the session is locked.
     pub secondary_output: SecondaryOutput,
-    /// Integer zoom of the lock screen's 8x8 bitmap glyphs. `None` selects a
-    /// TTY-like size automatically from the output's physical pixel height.
-    /// Explicit values are useful when the console font or viewing distance is
-    /// unusual.
+    /// Integer zoom of the Greeter's console font. `None` uses its native
+    /// physical pixel dimensions (the same as `Some(1)`), independently of
+    /// output resolution and desktop scaling.
     pub size: Option<u8>,
     /// The lock screen's look, configured separately from `dm.design`.
     pub design: DesignConfig,

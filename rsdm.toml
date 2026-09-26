@@ -87,8 +87,9 @@ pam_service = "rsdm-lock" # optional | string | default: "rsdm-lock" | values: P
 # primary_output = "DP-1" # optional | string or unset | default: unset | values: Wayland output names
 # "off" currently powers outputs down through niri IPC and falls back to black.
 secondary_output = "background" # optional | string | default: "background" | values: background, black, off
-# Unset chooses a TTY-like glyph size automatically.
-# size = 2 # optional | integer or unset | default: unset | values: 1..12
+# Unset uses the Greeter's actual console font at its native physical pixel size.
+# Explicit values multiply both font dimensions; remove old size overrides to match TTY.
+# size = 1 # optional | integer or unset | default: unset | values: 1..12
 
 [lock.design]
 # Lock design is independent from dm.design; omitted fields use their own defaults.

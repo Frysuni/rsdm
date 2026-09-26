@@ -212,9 +212,10 @@
       type = lib.types.nullOr (lib.types.ints.between 1 12);
       default = null;
       description = ''
-        Integer bitmap-glyph zoom for the lock UI. null automatically targets
-        a TTY-like text density (about 68 rows); 1 through 12 force an exact
-        crisp pixel zoom. Also adjustable at runtime through F1.
+        Integer zoom of the Greeter's console font for Lock. null and 1 use
+        its native physical pixel dimensions, independent of desktop scaling.
+        Values 2 through 12 enlarge both dimensions by that factor.
+        Remove old size overrides to match the TTY. Also adjustable through F1.
       '';
     };
 

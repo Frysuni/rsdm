@@ -88,15 +88,13 @@ impl App {
             }
         };
 
-        let zoom = resolve_zoom(
-            height,
-            self.menu.lock_settings().and_then(|settings| settings.size),
-        );
+        let zoom = resolve_zoom(self.menu.lock_settings().and_then(|settings| settings.size));
         let wallpaper_present = !black_secondary
             && crate::compose_lock_base(
                 &mut canvas,
                 &self.ctx.design,
                 self.ctx.wallpaper.as_ref(),
+                &self.ctx.font,
                 zoom,
                 self.animation_frame(),
             );
@@ -134,7 +132,7 @@ impl App {
             pending: self.pending,
             hibernate_available: self.ctx.hibernate_available,
         };
-        let mut surface = FbSurface::new(canvas, zoom);
+        let mut surface = FbSurface::new(canvas, &self.ctx.font, zoom);
         let area = surface.area();
         rsdm_ui::render_lock_content(
             &mut surface,

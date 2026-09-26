@@ -1431,7 +1431,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "rsdm"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1447,7 +1447,7 @@ dependencies = [
 
 [[package]]
 name = "rsdm-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -1456,7 +1456,7 @@ dependencies = [
 
 [[package]]
 name = "rsdm-idle"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "rsdm-core",
@@ -1468,7 +1468,7 @@ dependencies = [
 
 [[package]]
 name = "rsdm-infra"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "camino",
  "libc",
@@ -1484,7 +1484,7 @@ dependencies = [
 
 [[package]]
 name = "rsdm-lock"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "font8x8",
@@ -1503,7 +1503,7 @@ dependencies = [
 
 [[package]]
 name = "rsdm-tui"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "crossterm",
  "libc",
@@ -1518,7 +1518,7 @@ dependencies = [
 
 [[package]]
 name = "rsdm-ui"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "figrs",
  "rsdm-core",

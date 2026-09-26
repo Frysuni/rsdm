@@ -12,7 +12,7 @@ The production tree is intentionally narrow:
 - `rsdm-tui`: a thin greeter backend - a `Surface` over ratatui's cell buffer
   plus the input loop; the look comes from `rsdm-ui`
 - `rsdm-lock`: a thin `ext-session-lock-v1` Wayland locker - a `Surface` over a
-  software framebuffer (8x8 bitmap font, with the block/box glyph tables so it
+  software framebuffer (the Greeter's console bitmap font and Unicode map, so it
   draws the same frames and backgrounds as the TTY) plus PAM verification
 - `rsdm-idle`: an `ext-idle-notify-v1` client that supervises one lock process,
   waits for its compositor-confirmed runtime state, and runs configured hooks

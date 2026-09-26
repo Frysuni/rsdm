@@ -3,7 +3,7 @@
 //! A frame is drawn into a cell rectangle and reports the interior rectangle the
 //! body goes into. The nine styles track sysc-greet's border roster and are
 //! drawn from box-drawing and the CP437 block run - glyphs both media can render
-//! (the console font on the TTY; the `font8x8` BOX/BLOCK tables on the
+//! (the console font on the TTY and its exported bitmaps on the
 //! framebuffer). This replaces the two old, divergent implementations
 //! (`rsdm-tui/skins/borders.rs` drew a box with ratatui blocks; the locker
 //! framed the whole screen). Now the locker shows the same centered box.

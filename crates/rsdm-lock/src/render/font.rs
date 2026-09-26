@@ -1,60 +1,128 @@
-//! 8x8 bitmap glyphs, integer-scaled, from the pure-Rust `font8x8` crate.
-//!
-//! Lookups try ASCII first, then the block-element run (U+2580..U+259F) and the
-//! box-drawing run (U+2500..U+257F), so the framebuffer can render the very same
-//! frame and background glyphs the TTY uses. A glyph outside all three tables is
-//! simply not drawn (the cell shows the background underneath).
+//! Rasterize the Greeter's console bitmaps without changing their proportions.
 
 use font8x8::{BASIC_FONTS, BLOCK_FONTS, BOX_FONTS, UnicodeFonts};
+use rsdm_infra::console_font::{self, ConsoleFont};
 
 use super::canvas::Canvas;
 
-/// Native glyph size in pixels (before zooming).
-pub const GLYPH: u32 = 8;
+#[derive(Default)]
+pub struct Font {
+    console: Option<ConsoleFont>,
+}
 
-/// Look up an 8x8 glyph bitmap, trying ASCII, then block, then box drawing.
-pub fn glyph(ch: char) -> Option<[u8; 8]> {
-    BASIC_FONTS
+impl Font {
+    pub fn load(tty: &str) -> Self {
+        let console = match console_font::load(tty) {
+            Ok(font) => {
+                tracing::info!(
+                    width = font.width(),
+                    height = font.height(),
+                    "using Greeter console font"
+                );
+                Some(font)
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Greeter font unavailable; using fallback 8x16 font");
+                None
+            }
+        };
+        Self { console }
+    }
+
+    pub fn width(&self) -> u32 {
+        self.console.as_ref().map_or(8, ConsoleFont::width)
+    }
+
+    pub fn height(&self) -> u32 {
+        self.console.as_ref().map_or(16, ConsoleFont::height)
+    }
+
+    pub fn draw(
+        &self,
+        canvas: &mut Canvas,
+        ch: char,
+        position: (i32, i32),
+        zoom: u32,
+        color: u32,
+        opacity: u8,
+    ) {
+        let fallback;
+        let bitmap = if let Some(font) = &self.console {
+            let Some(bitmap) = font.glyph(ch) else { return };
+            bitmap
+        } else {
+            fallback = fallback_glyph(ch);
+            &fallback
+        };
+        let stride = self.width().div_ceil(8) as usize;
+        for row in 0..self.height() {
+            for col in 0..self.width() {
+                if bitmap[row as usize * stride + col as usize / 8] & (0x80 >> (col % 8)) != 0 {
+                    canvas.fill_rect_alpha(
+                        position.0 + (col * zoom) as i32,
+                        position.1 + (row * zoom) as i32,
+                        zoom,
+                        zoom,
+                        color,
+                        opacity,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn fallback_glyph(ch: char) -> [u8; 16] {
+    let bitmap = BASIC_FONTS
         .get(ch)
         .or_else(|| BLOCK_FONTS.get(ch))
         .or_else(|| BOX_FONTS.get(ch))
+        .or_else(|| BASIC_FONTS.get('?'))
+        .unwrap_or([0; 8]);
+    std::array::from_fn(|row| bitmap[row / 2].reverse_bits())
 }
 
-/// Blit one 8x8 glyph at an integer `zoom`, its top-left corner at `(x, y)`.
-///
-/// Every source pixel becomes the exact same `zoom x zoom` block of destination
-/// pixels, so the glyph fills precisely `GLYPH * zoom` pixels on each axis. That
-/// is the whole trick, and the whole story: there is no fractional fitting, no
-/// per-axis stretch, no "tile vs text" special case. Because every cell shares
-/// the same `GLYPH * zoom` pitch, box-drawing and block glyphs line up edge to
-/// edge and tile seamlessly, while plain text stays crisp at any zoom. Pixels
-/// the glyph does not set are left untouched, so the background shows through
-/// around and inside each letter.
-pub fn draw_glyph(
-    canvas: &mut Canvas,
-    ch: char,
-    x: i32,
-    y: i32,
-    zoom: u32,
-    color: u32,
-    opacity: u8,
-) {
-    let Some(bitmap) = glyph(ch) else {
-        return;
-    };
-    let z = zoom.max(1);
-    for (row, bits) in bitmap.iter().enumerate() {
-        for col in 0..GLYPH {
-            if bits & (1 << col) != 0 {
-                canvas.fill_rect_alpha(
-                    x + (col * z) as i32,
-                    y + (row as u32 * z) as i32,
-                    z,
-                    z,
-                    color,
-                    opacity,
-                );
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn console_bitmap_is_pixel_exact_at_native_size_and_integer_zoom() {
+        // A 12x3 asymmetric glyph crosses a byte boundary. Padding bits must
+        // not leak into the next cell, and bit order must match the console.
+        let bitmap = [0x80, 0x1f, 0x40, 0x2f, 0x20, 0x4f];
+        let mut snapshot = b"RSDMFNT1".to_vec();
+        for value in [12_u32, 3, 6, 1] {
+            snapshot.extend_from_slice(&value.to_le_bytes());
+        }
+        snapshot.extend_from_slice(&bitmap);
+        snapshot.extend_from_slice(&('A' as u32).to_le_bytes());
+        snapshot.extend_from_slice(&0_u32.to_le_bytes());
+        let font = Font {
+            console: Some(ConsoleFont::from_snapshot(&snapshot).unwrap()),
+        };
+
+        for zoom in [1, 2] {
+            let mut canvas = Canvas::try_new(30, 10, 0).unwrap();
+            font.draw(&mut canvas, 'A', (1, 1), zoom, 0xffff_ffff, 255);
+            for y in 0..10 {
+                for x in 0..30 {
+                    let expected = [(0, 0), (11, 0), (1, 1), (10, 1), (2, 2), (9, 2)]
+                        .iter()
+                        .any(|&(gx, gy)| {
+                            (1 + gx * zoom..1 + (gx + 1) * zoom).contains(&x)
+                                && (1 + gy * zoom..1 + (gy + 1) * zoom).contains(&y)
+                        });
+                    assert_eq!(canvas.pixels()[(y * 30 + x) as usize] != 0, expected);
+                }
             }
         }
+    }
+
+    #[test]
+    fn fallback_preserves_rectangular_console_cells() {
+        let font = Font { console: None };
+        assert_eq!((font.width(), font.height()), (8, 16));
+        assert_eq!(fallback_glyph('█'), [255; 16]);
     }
 }
