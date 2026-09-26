@@ -50,6 +50,10 @@ rsdm app -- foot
 ```
 
 Each launch becomes a transient unit in `app-graphical.slice`,
+named `app-rsdm-<application>@<instance>.service`. The application identity stays
+stable between launches so desktop portals can reuse saved permissions; only
+the instance changes.
+The unit is
 `PartOf=graphical-session.target`: when the compositor exits (or the session is
 otherwise torn down) systemd stops every one of them. Because that target *is*
 the cleanup story, `rsdm app` refuses to launch when no graphical session is

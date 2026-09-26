@@ -2,9 +2,7 @@
 
 use std::{
     os::unix::process::ExitStatusExt,
-    path::Path,
     process::{Command, ExitStatus},
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 use rsdm_core::domain::SessionManagerConfig;
@@ -19,8 +17,6 @@ pub(super) const AUTOSTART_TARGET: &str = "xdg-desktop-autostart.target";
 
 /// Fixed transient unit that keeps `graphical-session.target` wanted.
 pub(super) const ANCHOR_UNIT: &str = "rsdm-graphical-session.service";
-
-static NEXT_UNIT_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ManagedUnitKind {
@@ -173,46 +169,6 @@ pub(super) fn stop_unit(unit: &str) {
     best_effort_owned(&["stop".to_string(), unit.to_string()]);
 }
 
-pub(super) fn unique_unit_name(prefix: &str, program: &str) -> String {
-    let id = NEXT_UNIT_ID.fetch_add(1, Ordering::Relaxed);
-    // Fresh app processes all start their counter at zero, so PID alone can
-    // collide after reuse.
-    let millis = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_millis())
-        .unwrap_or(0);
-    format!(
-        "{prefix}-{}-{}-{millis}-{id}",
-        sanitize(program),
-        std::process::id()
-    )
-}
-
-fn sanitize(program: &str) -> String {
-    let stem = Path::new(program)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(program);
-    let mut sanitized = String::new();
-    let mut previous_dash = false;
-    for ch in stem.chars() {
-        if ch.is_ascii_alphanumeric() {
-            sanitized.push(ch);
-            previous_dash = false;
-        } else if !previous_dash {
-            sanitized.push('-');
-            previous_dash = true;
-        }
-    }
-
-    let sanitized = sanitized.trim_matches('-');
-    if sanitized.is_empty() {
-        "app".to_string()
-    } else {
-        sanitized.to_string()
-    }
-}
-
 pub(super) fn exit_status_code(status: ExitStatus) -> i32 {
     status
         .code()
@@ -236,13 +192,6 @@ mod tests {
         args.windows(2)
             .find(|window| window[0] == "--slice")
             .map(|window| window[1].as_str())
-    }
-
-    #[test]
-    fn sanitize_makes_safe_unit_names() {
-        assert_eq!(sanitize("/usr/bin/niri-session"), "niri-session");
-        assert_eq!(sanitize("foo/bar baz"), "bar-baz");
-        assert_eq!(sanitize("////"), "app");
     }
 
     #[test]

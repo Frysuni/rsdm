@@ -5,6 +5,7 @@
 
 mod env;
 mod systemd;
+mod unit_name;
 
 use std::{
     os::raw::c_int,
@@ -26,8 +27,9 @@ use env::{
 use systemd::{
     ManagedUnitKind, SESSION_TARGET, anchor_graphical_session, anchored_teardown_commands,
     best_effort_owned, exit_status_code, release_anchor, release_anchor_commands, stop_unit,
-    systemd_run_args, unique_unit_name, unit_is_active,
+    systemd_run_args, unit_is_active,
 };
+use unit_name::unique_unit_name;
 
 static TERMINATE: AtomicBool = AtomicBool::new(false);
 
@@ -69,7 +71,7 @@ pub fn start(compositor: &[String], cfg: &SessionManagerConfig) -> Result<i32, S
         "captured compositor environment"
     );
     export(&collect_present(&[], &[]));
-    let unit = unique_unit_name("session-rsdm", program);
+    let unit = unique_unit_name(ManagedUnitKind::Session, program);
     let mut child = Command::new("systemd-run")
         .args(systemd_run_args(
             ManagedUnitKind::Session,
@@ -119,7 +121,7 @@ pub fn finalize(cfg: &SessionManagerConfig, extra_names: &[String]) {
 pub fn run_app(argv: &[String]) -> Result<i32, SessionError> {
     let program = argv.first().ok_or(SessionError::EmptyCommand)?;
     wait_for_graphical_session()?;
-    let unit = unique_unit_name("app-rsdm", program);
+    let unit = unique_unit_name(ManagedUnitKind::App, program);
     let app_env = command_environment();
     tracing::info!(program, unit, argv = ?argv, "launching app as transient systemd user unit");
     tracing::debug!(
