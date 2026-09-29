@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File, OpenOptions},
-    io,
+    io::{self, IsTerminal as _},
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -11,8 +11,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use rsdm_core::domain::{LoggingConfig, LoggingLevel};
 use rsdm_infra::config::load_config;
 use tracing_subscriber::{
-    EnvFilter,
-    fmt::writer::{BoxMakeWriter, MakeWriterExt},
+    EnvFilter, fmt::writer::BoxMakeWriter, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
 pub fn init(config_path: &Path) {
@@ -21,15 +20,31 @@ pub fn init(config_path: &Path) {
         Err(error) => (LoggingConfig::default(), Some(error.to_string())),
     };
     let filter = logging_filter(&logging);
-    let (writer, destination) = logging_writer(&logging);
+    let (log_file, destination) = open_log_destination(&logging);
 
-    if let Err(error) = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(writer)
-        .with_ansi(false)
-        .with_target(true)
-        .try_init()
-    {
+    let stderr_layer = tracing_subscriber::fmt::layer()
+        .with_writer(BoxMakeWriter::new(io::stderr))
+        .with_ansi(io::stderr().is_terminal())
+        .with_target(true);
+    let init_result = if let Some(file) = log_file {
+        let file_layer = tracing_subscriber::fmt::layer()
+            .with_writer(BoxMakeWriter::new(Mutex::new(file)))
+            .with_ansi(false)
+            .with_target(true);
+
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(stderr_layer)
+            .with(file_layer)
+            .try_init()
+    } else {
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(stderr_layer)
+            .try_init()
+    };
+
+    if let Err(error) = init_result {
         eprintln!("warning: failed to initialize logging: {error}");
         return;
     }
@@ -67,7 +82,7 @@ fn default_filter(level: LoggingLevel) -> String {
     )
 }
 
-fn logging_writer(logging: &LoggingConfig) -> (BoxMakeWriter, String) {
+fn open_log_destination(logging: &LoggingConfig) -> (Option<File>, String) {
     let journald = "journald".to_string();
     let Some(path) = logging
         .file
@@ -75,20 +90,17 @@ fn logging_writer(logging: &LoggingConfig) -> (BoxMakeWriter, String) {
         .filter(|file| !file.trim().is_empty())
         .map(PathBuf::from)
     else {
-        return (BoxMakeWriter::new(io::stderr), journald);
+        return (None, journald);
     };
 
     match open_log_file(&path) {
-        Ok(file) => (
-            BoxMakeWriter::new(io::stderr.and(Mutex::new(file))),
-            format!("journald + {}", path.display()),
-        ),
+        Ok(file) => (Some(file), format!("journald + {}", path.display())),
         Err(error) => {
             eprintln!(
                 "warning: failed to open log file {}; logging to the journal only: {error}",
                 path.display()
             );
-            (BoxMakeWriter::new(io::stderr), journald)
+            (None, journald)
         }
     }
 }
