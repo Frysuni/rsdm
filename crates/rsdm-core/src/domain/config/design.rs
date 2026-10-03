@@ -132,6 +132,9 @@ pub enum PasswordRendering {
 /// the styles survive on a raw VT.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum BorderStyle {
+    /// No frame or background panel around the content.
+    #[serde(rename = "none")]
+    None,
     /// Double outer frame around a single inner panel (sysc-greet default).
     #[default]
     #[serde(rename = "classic")]
@@ -139,7 +142,7 @@ pub enum BorderStyle {
     /// A single clean frame, nothing nested.
     #[serde(rename = "modern")]
     Modern,
-    /// No frame at all - just the banner and fields.
+    /// No frame glyphs, but keep the background panel.
     #[serde(rename = "minimal")]
     Minimal,
     /// Solid block border drawn from the half-block run.

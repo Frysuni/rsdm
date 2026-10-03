@@ -3,7 +3,7 @@
 use std::fs;
 
 use figrs::{Figlet, FigletOptions};
-use rsdm_core::domain::{DEFAULT_TITLE_FONT, TitleSource, logo};
+use rsdm_core::domain::{BorderStyle, DEFAULT_TITLE_FONT, TitleSource, logo};
 use time::{OffsetDateTime, format_description::FormatItem, macros::format_description};
 
 use crate::design::{Design, normalize_title_font};
@@ -81,11 +81,13 @@ fn clean_art_lines(text: &str) -> Vec<String> {
 
 // --- captions and status --------------------------------------------------
 
-/// `-----------| LABEL |-----------`, exactly `width` columns wide. The caption
-/// above the fields, shared by both fronts. The label sits between two
-/// box-drawing tees so the rule meets the separators seamlessly (a rotated `T`)
-/// instead of the old slash run.
-pub fn framed_caption(label: &str, width: usize) -> String {
+/// Caption above the fields, shared by both fronts. With no border it is plain
+/// text; otherwise the label sits inside a full-width box-drawing rule.
+pub fn caption(label: &str, width: usize, border: BorderStyle) -> String {
+    if border == BorderStyle::None {
+        return label.to_string();
+    }
+
     const DASH: char = '\u{2500}';
     // Right tee `-|` on the left of the label, left tee `|-` on the right, so
     // the horizontal rule joins each separator cleanly.
@@ -147,15 +149,20 @@ mod tests {
 
     #[test]
     fn framed_caption_is_exact_width_and_centered() {
-        let line = framed_caption("LOGIN", 30);
+        let line = caption("LOGIN", 30, BorderStyle::Classic);
         assert_eq!(line.chars().count(), 30);
         assert!(line.contains("\u{2524} LOGIN \u{251c}"));
     }
 
     #[test]
     fn framed_caption_falls_back_when_too_narrow() {
-        let line = framed_caption("LOGIN", 4);
+        let line = caption("LOGIN", 4, BorderStyle::Classic);
         assert_eq!(line, "\u{2524} LOGIN \u{251c}");
+    }
+
+    #[test]
+    fn borderless_caption_has_no_rule() {
+        assert_eq!(caption("LOGIN", 30, BorderStyle::None), "LOGIN");
     }
 
     #[test]

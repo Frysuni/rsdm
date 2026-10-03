@@ -19,6 +19,7 @@ let
     "trans-is-hard-job"
   ];
   borderStyles = [
+    "none"
     "classic"
     "modern"
     "minimal"
@@ -76,7 +77,8 @@ let
         default = "classic";
         description = ''
           Frame style for the login box / lock card. classic = double frame +
-          inner panel; modern = single frame; minimal = no frame; ascii1 = solid
+          inner panel; modern = single frame; none = no frame or panel;
+          minimal = panel without frame; ascii1 = solid
           block; ascii2 = gradient fade; ascii3 = layered panel; ascii4 = block
           banners; wave / pulse = variants.
         '';

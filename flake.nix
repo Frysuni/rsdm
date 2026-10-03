@@ -20,17 +20,7 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       pkgsFor = system: import nixpkgs { inherit system; };
-      stableVersion = "1.1.0";
-      stableReleases = {
-        x86_64-linux = {
-          target = "x86_64-unknown-linux-gnu";
-          hash = "sha256-I6xHWwz1EXTdgMBiZDG9aiX6DLn16A/tpTbPL/cY3hw=";
-        };
-        aarch64-linux = {
-          target = "aarch64-unknown-linux-gnu";
-          hash = "sha256-Q/39IpIdB7Bnqql94QL+zKllzFMgSG8d1JlfrPiPHmU=";
-        };
-      };
+      stable = builtins.fromJSON (builtins.readFile ./packaging/nix/stable.json);
 
       # Built from the exact flake source on the user's machine.
       mkUnstable =
@@ -53,7 +43,10 @@
             doCheck = false;
           };
         in
-        craneLib.buildPackage (commonArgs // { cargoArtifacts = craneLib.buildDepsOnly commonArgs; });
+        craneLib.buildPackage (commonArgs // {
+          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+          allowSubstitutes = false;
+        });
 
       # Installs the matching binary from the latest stable GitHub release.
       # autoPatchelf rewrites the generic GNU/Linux interpreter and library
@@ -62,14 +55,14 @@
         system:
         let
           pkgs = pkgsFor system;
-          release = stableReleases.${system};
+          target = "${pkgs.stdenv.hostPlatform.parsed.cpu.name}-unknown-linux-gnu";
         in
         pkgs.stdenvNoCC.mkDerivation {
           pname = "rsdm";
-          version = stableVersion;
+          version = stable.version;
           src = pkgs.fetchurl {
-            url = "https://github.com/Frysuni/rsdm/releases/download/v${stableVersion}/rsdm-${stableVersion}-${release.target}.tar.gz";
-            inherit (release) hash;
+            url = "https://github.com/Frysuni/rsdm/releases/download/v${stable.version}/rsdm-${stable.version}-${target}.tar.gz";
+            hash = stable.hashes.${system};
           };
           sourceRoot = ".";
           strictDeps = true;
@@ -99,47 +92,6 @@
             platforms = systems;
           };
         };
-
-      # Evaluate the module in both supported deployment shapes. In particular,
-      # lock/idle-only installs must not create a restart-looping greeter service
-      # or take over getty/defaultUnit.
-      mkModuleCheck =
-        system:
-        let
-          pkgs = pkgsFor system;
-          evaluate =
-            dmEnabled:
-            (nixpkgs.lib.nixosSystem {
-              inherit system;
-              modules = [
-                (import ./packaging/nix/module.nix self)
-                {
-                  boot.loader.grub.enable = false;
-                  fileSystems."/" = {
-                    device = "none";
-                    fsType = "tmpfs";
-                  };
-                  system.stateVersion = "26.05";
-                  services.rsdm = {
-                    enable = true;
-                    dm.enable = dmEnabled;
-                    lock.enable = true;
-                    idle.enable = true;
-                  };
-                }
-              ];
-            }).config;
-          full = evaluate true;
-          idleOnly = evaluate false;
-        in
-        assert full.systemd.services ? rsdm;
-        assert full.systemd.defaultUnit == "graphical.target";
-        assert !(idleOnly.systemd.services ? rsdm);
-        assert idleOnly.systemd.defaultUnit == "multi-user.target";
-        assert idleOnly.systemd.services."getty@tty1".enable;
-        assert idleOnly.systemd.user.services ? rsdm-idle;
-        pkgs.runCommand "rsdm-module-evaluation" { } "touch $out";
-
     in
     {
       packages = forAllSystems (system: rec {
@@ -160,7 +112,7 @@
       });
 
       checks = forAllSystems (system: {
-        module = mkModuleCheck system;
+        module = import ./packaging/nix/check.nix { inherit self nixpkgs system; };
       });
 
       devShells = forAllSystems (

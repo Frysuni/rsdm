@@ -98,13 +98,58 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           name: ${{ github.event.inputs.tag || github.ref_name }}
+          prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}
           generate_release_notes: true
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
 
+  update-stable:
+    name: update stable Nix channel
+    needs: release
+    if: ${{ !contains(github.event.inputs.tag || github.ref_name, '-') }}
+    runs-on: ubuntu-26.04
+    concurrency:
+      group: update-stable-nix
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Update release version and hashes
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: python3 packaging/nix/update-stable.py "$RELEASE_TAG" dist
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Check flake and release package
+        run: |
+          nix flake check --all-systems --no-build
+          nix build .#rsdm-stable --no-link --print-build-logs
+
+      - name: Commit stable channel update
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packaging/nix/stable.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(nix): update stable channel to $RELEASE_TAG"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
   aur:
     name: publish aur packages
+    if: ${{ !contains(github.event.inputs.tag || github.ref_name, '-') }}
     needs: release
     uses: ./.github/workflows/aur.yml
     with:

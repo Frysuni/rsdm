@@ -1,18 +1,14 @@
 # Installation: NixOS
 
-`rsdm` ships a flake with a NixOS module and two installation modes:
+`rsdm` provides two channels for x86_64-linux and aarch64-linux:
 
-| package          | what it is                                                     |
-|------------------|----------------------------------------------------------------|
-| `rsdm-prebuilt`  | downloads the release binary and patches it for the Nix store  |
-| `rsdm-source`    | builds from the exact flake source with Crane                  |
-| `rsdm-stable`    | compatibility alias for `rsdm-prebuilt`                       |
-| `rsdm-unstable`  | compatibility alias for `rsdm-source`                         |
-| `default`        | alias for `rsdm-prebuilt`                                     |
+| channel | behavior |
+|---------|----------|
+| `stable` (default) | downloads a stable GitHub Release binary; no Rust compilation |
+| `unstable` | builds the source revision selected by your flake input locally |
 
-The prebuilt package is the default and does not compile Rust locally. Select
-`rsdm-source` when you explicitly want to build and run the input revision from
-source. Pin the flake input to a tag or commit for a stable deployment.
+Both use the same input. You do not need to specify commits or prerelease tags.
+The lock file records the revision automatically when you update the input.
 
 ## Flake module
 
@@ -27,13 +23,7 @@ source. Pin the flake input to a tag or commit for a stable deployment.
         {
           services.rsdm = {
             enable = true;
-            binaryCache.enable = true;
-
-            # Default: release binary, no Rust compilation.
-            package = rsdm.packages.x86_64-linux.rsdm-prebuilt;
-
-            # Build the selected flake revision from source instead:
-            # package = rsdm.packages.x86_64-linux.rsdm-source;
+            channel = "stable"; # or "unstable" to build the development version
 
             dm = {
               tty = "tty1";
@@ -77,43 +67,59 @@ source. Pin the flake input to a tag or commit for a stable deployment.
 sudo nixos-rebuild switch
 ```
 
-## Binary cache and source builds
+## Updating and switching channels
 
-The default `rsdm-prebuilt` package is the fastest installation path: it
-downloads the stable release binary and does not compile Rust. The public,
-signed Nix cache at `https://frysuni.github.io/rsdm` additionally stores the
-exact `rsdm-source` outputs built by CI for x86_64 and aarch64.
-
-`services.rsdm.binaryCache.enable = true` adds that cache and its public key to
-the system Nix daemon for subsequent rebuilds. Keep it enabled and select
-`rsdm-source` to use the cached source derivation when available:
+Keep `inputs.rsdm.url = "github:Frysuni/rsdm"` and choose either:
 
 ```nix
-services.rsdm = {
-  enable = true;
-  binaryCache.enable = true;
-  package = rsdm.packages.x86_64-linux.rsdm-source;
-};
+services.rsdm.channel = "stable";
+# services.rsdm.channel = "unstable";
 ```
 
-To insist on a local source build, disable the project cache and disable
-substitution for that rebuild:
-
-```nix
-services.rsdm = {
-  enable = true;
-  binaryCache.enable = false;
-  package = rsdm.packages.x86_64-linux.rsdm-source;
-};
-```
+Update from your system flake directory, then rebuild (replace `host` with your
+NixOS configuration name):
 
 ```sh
-sudo nixos-rebuild switch --option substitute false
+nix flake update rsdm
+sudo nixos-rebuild switch --flake .#host
 ```
 
-The cache option takes effect after the first successful switch. On a new
-machine the default prebuilt package avoids the expensive first Rust build;
-later source-mode upgrades can be substituted from the Nix cache.
+Stable uses the release version and archive hashes recorded in the updated
+flake. The release workflow updates these after publishing a stable release.
+Unstable compiles the source selected by the updated lock file, including
+unreleased changes on the main branch. Prereleases do not change stable.
+
+The module does not add caches, keys, or global Nix download settings. Both
+channels use your existing substituters, normally including `cache.nixos.org`,
+for available dependencies. Unstable builds RSDM locally; dependencies missing
+from those caches are also built locally. Project-specific Rust dependencies
+may need compilation on the first build. Subsequent builds reuse matching
+local store paths. There is no additional cache setup or trust prompt.
+
+For direct package use, the flake exposes `rsdm-stable` and `rsdm-unstable`;
+`default` selects stable. `rsdm-prebuilt` and `rsdm-source` remain compatibility
+aliases. An explicit `services.rsdm.package` overrides the channel selection.
+
+### Migrating from the GitHub Pages cache
+
+Remove `services.rsdm.binaryCache.enable` from your configuration; this option
+has been removed. Remove an explicit `services.rsdm.package` if you want the
+new `channel` setting to select the package. Also remove any manually added
+RSDM Pages substituter and signing key from your Nix settings.
+
+Until the first successful switch, the running daemon may still have the old
+Pages cache configured. Bypass it for that rebuild:
+
+```sh
+sudo nixos-rebuild switch --flake .#host \
+  --option substituters https://cache.nixos.org \
+  --option extra-substituters ""
+```
+
+This command temporarily excludes all additional caches; include any other
+caches you need in the `substituters` argument. Later rebuilds need no override.
+Do not disable substitution globally: that would also prevent downloads of
+ordinary dependencies from the public NixOS cache.
 
 The module:
 
@@ -140,7 +146,7 @@ each look under its own `.design`.
 |---------------------------------------|----------------------------------------------------|
 | `enable`                              | turn rsdm on                                       |
 | `package`                             | rsdm package to install                            |
-| `binaryCache.enable`                  | trust and use the public rsdm Nix cache            |
+| `channel`                             | `stable` (default) or `unstable`                   |
 | `dm.enable`                           | run the greeter (default `true`)                   |
 | `dm.tty` / `dm.seat`                  | VT the greeter owns (e.g. `"tty1"`) and logind seat |
 | `dm.fixedSession`                     | always launch one session, hide the picker (or `null`) |

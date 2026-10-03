@@ -1,6 +1,4 @@
 {
-  binaryCachePublicKey,
-  binaryCacheUrl,
   defaultPackage,
   lib,
   mkDesignOptions,
@@ -14,16 +12,20 @@
   package = lib.mkOption {
     type = lib.types.package;
     default = defaultPackage;
-    defaultText = lib.literalExpression "inputs.rsdm.packages.${pkgs.system}.default";
+    description = "Package to install; an explicit override takes precedence over channel.";
+    defaultText = lib.literalExpression ''inputs.rsdm.packages.${pkgs.system}."rsdm-''${config.services.rsdm.channel}"'';
   };
 
-  binaryCache.enable = lib.mkOption {
-    type = lib.types.bool;
-    default = true;
+  channel = lib.mkOption {
+    type = lib.types.enum [
+      "stable"
+      "unstable"
+    ];
+    default = "stable";
     description = ''
-      Add the public rsdm binary cache (${binaryCacheUrl}) and its trusted
-      signing key (${binaryCachePublicKey}) to the system Nix daemon. Disable
-      this to prevent future rebuilds from substituting rsdm from that cache.
+      stable downloads the release binary; unstable builds the flake input's
+      source revision locally. Run nix flake update rsdm to update either channel.
+      Existing Nix substituters remain available for dependencies.
     '';
   };
 

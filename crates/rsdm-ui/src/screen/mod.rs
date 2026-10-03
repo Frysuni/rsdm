@@ -140,13 +140,15 @@ pub fn render_login(
     // HUD (top status, bottom footer) first, each over a background-free margin;
     // then the opaque box over the center. They never overlap in normal sizes.
     draw_status_login(surface, area, scene, p);
-    draw_footer_login(surface, area, scene, p);
+    if menu.hints_enabled() || scene.pending.is_some() {
+        draw_footer_login(surface, area, scene, p);
+    }
 
     let fields = login_fields(scene);
     let content_w = content_width(&scene.title, &fields, scene.message, area.w);
     let mut body = vec![
         BodyLine::Centered(vec![Segment::bold(
-            banner::framed_caption("LOGIN", content_w as usize),
+            banner::caption("LOGIN", content_w as usize, design.border),
             Role::Primary,
         )]),
         BodyLine::Blank,
@@ -239,7 +241,9 @@ pub fn render_lock_content(
     // Fill an opaque box only when nothing colorful sits behind it.
     let opaque_regions = !has_wallpaper && !design.background.is_full_field();
     draw_status_lock(surface, area, scene, p, opaque_regions);
-    draw_footer_lock(surface, area, scene, p, opaque_regions);
+    if menu.hints_enabled() || scene.pending.is_some() {
+        draw_footer_lock(surface, area, scene, p, opaque_regions);
+    }
 
     let fields = vec![
         ("User", scene.username.to_string(), false),
@@ -248,7 +252,7 @@ pub fn render_lock_content(
     let content_w = content_width(&scene.title, &fields, scene.message, area.w);
     let mut body = vec![
         BodyLine::Centered(vec![Segment::bold(
-            banner::framed_caption("LOCKED", content_w as usize),
+            banner::caption("LOCKED", content_w as usize, design.border),
             Role::Accent,
         )]),
         BodyLine::Blank,

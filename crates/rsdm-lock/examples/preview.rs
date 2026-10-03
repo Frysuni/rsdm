@@ -56,6 +56,7 @@ fn main() -> anyhow::Result<()> {
         _ => Background::None,
     };
     config.lock.design.border_style = match border.as_deref() {
+        Some("none") => BorderStyle::None,
         Some("modern") => BorderStyle::Modern,
         Some("minimal") => BorderStyle::Minimal,
         Some("ascii1") | Some("block") => BorderStyle::Ascii1,

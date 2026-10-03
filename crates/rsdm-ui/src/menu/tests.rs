@@ -70,13 +70,41 @@ fn submenu_starts_on_the_active_item() {
 }
 
 #[test]
+fn hints_toggle_stays_in_effect_after_closing_the_menu() {
+    let mut menu = Menu::new();
+    let mut design = design();
+    menu.open();
+    for _ in 0..ROOT_ROWS - 1 {
+        menu.handle_key(MenuKey::Down, &mut design);
+    }
+
+    assert_eq!(
+        menu.view(&design).rows[ROOT_ROWS - 1].label,
+        "Hints: Enabled"
+    );
+    assert_eq!(
+        menu.handle_key(MenuKey::Enter, &mut design),
+        MenuOutcome::Redraw
+    );
+    assert!(!menu.hints_enabled());
+    assert_eq!(
+        menu.view(&design).rows[ROOT_ROWS - 1].label,
+        "Hints: Disabled"
+    );
+
+    menu.handle_key(MenuKey::Esc, &mut design);
+    menu.open();
+    assert!(!menu.hints_enabled());
+}
+
+#[test]
 fn wallpaper_controls_apply_live() {
     let mut menu = Menu::new();
     let mut design = design();
     menu.show_wallpaper_controls(true);
     menu.open();
 
-    for _ in 0..6 {
+    for _ in 0..ROOT_ROWS {
         menu.handle_key(MenuKey::Down, &mut design);
     }
     menu.handle_key(MenuKey::Enter, &mut design);

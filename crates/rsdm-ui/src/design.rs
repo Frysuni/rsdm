@@ -133,6 +133,7 @@ pub const THEMES: &[ThemePreset] = &[
 
 /// The full border roster, in menu order.
 pub const BORDERS: &[BorderStyle] = &[
+    BorderStyle::None,
     BorderStyle::Classic,
     BorderStyle::Modern,
     BorderStyle::Minimal,
@@ -203,6 +204,7 @@ pub fn theme_label(theme: ThemePreset) -> &'static str {
 /// Human-readable label for a border style, for the menu.
 pub fn border_label(border: BorderStyle) -> &'static str {
     match border {
+        BorderStyle::None => "None",
         BorderStyle::Classic => "Classic",
         BorderStyle::Modern => "Modern",
         BorderStyle::Minimal => "Minimal",
@@ -277,7 +279,7 @@ mod tests {
     #[test]
     fn rosters_cover_every_variant() {
         assert_eq!(THEMES.len(), 14);
-        assert_eq!(BORDERS.len(), 9);
+        assert_eq!(BORDERS.len(), 10);
         assert_eq!(BACKGROUNDS.len(), 6);
         assert!(title_fonts().len() > 100);
     }

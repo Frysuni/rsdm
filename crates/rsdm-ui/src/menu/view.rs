@@ -69,11 +69,20 @@ impl Menu {
             row("Backgrounds >", self.index == 3, false),
             row("Title font >", self.index == 4, false),
             row("Speed >", self.index == 5, false),
+            row(
+                if self.hints_enabled {
+                    "Hints: Enabled"
+                } else {
+                    "Hints: Disabled"
+                },
+                self.index == 6,
+                false,
+            ),
         ];
 
         if self.wallpaper_controls {
-            rows.push(row("Wallpaper dim >", self.index == 6, false));
-            rows.push(row("Background opacity >", self.index == 7, false));
+            rows.push(row("Wallpaper dim >", self.index == 7, false));
+            rows.push(row("Background opacity >", self.index == 8, false));
         }
         if let Some(settings) = self.lock_settings {
             let size = settings

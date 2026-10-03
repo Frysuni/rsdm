@@ -98,7 +98,7 @@ the locker exits. See [idle.md](idle.md).
 | field              | values                                                                |
 |--------------------|-----------------------------------------------------------------------|
 | `theme`            | `minimal` `monochrome` `cyberpunk` `catppuccin` `gruvbox` `nord` `dracula` `tokyo-night` `material` `solarized` `eldritch` `rama` `dark` `trans-is-hard-job` |
-| `border_style`     | `classic` `modern` `minimal` `ascii1` `ascii2` `ascii3` `ascii4` `wave` `pulse` |
+| `border_style`     | `none` `classic` `modern` `minimal` `ascii1` `ascii2` `ascii3` `ascii4` `wave` `pulse` |
 | `background`       | `none` `matrix` `fire` `rain` `plasma` `starfield`                    |
 | `background_speed` | `0` (frozen) .. `10` (fast); `5` is natural                           |
 | `title_mode`       | `custom` `hostname` `os-release` `session-name` `preset-logo`         |
@@ -108,6 +108,9 @@ the locker exits. See [idle.md](idle.md).
 | `password_mode`    | `hidden` (no echo) or `asterisks`                                     |
 | `menu`             | enable the runtime F1 design switcher                                 |
 | `show_clock` / `show_hostname` | status line extras                                        |
+
+For `border_style`, `none` removes the frame, caption rule, and background
+panel; `minimal` keeps the panel and caption rule.
 
 The banner is rendered at the size the FIGlet font draws it - there is no font
 scale or title-size knob. Pick a different `title_font` to change the look.
@@ -129,14 +132,16 @@ See [lock.md](lock.md) for how wallpaper dim/opacity and the wallpaper interact.
 If `menu = true`, press `F1` on the greeter or lock screen to switch theme,
 border, background, title font and speed live. On the locker the menu also
 offers Lock size, Secondary outputs, and Save settings; with a wallpaper it adds
-Wallpaper dim and Background opacity. Greeter changes remain in-memory only.
+Wallpaper dim and Background opacity. The shared Hints toggle hides the normal
+keyboard hints at the bottom until that Greeter or Lock instance exits;
+confirmation prompts remain visible. Greeter changes remain in-memory only.
 
-Save settings updates only the fields exposed by the lock menu, preserves TOML
-comments, validates the result, and replaces the file atomically. It never asks
-for root. A NixOS module config resolves into `/nix/store` and is intentionally
-immutable; rsdm explains that `services.rsdm.lock.*` must be changed in the Nix
-configuration instead. Permission errors and read-only filesystems are also
-reported in the menu and full logs.
+Save settings updates the persistent lock-menu fields (not Hints), preserves
+TOML comments, validates the result, and replaces the file atomically. It never
+asks for root. A NixOS module config resolves into `/nix/store` and is
+intentionally immutable; rsdm explains that `services.rsdm.lock.*` must be
+changed in the Nix configuration instead. Permission errors and read-only
+filesystems are also reported in the menu and full logs.
 
 ## Logging (`[logging]`)
 

@@ -7,7 +7,7 @@ mod view;
 
 pub use view::{MenuRow, MenuView};
 
-const ROOT_ROWS: usize = 6;
+const ROOT_ROWS: usize = 7;
 const WALLPAPER_ROOT_ROWS: usize = 2;
 const LOCK_ROOT_ROWS: usize = 3;
 
@@ -55,6 +55,7 @@ pub struct Menu {
     mode: MenuMode,
     index: usize,
     wallpaper_controls: bool,
+    hints_enabled: bool,
     lock_settings: Option<LockMenuSettings>,
     notice: Option<(String, bool)>,
 }
@@ -72,6 +73,7 @@ impl Menu {
             mode: MenuMode::Root,
             index: 0,
             wallpaper_controls: false,
+            hints_enabled: true,
             lock_settings: None,
             notice: None,
         }
@@ -87,6 +89,10 @@ impl Menu {
 
     pub fn lock_settings(&self) -> Option<LockMenuSettings> {
         self.lock_settings
+    }
+
+    pub fn hints_enabled(&self) -> bool {
+        self.hints_enabled
     }
 
     pub fn set_notice(&mut self, message: impl Into<String>, error: bool) {
@@ -151,8 +157,12 @@ impl Menu {
             3 => self.open_submenu(MenuMode::Backgrounds, background_index(design)),
             4 => self.open_submenu(MenuMode::TitleFonts, title_font_index(design)),
             5 => self.open_submenu(MenuMode::Speed, design.background_speed as usize),
-            6 if self.wallpaper_controls => self.open_submenu(MenuMode::Dim, design.dim as usize),
-            7 if self.wallpaper_controls => self.open_submenu(
+            6 => {
+                self.hints_enabled = !self.hints_enabled;
+                MenuOutcome::Redraw
+            }
+            7 if self.wallpaper_controls => self.open_submenu(MenuMode::Dim, design.dim as usize),
+            8 if self.wallpaper_controls => self.open_submenu(
                 MenuMode::BackgroundOpacity,
                 design.background_opacity as usize,
             ),

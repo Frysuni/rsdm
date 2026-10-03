@@ -1,4 +1,6 @@
 # Complete rsdm configuration example.
+# NixOS installation channel is set with services.rsdm.channel in your flake,
+# not in this runtime configuration. See docs/installation/nixos.md.
 #
 # Default path: /etc/rsdm.toml. Override it with --config or RSDM_CONFIG.
 # Every field is optional: an omitted field uses the default shown in its
@@ -61,7 +63,7 @@ command = [] # optional | array<string> | default: [] | values: executable follo
 
 [dm.design]
 theme = "monochrome" # optional | string | default: "monochrome" | values: minimal, monochrome, cyberpunk, catppuccin, gruvbox, nord, dracula, tokyo-night, material, solarized, eldritch, rama, dark, trans-is-hard-job
-border_style = "classic" # optional | string | default: "classic" | values: classic, modern, minimal, ascii1, ascii2, ascii3, ascii4, wave, pulse
+border_style = "classic" # optional | string | default: "classic" | values: none, classic, modern, minimal, ascii1, ascii2, ascii3, ascii4, wave, pulse
 background = "none" # optional | string | default: "none" | values: none, matrix, fire, rain, plasma, starfield
 background_speed = 5 # optional | integer | default: 5 | values: 0..10
 # "custom" uses title_text; "preset-logo" uses title_preset.
@@ -94,7 +96,7 @@ secondary_output = "background" # optional | string | default: "background" | va
 [lock.design]
 # Lock design is independent from dm.design; omitted fields use their own defaults.
 theme = "monochrome" # optional | string | default: "monochrome" | values: minimal, monochrome, cyberpunk, catppuccin, gruvbox, nord, dracula, tokyo-night, material, solarized, eldritch, rama, dark, trans-is-hard-job
-border_style = "classic" # optional | string | default: "classic" | values: classic, modern, minimal, ascii1, ascii2, ascii3, ascii4, wave, pulse
+border_style = "classic" # optional | string | default: "classic" | values: none, classic, modern, minimal, ascii1, ascii2, ascii3, ascii4, wave, pulse
 background = "none" # optional | string | default: "none" | values: none, matrix, fire, rain, plasma, starfield
 background_speed = 5 # optional | integer | default: 5 | values: 0..10
 # "custom" uses title_text; "preset-logo" uses title_preset.

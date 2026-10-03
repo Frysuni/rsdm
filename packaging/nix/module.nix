@@ -8,9 +8,7 @@ self:
 let
   cfg = config.services.rsdm;
   toml = pkgs.formats.toml { };
-  defaultPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-  binaryCacheUrl = "https://frysuni.github.io/rsdm?priority=30";
-  binaryCachePublicKey = "rsdm.frysuni.github.io-1:XzJd5S6PzIYQ0m7QipTmvOXvxtuyAmhJXbqbcwUeXcA=";
+  defaultPackage = self.packages.${pkgs.stdenv.hostPlatform.system}."rsdm-${cfg.channel}";
   ttyName = lib.removePrefix "/dev/" cfg.dm.tty;
   ttyPath = if lib.hasPrefix "/dev/" cfg.dm.tty then cfg.dm.tty else "/dev/${cfg.dm.tty}";
   displayManagerAlias =
@@ -103,8 +101,6 @@ in
   options.services.rsdm = import ./options.nix {
     inherit
       defaultPackage
-      binaryCachePublicKey
-      binaryCacheUrl
       lib
       mkDesignOptions
       pkgs
@@ -116,8 +112,6 @@ in
   config = import ./system.nix {
     inherit
       baseConfig
-      binaryCachePublicKey
-      binaryCacheUrl
       cfg
       config
       displayManagerAlias

@@ -73,13 +73,16 @@ jobs:
         with:
           use-flakehub: disabled
 
+      - name: test stable channel publication
+        run: python3 -B packaging/nix/test_update_stable.py
+
       # Evaluate every flake output; the package itself is built explicitly in
       # the next step so failures retain the full build log.
       - name: flake check (eval only)
-        run: nix flake check --no-build
+        run: nix flake check --all-systems --no-build
 
       - name: build rsdm from source
-        run: nix build .#rsdm-source --print-build-logs
+        run: nix build .#rsdm-unstable --print-build-logs
 
       - name: build prebuilt rsdm
-        run: nix build .#rsdm-prebuilt --print-build-logs
+        run: nix build .#rsdm-stable --print-build-logs

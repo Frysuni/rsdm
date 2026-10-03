@@ -1,7 +1,7 @@
 //! The login/lock box frame, one implementation for both fronts.
 //!
 //! A frame is drawn into a cell rectangle and reports the interior rectangle the
-//! body goes into. The nine styles track sysc-greet's border roster and are
+//! body goes into. The decorated styles track sysc-greet's border roster and are
 //! drawn from box-drawing and the CP437 block run - glyphs both media can render
 //! (the console font on the TTY and its exported bitmaps on the
 //! framebuffer). This replaces the two old, divergent implementations
@@ -55,7 +55,7 @@ struct Pad {
 
 fn pad(style: BorderStyle) -> Pad {
     match style {
-        BorderStyle::Minimal => Pad {
+        BorderStyle::None | BorderStyle::Minimal => Pad {
             x: 0,
             top: 0,
             bottom: 0,
@@ -122,11 +122,11 @@ pub fn draw_frame_with_fill(
     p: Palette,
     fill_background: bool,
 ) -> Rect {
-    if fill_background {
+    if fill_background && style != BorderStyle::None {
         surface.fill(frame, p.bg_base);
     }
     match style {
-        BorderStyle::Minimal => {}
+        BorderStyle::None | BorderStyle::Minimal => {}
         BorderStyle::Modern => draw_box(surface, frame, &LIGHT, p.primary),
         BorderStyle::Classic => {
             draw_box(surface, frame, &DOUBLE, p.border_default);
@@ -250,6 +250,7 @@ mod tests {
     #[test]
     fn interior_is_exactly_content_size() {
         for style in [
+            BorderStyle::None,
             BorderStyle::Classic,
             BorderStyle::Modern,
             BorderStyle::Minimal,
@@ -277,8 +278,24 @@ mod tests {
     }
 
     #[test]
+    fn none_leaves_the_background_and_frame_area_untouched() {
+        let mut surface = VecSurface::new(30, 8);
+        let background = pal().primary;
+        surface.clear(background);
+        let frame = Rect::new(2, 1, 20, 6);
+
+        assert_eq!(
+            draw_frame_with_fill(&mut surface, frame, BorderStyle::None, pal(), true),
+            frame
+        );
+        assert!(surface.bg.iter().all(|color| *color == background));
+        assert!(surface.cells.iter().all(Option::is_none));
+    }
+
+    #[test]
     fn every_style_draws_without_panic_small() {
         for style in [
+            BorderStyle::None,
             BorderStyle::Classic,
             BorderStyle::Modern,
             BorderStyle::Minimal,

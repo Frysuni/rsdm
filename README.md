@@ -102,9 +102,10 @@ services.rsdm = {
 };
 ```
 
-The default package downloads the pinned release binary. `rsdm-stable` aliases
-`rsdm-prebuilt`; select `rsdm-source` to build the exact flake revision instead.
-Pin the input to a tag/revision for a stable deployment.
+Set `services.rsdm.channel = "stable"` (the default) to download the stable
+release binary, or `"unstable"` to compile the development version locally.
+Run `nix flake update rsdm` and rebuild to update either channel. Existing Nix
+caches provide available dependencies; no project cache configuration is needed.
 See [docs/installation/nixos.md](docs/installation/nixos.md).
 
 ## Documentation
