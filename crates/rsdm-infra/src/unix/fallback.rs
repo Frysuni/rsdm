@@ -6,6 +6,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum FallbackError {
+    #[error(transparent)]
+    Vt(#[from] super::vt::VtError),
     #[error("fallback command is empty")]
     EmptyCommand,
     #[error("fallback argument contains a NUL byte")]
@@ -16,6 +18,8 @@ pub enum FallbackError {
         #[source]
         source: io::Error,
     },
+    #[error("could not attach the fallback to the terminal: {0}")]
+    AttachTty(io::Error),
     #[error("every fallback command failed; last error: {0}")]
     Exec(io::Error),
 }
@@ -26,6 +30,8 @@ pub enum FallbackError {
 /// On success this never returns (the process image is replaced). It only returns
 /// `Err` when the VT could not be attached or every candidate failed to exec.
 pub fn exec_fallback(tty_path: &str, primary: &[String]) -> Result<Infallible, FallbackError> {
+    super::shutdown::install_terminate_handler();
+    let _vt = super::vt::acquire(tty_path)?;
     attach_vt(tty_path)?;
 
     // Resolve the distro's own console login before we exec, so an unconfigured
@@ -65,14 +71,14 @@ fn attach_vt(tty_path: &str) -> Result<(), FallbackError> {
         });
     }
 
-    // SAFETY: fd is a valid descriptor we just opened. Becoming a session leader
-    // and stealing the VT as our controlling terminal lets login/agetty drive it;
-    // dup2 onto 0/1/2 is the standard way to attach a process to a terminal.
+    if let Err(error) = claim_controlling_terminal(fd) {
+        // SAFETY: fd is owned by this function and has not been duplicated.
+        unsafe { libc::close(fd) };
+        return Err(FallbackError::AttachTty(error));
+    }
+
+    // SAFETY: fd is valid; dup2 attaches the standard descriptors to the VT.
     unsafe {
-        libc::setsid();
-        // Force-steal the controlling terminal (arg 1): the greeter runs as root,
-        // and we must own the VT even if a half-dead session still claims it.
-        libc::ioctl(fd, libc::TIOCSCTTY, 1);
         for target in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
             if libc::dup2(fd, target) < 0 {
                 let error = io::Error::last_os_error();
@@ -91,6 +97,22 @@ fn attach_vt(tty_path: &str) -> Result<(), FallbackError> {
     }
 
     reset_terminal();
+    Ok(())
+}
+
+fn claim_controlling_terminal(fd: i32) -> io::Result<()> {
+    // SAFETY: fd is an open terminal. A process that is already a session
+    // leader can claim it without calling setsid successfully again.
+    unsafe {
+        if libc::setsid() < 0 && libc::getsid(0) != libc::getpid() {
+            return Err(io::Error::last_os_error());
+        }
+        // Never steal a terminal from another session, including one that
+        // claimed it between the ownership check and this ioctl.
+        if libc::ioctl(fd, libc::TIOCSCTTY, 0) < 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
     Ok(())
 }
 
