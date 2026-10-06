@@ -7,6 +7,7 @@ use std::{
 use rsdm_core::ports::{LoginAttemptLimitError, LoginAttemptLimiter, MAX_USERNAME_BYTES};
 
 const MAX_TRACKED_USERNAMES: usize = 1024;
+const FAILURE_COUNTER_RETENTION: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug)]
 pub struct MemoryLoginAttemptLimiter {
@@ -28,7 +29,7 @@ impl MemoryLoginAttemptLimiter {
 impl LoginAttemptLimiter for MemoryLoginAttemptLimiter {
     fn check_allowed(&self, username: &str) -> Result<(), LoginAttemptLimitError> {
         let mut attempts = self.lock_attempts();
-        attempts.retain(|_, state| state.last_failure.elapsed() < self.delay);
+        self.prune_expired_attempts(&mut attempts);
         if username.len() > MAX_USERNAME_BYTES
             || (!attempts.contains_key(username) && attempts.len() >= MAX_TRACKED_USERNAMES)
         {
@@ -51,7 +52,7 @@ impl LoginAttemptLimiter for MemoryLoginAttemptLimiter {
 
     fn record_failure(&self, username: &str) {
         let mut attempts = self.lock_attempts();
-        attempts.retain(|_, state| state.last_failure.elapsed() < self.delay);
+        self.prune_expired_attempts(&mut attempts);
         if username.len() > MAX_USERNAME_BYTES
             || (!attempts.contains_key(username) && attempts.len() >= MAX_TRACKED_USERNAMES)
         {
@@ -68,6 +69,20 @@ impl LoginAttemptLimiter for MemoryLoginAttemptLimiter {
 }
 
 impl MemoryLoginAttemptLimiter {
+    fn prune_expired_attempts(&self, attempts: &mut HashMap<String, AttemptState>) {
+        // Entering another password or completing a PAM challenge can take
+        // longer than the backoff; partial counters must survive that interval.
+        let retention = self.delay.max(FAILURE_COUNTER_RETENTION);
+        attempts.retain(|_, state| {
+            let expiry = if state.failures >= self.max_failures {
+                self.delay
+            } else {
+                retention
+            };
+            state.last_failure.elapsed() < expiry
+        });
+    }
+
     fn lock_attempts(&self) -> MutexGuard<'_, HashMap<String, AttemptState>> {
         self.attempts
             .lock()
@@ -139,5 +154,31 @@ mod tests {
         assert!(limiter.check_allowed(&username).is_err());
         limiter.record_failure(&username);
         assert!(limiter.lock_attempts().is_empty());
+    }
+
+    #[test]
+    fn partial_counters_survive_the_backoff_and_reach_the_threshold() {
+        let limiter = MemoryLoginAttemptLimiter::new(2, Duration::from_secs(1));
+        limiter.record_failure("alice");
+        limiter.lock_attempts().get_mut("alice").unwrap().last_failure =
+            Instant::now() - Duration::from_secs(2);
+        assert!(limiter.check_allowed("alice").is_ok());
+        assert_eq!(limiter.lock_attempts().get("alice").unwrap().failures, 1);
+        limiter.record_failure("alice");
+        assert!(limiter.check_allowed("alice").is_err());
+    }
+
+    #[test]
+    fn inactive_partial_counters_expire_and_make_room() {
+        let limiter = MemoryLoginAttemptLimiter::new(2, Duration::from_secs(1));
+        for index in 0..MAX_TRACKED_USERNAMES {
+            limiter.record_failure(&format!("user{index}"));
+        }
+        assert!(limiter.check_allowed("new-user").is_err());
+        limiter.lock_attempts().get_mut("user0").unwrap().last_failure =
+            Instant::now() - FAILURE_COUNTER_RETENTION - Duration::from_secs(1);
+        assert!(limiter.check_allowed("new-user").is_ok());
+        limiter.record_failure("new-user");
+        assert_eq!(limiter.lock_attempts().len(), MAX_TRACKED_USERNAMES);
     }
 }

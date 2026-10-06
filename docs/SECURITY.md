@@ -41,6 +41,16 @@ stacks that map a submitted identity to a local account. Lock requires that
 PAM's final identity still matches the seated user. An unavailable conversation,
 unsupported PAM message type, or cancelled response fails authentication.
 
+## Attempt limits
+
+DM and Lock track at most 1024 account names per process. Input is limited to
+256 bytes for a username and 4096 bytes for each credential. Partial failure
+counters expire after 15 minutes without a failure, or after
+`failure_delay_ms` if that is longer. Blocked counters expire when their
+configured delay ends. When the table is full, new names are rate limited
+until an entry expires; existing blocked names are never evicted by a flood
+of other names.
+
 ## Lock screen
 
 `rsdm lock` is an `ext-session-lock-v1` Wayland client. Its security profile:

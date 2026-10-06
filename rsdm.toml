@@ -29,6 +29,8 @@ level = "info" # optional | string | default: "info" | values: error, warn, info
 deny_root = true # optional | bool | default: true | values: true, false
 # When non-empty, a user must belong to at least one listed group.
 allowed_groups = [] # optional | array<string> | default: [] | values: local group names
+# Partial counters expire after 15 minutes of inactivity (or a longer failure delay).
+# At most 1024 account names are tracked; a full table temporarily blocks new names.
 max_failed_attempts = 5 # optional | integer | default: 5 | values: 1..255
 failure_delay_ms = 1200 # optional | integer | default: 1200 | values: >= 0, milliseconds
 
