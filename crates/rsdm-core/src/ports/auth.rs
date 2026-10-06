@@ -2,6 +2,9 @@ use thiserror::Error;
 
 use crate::domain::PasswordSecret;
 
+pub const MAX_USERNAME_BYTES: usize = 256;
+pub const MAX_PASSWORD_BYTES: usize = 4096;
+
 #[derive(Debug)]
 pub struct AuthRequest<'a> {
     pub username: &'a str,

@@ -4,7 +4,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rsdm_core::ports::{LoginAttemptLimitError, LoginAttemptLimiter};
+use rsdm_core::ports::{LoginAttemptLimitError, LoginAttemptLimiter, MAX_USERNAME_BYTES};
+
+const MAX_TRACKED_USERNAMES: usize = 1024;
 
 #[derive(Debug)]
 pub struct MemoryLoginAttemptLimiter {
@@ -25,7 +27,15 @@ impl MemoryLoginAttemptLimiter {
 
 impl LoginAttemptLimiter for MemoryLoginAttemptLimiter {
     fn check_allowed(&self, username: &str) -> Result<(), LoginAttemptLimitError> {
-        let attempts = self.lock_attempts();
+        let mut attempts = self.lock_attempts();
+        attempts.retain(|_, state| state.last_failure.elapsed() < self.delay);
+        if username.len() > MAX_USERNAME_BYTES
+            || (!attempts.contains_key(username) && attempts.len() >= MAX_TRACKED_USERNAMES)
+        {
+            return Err(LoginAttemptLimitError::RateLimited {
+                username: username.to_string(),
+            });
+        }
         let Some(state) = attempts.get(username) else {
             return Ok(());
         };
@@ -41,6 +51,12 @@ impl LoginAttemptLimiter for MemoryLoginAttemptLimiter {
 
     fn record_failure(&self, username: &str) {
         let mut attempts = self.lock_attempts();
+        attempts.retain(|_, state| state.last_failure.elapsed() < self.delay);
+        if username.len() > MAX_USERNAME_BYTES
+            || (!attempts.contains_key(username) && attempts.len() >= MAX_TRACKED_USERNAMES)
+        {
+            return;
+        }
         let state = attempts.entry(username.to_string()).or_default();
         state.failures = state.failures.saturating_add(1);
         state.last_failure = Instant::now();
@@ -102,5 +118,26 @@ mod tests {
         let limiter = MemoryLoginAttemptLimiter::new(1, Duration::from_millis(0));
         limiter.record_failure("carol");
         assert!(limiter.check_allowed("carol").is_ok());
+        assert!(limiter.lock_attempts().is_empty());
+    }
+
+    #[test]
+    fn distinct_usernames_cannot_evict_blocked_accounts_or_grow_without_limit() {
+        let limiter = MemoryLoginAttemptLimiter::new(1, Duration::from_secs(60));
+        for index in 0..MAX_TRACKED_USERNAMES + 10 {
+            limiter.record_failure(&format!("user{index}"));
+        }
+        assert_eq!(limiter.lock_attempts().len(), MAX_TRACKED_USERNAMES);
+        assert!(limiter.check_allowed("user0").is_err());
+        assert!(limiter.check_allowed("another-user").is_err());
+    }
+
+    #[test]
+    fn oversized_usernames_are_not_retained() {
+        let limiter = MemoryLoginAttemptLimiter::new(1, Duration::from_secs(60));
+        let username = "x".repeat(MAX_USERNAME_BYTES + 1);
+        assert!(limiter.check_allowed(&username).is_err());
+        limiter.record_failure(&username);
+        assert!(limiter.lock_attempts().is_empty());
     }
 }
