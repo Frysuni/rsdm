@@ -132,7 +132,8 @@ pub(super) fn handle_key(
     model: &LoginUiModel<'_>,
 ) -> Option<FormEvent> {
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-        return Some(FormEvent::Ui(LoginUiEvent::ExitToTty));
+        return model.config.dm.fallback.permitted(&model.config.security)
+            .then_some(FormEvent::Ui(LoginUiEvent::ExitToTty));
     }
 
     if form.modal_open {
@@ -155,7 +156,9 @@ fn handle_form_key(
     model: &LoginUiModel<'_>,
 ) -> Option<FormEvent> {
     match key {
-        KeyCode::Esc => form.arm(Pending::Exit),
+        KeyCode::Esc if model.config.dm.fallback.permitted(&model.config.security) => {
+            form.arm(Pending::Exit)
+        }
         KeyCode::F(11) => form.arm(Pending::Reboot),
         KeyCode::F(12) => form.arm(Pending::Shutdown),
         KeyCode::Tab | KeyCode::Down => {

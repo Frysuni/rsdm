@@ -58,6 +58,8 @@ session = true # optional | bool | default: true | values: true, false
 
 [dm.fallback]
 # Hands the VT to a console login if the greeter cannot start.
+# Requires deny_root = false and allowed_groups = []; otherwise fallback is refused.
+# Console login uses the system login PAM policy and its own attempt limits.
 enabled = true # optional | bool | default: true | values: true, false
 # Empty auto-detects the system getty; set argv only to override that behavior.
 command = [] # optional | array<string> | default: [] | values: executable followed by arguments

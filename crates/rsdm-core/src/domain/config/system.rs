@@ -77,8 +77,8 @@ impl Default for SecurityConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FallbackConfig {
-    /// When the greeter cannot run (TTY unavailable, no sessions, PAM misconfig)
-    /// hand the terminal to a console login so the operator can still log in.
+    /// Allow console login when the greeter cannot run and security policy
+    /// permits it. The configured VT must be available.
     pub enabled: bool,
     /// Argv of the fallback program. The first element is resolved through
     /// `PATH` when it contains no `/`. Leave empty to auto-resolve: rsdm reuses
@@ -95,6 +95,13 @@ impl Default for FallbackConfig {
             // Empty == auto: discover the system getty, then try the built-ins.
             command: Vec::new(),
         }
+    }
+}
+
+impl FallbackConfig {
+    pub fn permitted(&self, security: &SecurityConfig) -> bool {
+        // External console login cannot enforce the Greeter's account policy.
+        self.enabled && !security.deny_root && security.allowed_groups.is_empty()
     }
 }
 
@@ -154,5 +161,18 @@ mod tests {
     fn missing_vtnr_is_none() {
         assert_eq!(vtnr_from_path("/dev/pts/3"), None);
         assert_eq!(vtnr_from_path("/dev/console"), None);
+    }
+
+    #[test]
+    fn console_fallback_requires_an_unrestricted_account_policy() {
+        let mut security = SecurityConfig::default();
+        let fallback = FallbackConfig::default();
+        assert!(!fallback.permitted(&security));
+        security.deny_root = false;
+        assert!(fallback.permitted(&security));
+        security.allowed_groups.push("users".to_string());
+        assert!(!fallback.permitted(&security));
+        security.allowed_groups.clear();
+        assert!(!FallbackConfig { enabled: false, command: Vec::new() }.permitted(&security));
     }
 }

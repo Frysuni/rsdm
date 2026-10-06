@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use rsdm_core::domain::{AppConfig, FallbackConfig};
+use rsdm_core::domain::{AppConfig, FallbackConfig, SecurityConfig};
 use rsdm_infra::{
     config::{DEFAULT_CONFIG_PATH, load_config},
     unix::exec_fallback,
@@ -238,9 +238,10 @@ fn run_dm(path: &Path) -> Result<()> {
     info!(tty = %config.dm.tty.path, "starting dm runtime");
     let tty_path = config.dm.tty.path.clone();
     let fallback = config.dm.fallback.clone();
+    let security = config.security.clone();
     match dm::run_dm(config) {
         Ok(()) => Ok(()),
-        Err(error) => fallback_or_error(&fallback, &tty_path, error),
+        Err(error) => fallback_or_error(&fallback, &security, &tty_path, error),
     }
 }
 
@@ -262,6 +263,7 @@ fn run_session(path: &Path, action: SessionAction) -> Result<()> {
 
 fn fallback_or_error(
     fallback: &FallbackConfig,
+    security: &SecurityConfig,
     tty_path: &str,
     error: anyhow::Error,
 ) -> Result<()> {
@@ -271,6 +273,11 @@ fn fallback_or_error(
     }
     if !fallback.enabled {
         return Err(error);
+    }
+    if !fallback.permitted(security) {
+        return Err(error.context(
+            "TTY fallback cannot enforce the configured account restrictions",
+        ));
     }
     if error.downcast_ref::<rsdm_infra::unix::VtError>().is_some() {
         error!(

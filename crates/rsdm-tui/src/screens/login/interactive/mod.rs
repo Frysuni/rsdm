@@ -62,6 +62,7 @@ fn build_scene<'a>(
         password_preview,
         field: form.field,
         pending: form.pending,
+        console_exit_enabled: model.config.dm.fallback.permitted(&model.config.security),
         message,
         message_is_error,
         sessions: model.sessions,

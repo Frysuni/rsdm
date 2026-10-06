@@ -14,7 +14,8 @@ fn press(form: &mut FormState, model: &LoginUiModel<'_>, code: KeyCode) -> Optio
 
 #[test]
 fn destructive_actions_require_a_confirming_second_press() {
-    let config = AppConfig::default();
+    let mut config = AppConfig::default();
+    config.security.deny_root = false;
     let sessions = sessions();
     let model = LoginUiModel {
         config: &config,
@@ -49,7 +50,8 @@ fn destructive_actions_require_a_confirming_second_press() {
 
 #[test]
 fn a_different_key_cancels_and_is_swallowed() {
-    let config = AppConfig::default();
+    let mut config = AppConfig::default();
+    config.security.deny_root = false;
     let sessions = sessions();
     let model = LoginUiModel {
         config: &config,
@@ -72,7 +74,8 @@ fn a_different_key_cancels_and_is_swallowed() {
 
 #[test]
 fn a_different_action_key_cancels_and_is_swallowed() {
-    let config = AppConfig::default();
+    let mut config = AppConfig::default();
+    config.security.deny_root = false;
     let sessions = sessions();
     let model = LoginUiModel {
         config: &config,

@@ -134,7 +134,11 @@
     fallback.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Hand the TTY to a plain login when the greeter cannot run.";
+      description = ''
+        Hand the TTY to a plain login when the greeter cannot run. Requires
+        security.deny_root = false and empty security.allowed_groups in extraConfig;
+        console login uses the system login PAM policy and its own rate limits.
+      '';
     };
 
     fallback.command = lib.mkOption {

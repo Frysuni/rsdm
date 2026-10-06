@@ -119,6 +119,13 @@ Fallback requires a successfully loaded configuration. A missing, invalid, or
 incompatible config causes DM to exit; it never substitutes a default VT or
 enables fallback in place of the administrator's policy.
 
+DM also refuses fallback when `security.deny_root = true` or
+`security.allowed_groups` is non-empty, because console login cannot enforce
+these restrictions. This applies both to Greeter errors and to user-requested
+exit; the Greeter hides the exit action when fallback is unavailable. With
+`deny_root = false`, empty `allowed_groups`, and fallback enabled, console access
+uses the system login PAM stack and its own rate limits.
+
 ## Security
 
 The greeter never checks passwords itself - PAM does. Password buffers are

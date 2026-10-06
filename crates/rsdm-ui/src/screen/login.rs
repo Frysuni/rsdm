@@ -97,16 +97,13 @@ pub(super) fn draw_footer_login(
         primary.push(key("F2"));
         primary.push(hint(" Sessions"));
     }
-    let secondary = vec![
-        key("Esc"),
-        hint(" Exit"),
-        sep(),
-        key("F11"),
-        hint(" Reboot"),
-        sep(),
-        key("F12"),
-        hint(" Shutdown"),
-    ];
+    let mut secondary = Vec::new();
+    if scene.console_exit_enabled {
+        secondary.extend([key("Esc"), hint(" Exit"), sep()]);
+    }
+    secondary.extend([
+        key("F11"), hint(" Reboot"), sep(), key("F12"), hint(" Shutdown"),
+    ]);
     draw_bottom_hud(surface, area, &[primary, secondary], p, true);
 }
 
