@@ -58,7 +58,7 @@ pub enum SessionError {
 /// Returns the compositor's exit code.
 pub fn start(compositor: &[String], cfg: &SessionManagerConfig) -> Result<i32, SessionError> {
     let program = compositor.first().ok_or(SessionError::EmptyCommand)?;
-    if unit_is_active(SESSION_TARGET) || unit_is_active(ANCHOR_UNIT) {
+    if unit_is_active(SESSION_TARGET) {
         return Err(SessionError::SessionAlreadyActive);
     }
     TERMINATE.store(false, Ordering::SeqCst);
@@ -71,7 +71,8 @@ pub fn start(compositor: &[String], cfg: &SessionManagerConfig) -> Result<i32, S
         "starting managed graphical session"
     );
 
-    // A crashed session may leave the fixed anchor active.
+    // With the graphical target inactive, a remaining anchor is stale. Never
+    // release an anchor while the target still belongs to a live session.
     release_anchor();
 
     let session_env = command_environment();
