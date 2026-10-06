@@ -1,3 +1,4 @@
+mod conversation;
 mod state;
 mod terminal;
 
@@ -7,7 +8,10 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use rsdm_core::{
     domain::PasswordRendering,
-    ports::{LoginAttempt, LoginAttemptOutcome, LoginUi, LoginUiEvent, LoginUiModel, UiError},
+    ports::{
+        AuthConversation, LoginAttempt, LoginAttemptOutcome, LoginUi, LoginUiEvent, LoginUiModel,
+        UiError,
+    },
 };
 use rsdm_ui::{Design, LoginScene, Menu, MenuKey, Surface, banner};
 
@@ -60,6 +64,7 @@ fn build_scene<'a>(
         clock: design.show_clock.then(banner::clock_text),
         username: &form.username,
         password_preview,
+        authentication_active: false,
         field: form.field,
         pending: form.pending,
         console_exit_enabled: model.config.dm.fallback.permitted(&model.config.security),
@@ -84,7 +89,7 @@ impl LoginUi for RatatuiLoginUi {
     fn run(
         &mut self,
         model: LoginUiModel<'_>,
-        attempt: &mut dyn FnMut(LoginAttempt) -> LoginAttemptOutcome,
+        attempt: &mut dyn FnMut(LoginAttempt, &mut dyn AuthConversation) -> LoginAttemptOutcome,
     ) -> Result<LoginUiEvent, UiError> {
         run_prompt(model, attempt).map_err(|error| UiError::Terminal(error.to_string()))
     }
@@ -104,7 +109,7 @@ fn menu_key(key: KeyEvent) -> Option<MenuKey> {
 
 fn run_prompt(
     model: LoginUiModel<'_>,
-    attempt: &mut dyn FnMut(LoginAttempt) -> LoginAttemptOutcome,
+    attempt: &mut dyn FnMut(LoginAttempt, &mut dyn AuthConversation) -> LoginAttemptOutcome,
 ) -> Result<LoginUiEvent, io::Error> {
     install_panic_hook();
     let tty = open_tty(&model.config.dm.tty.path)?;
@@ -177,7 +182,14 @@ fn run_prompt(
                                 animation_frame,
                             );
                         })?;
-                        match attempt(submitted) {
+                        let mut conversation = conversation::GreeterConversation {
+                            terminal: &mut terminal,
+                            model: &model,
+                            form: &form,
+                            design: &design,
+                            notice: String::new(),
+                        };
+                        match attempt(submitted, &mut conversation) {
                             LoginAttemptOutcome::Failure(message) => {
                                 status = Some(Status::error(message));
                                 form.field = state::Field::Password;

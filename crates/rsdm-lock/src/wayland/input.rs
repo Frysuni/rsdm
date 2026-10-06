@@ -10,7 +10,6 @@ use smithay_client_toolkit::{
 };
 
 use super::App;
-use crate::auth::{Attempt, Authenticator};
 
 impl App {
     pub(super) fn unlock(&mut self) {
@@ -26,25 +25,6 @@ impl App {
             self.unlocked = true;
         }
         self.exit = true;
-    }
-
-    fn submit(&mut self) {
-        if self.model.is_empty() {
-            return;
-        }
-        let password = self.model.take_password();
-        let authenticator = Authenticator {
-            verifier: &self.ctx.verifier,
-            limiter: &self.ctx.limiter,
-            username: &self.ctx.username,
-            pam_service: &self.ctx.pam_service,
-        };
-        match authenticator.attempt(&password) {
-            Attempt::Unlocked => self.unlock(),
-            Attempt::Failed(message) | Attempt::RateLimited(message) => {
-                self.model.set_error(message);
-            }
-        }
     }
 
     fn handle_menu_key(&mut self, keysym: Keysym) {
@@ -151,6 +131,10 @@ impl KeyboardHandler for App {
         _: u32,
         event: KeyEvent,
     ) {
+        if self.authentication.is_some() {
+            self.handle_authentication_key(event);
+            return;
+        }
         if self.menu.is_open() {
             self.handle_menu_key(event.keysym);
             return;

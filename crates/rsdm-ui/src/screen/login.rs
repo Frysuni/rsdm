@@ -3,11 +3,15 @@
 
 use rsdm_core::domain::Palette;
 
+use crate::{banner, design::Design};
 use crate::surface::{Rect, Surface};
 use crate::text::{Role, Segment, draw_segments_centered};
 
-use super::layout::{draw_bottom_hud, draw_double_frame, draw_top_hud, hint, key, sep};
-use super::{Field, LoginScene, Pending};
+use super::message::push_message;
+use super::layout::{
+    draw_bottom_hud, draw_double_frame, draw_top_hud, hint, key, push_banner, push_fields, sep,
+};
+use super::{BodyLine, Field, LoginScene, Pending};
 
 pub(super) fn login_fields(scene: &LoginScene<'_>) -> Vec<(&'static str, String, bool)> {
     let mut fields = vec![
@@ -17,7 +21,11 @@ pub(super) fn login_fields(scene: &LoginScene<'_>) -> Vec<(&'static str, String,
             scene.field == Field::Username,
         ),
         (
-            "Password",
+            if scene.authentication_active {
+                "Response"
+            } else {
+                "Password"
+            },
             scene.password_preview.clone(),
             scene.field == Field::Password,
         ),
@@ -68,6 +76,14 @@ pub(super) fn draw_footer_login(
     scene: &LoginScene<'_>,
     p: Palette,
 ) {
+    if scene.authentication_active {
+        let line = vec![
+            key("Enter"), hint(" Continue"), sep(), key("Esc"), hint(" Cancel"),
+        ];
+        draw_bottom_hud(surface, area, &[line], p, true);
+        return;
+    }
+
     if let Some(pending) = scene.pending {
         let (label, word) = match pending {
             Pending::Exit => ("Esc", "exit to the console"),
@@ -148,4 +164,34 @@ pub(super) fn draw_picker(
         let color = if selected { p.accent } else { p.fg_secondary };
         surface.text(modal.x + 2, y, &format!("{marker}{label}"), color, selected);
     }
+}
+
+pub(super) fn login_body(
+    scene: &LoginScene<'_>,
+    fields: Vec<(&'static str, String, bool)>,
+    content_w: u16,
+    design: &Design,
+) -> Vec<BodyLine> {
+    let mut body = vec![
+        BodyLine::Centered(vec![Segment::bold(
+            banner::caption("LOGIN", content_w as usize, design.border),
+            Role::Primary,
+        )]),
+        BodyLine::Blank,
+    ];
+    push_banner(&mut body, &scene.title);
+    body.push(BodyLine::Blank);
+    push_fields(&mut body, fields);
+    if let Some(message) = scene.message {
+        let role = if scene.message_is_error {
+            Role::Danger
+        } else {
+            Role::Info
+        };
+        let text = if scene.message_is_error { format!("x {message}") } else { message.to_string() };
+        push_message(&mut body, &text, role, content_w);
+    }
+    body.push(BodyLine::Blank); // extra gap before the bottom border
+
+    body
 }

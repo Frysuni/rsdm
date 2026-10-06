@@ -1,44 +1,15 @@
 use std::{
     ffi::{CStr, CString},
-    os::raw::{c_char, c_int, c_void},
+    os::raw::{c_int, c_void},
     ptr,
 };
 
-use rsdm_core::ports::AuthError;
+use rsdm_core::ports::{AuthConversation, AuthError};
 use zeroize::Zeroizing;
 
 use super::conversation::{ConversationData, PamConv};
 
-pub const PAM_SUCCESS: c_int = 0;
-const PAM_ESTABLISH_CRED: c_int = 0x2;
-const PAM_DELETE_CRED: c_int = 0x4;
-const PAM_TTY: c_int = 3;
-const PAM_FAIL_DELAY: c_int = 10;
-
-#[repr(C)]
-pub struct PamHandleRaw {
-    _private: [u8; 0],
-}
-
-#[link(name = "pam")]
-unsafe extern "C" {
-    fn pam_start(
-        service_name: *const c_char,
-        user: *const c_char,
-        pam_conversation: *const PamConv,
-        pamh: *mut *mut PamHandleRaw,
-    ) -> c_int;
-    fn pam_end(pamh: *mut PamHandleRaw, pam_status: c_int) -> c_int;
-    fn pam_authenticate(pamh: *mut PamHandleRaw, flags: c_int) -> c_int;
-    fn pam_acct_mgmt(pamh: *mut PamHandleRaw, flags: c_int) -> c_int;
-    fn pam_setcred(pamh: *mut PamHandleRaw, flags: c_int) -> c_int;
-    fn pam_open_session(pamh: *mut PamHandleRaw, flags: c_int) -> c_int;
-    fn pam_close_session(pamh: *mut PamHandleRaw, flags: c_int) -> c_int;
-    fn pam_getenvlist(pamh: *mut PamHandleRaw) -> *mut *mut c_char;
-    fn pam_strerror(pamh: *mut PamHandleRaw, errnum: c_int) -> *const c_char;
-    fn pam_set_item(pamh: *mut PamHandleRaw, item_type: c_int, item: *const c_void) -> c_int;
-    fn pam_putenv(pamh: *mut PamHandleRaw, name_value: *const c_char) -> c_int;
-}
+use super::bindings::*;
 
 pub struct PamHandle {
     raw: *mut PamHandleRaw,
@@ -52,6 +23,7 @@ impl PamHandle {
         service: &str,
         user: &str,
         password: Zeroizing<Vec<u8>>,
+        conversation: Option<Box<dyn AuthConversation>>,
     ) -> Result<Self, AuthError> {
         let service = cstring("service", service)?;
         let user = cstring("user", user)?;
@@ -60,6 +32,7 @@ impl PamHandle {
             username: user.clone(),
             password_answered: false,
             username_answered: false,
+            conversation,
         });
         let data_ptr = conversation_data.as_mut() as *mut ConversationData;
         let conversation = Box::new(PamConv::new(data_ptr.cast()));
@@ -109,6 +82,22 @@ impl PamHandle {
         // Keep the callback context alive for close_session and pam_end, while
         // rejecting any later secret prompt instead of retaining the password.
         self.conversation_data.password.take();
+        self.conversation_data.conversation.take();
+    }
+
+    pub fn username(&mut self) -> Result<String, AuthError> {
+        let mut item = ptr::null();
+        // SAFETY: PAM writes a borrowed item pointer belonging to the live handle.
+        let status = unsafe { pam_get_item(self.raw, PAM_USER, &mut item) };
+        self.last_status = status;
+        if status != PAM_SUCCESS || item.is_null() {
+            return Err(AuthError::Backend("PAM did not return an account name".to_string()));
+        }
+        // SAFETY: PAM_USER is a NUL-terminated C string until the next PAM call.
+        unsafe { CStr::from_ptr(item.cast()) }
+            .to_str()
+            .map(str::to_string)
+            .map_err(|_| AuthError::Backend("PAM account name is not UTF-8".to_string()))
     }
 
     pub fn account_mgmt(&mut self) -> Result<(), AuthError> {

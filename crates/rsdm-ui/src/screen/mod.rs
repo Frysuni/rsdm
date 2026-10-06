@@ -3,19 +3,19 @@
 mod layout;
 mod lock;
 mod login;
+mod message;
 
 use rsdm_core::domain::{Palette, Session};
 
 use crate::backgrounds;
-use crate::banner;
 use crate::design::Design;
 use crate::menu::Menu;
 use crate::surface::{Rect, Surface};
-use crate::text::{Role, Segment};
+use crate::text::Segment;
 
-use layout::{content_width, draw_framed_box, push_banner, push_fields, too_small};
-use lock::{draw_footer_lock, draw_status_lock, lock_too_small};
-use login::{draw_footer_login, draw_picker, draw_status_login, login_fields};
+use layout::{content_width, draw_framed_box, too_small};
+use lock::{draw_footer_lock, draw_status_lock, lock_body, lock_too_small};
+use login::{draw_footer_login, draw_picker, draw_status_login, login_body, login_fields};
 
 /// Which input field has focus on the greeter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +63,7 @@ pub struct LoginScene<'a> {
     pub clock: Option<String>,
     pub username: &'a str,
     pub password_preview: String,
+    pub authentication_active: bool,
     pub field: Field,
     pub pending: Option<Pending>,
     pub console_exit_enabled: bool,
@@ -90,6 +91,7 @@ pub struct LockScene<'a> {
     pub clock: Option<String>,
     pub username: &'a str,
     pub password_preview: String,
+    pub authentication_active: bool,
     pub message: Option<&'a str>,
     pub message_is_error: bool,
     pub pending: Option<LockPending>,
@@ -147,26 +149,7 @@ pub fn render_login(
 
     let fields = login_fields(scene);
     let content_w = content_width(&scene.title, &fields, scene.message, area.w);
-    let mut body = vec![
-        BodyLine::Centered(vec![Segment::bold(
-            banner::caption("LOGIN", content_w as usize, design.border),
-            Role::Primary,
-        )]),
-        BodyLine::Blank,
-    ];
-    push_banner(&mut body, &scene.title);
-    body.push(BodyLine::Blank);
-    push_fields(&mut body, fields);
-    if let Some(message) = scene.message {
-        let line = if scene.message_is_error {
-            Segment::bold(format!("x {message}"), Role::Danger)
-        } else {
-            Segment::bold(message.to_string(), Role::Info)
-        };
-        body.push(BodyLine::Blank);
-        body.push(BodyLine::Centered(vec![line]));
-    }
-    body.push(BodyLine::Blank); // extra gap before the bottom border
+    let body = login_body(scene, fields, content_w, design);
 
     draw_framed_box(surface, design, area, content_w, &body, p, true);
     if scene.picker_open {
@@ -248,32 +231,14 @@ pub fn render_lock_content(
 
     let fields = vec![
         ("User", scene.username.to_string(), false),
-        ("Password", scene.password_preview.clone(), true),
+        (
+            if scene.authentication_active { "Response" } else { "Password" },
+            scene.password_preview.clone(),
+            true,
+        ),
     ];
     let content_w = content_width(&scene.title, &fields, scene.message, area.w);
-    let mut body = vec![
-        BodyLine::Centered(vec![Segment::bold(
-            banner::caption("LOCKED", content_w as usize, design.border),
-            Role::Accent,
-        )]),
-        BodyLine::Blank,
-    ];
-    push_banner(&mut body, &scene.title);
-    body.push(BodyLine::Blank);
-    push_fields(&mut body, fields);
-    if let Some(message) = scene.message {
-        let role = if scene.message_is_error {
-            Role::Danger
-        } else {
-            Role::Secondary
-        };
-        body.push(BodyLine::Blank);
-        body.push(BodyLine::Centered(vec![Segment::bold(
-            message.to_string(),
-            role,
-        )]));
-    }
-    body.push(BodyLine::Blank); // extra gap before the bottom border
+    let body = lock_body(scene, fields, content_w, design);
 
     draw_framed_box(surface, design, area, content_w, &body, p, opaque_regions);
     if menu.is_open() {

@@ -3,11 +3,15 @@
 
 use rsdm_core::domain::Palette;
 
+use crate::{banner, design::Design};
 use crate::surface::{Rect, Surface};
 use crate::text::{Role, Segment};
 
-use super::layout::{draw_bottom_hud, draw_top_hud, hint, key, sep};
-use super::{CARET, LockPending, LockScene};
+use super::message::push_message;
+use super::layout::{
+    draw_bottom_hud, draw_top_hud, hint, key, push_banner, push_fields, sep,
+};
+use super::{BodyLine, CARET, LockPending, LockScene};
 
 pub(super) fn draw_status_lock(
     surface: &mut impl Surface,
@@ -36,6 +40,14 @@ pub(super) fn draw_footer_lock(
     p: Palette,
     clear_background: bool,
 ) {
+    if scene.authentication_active {
+        let line = vec![
+            key("Enter"), hint(" Continue"), sep(), key("Esc"), hint(" Cancel"),
+        ];
+        draw_bottom_hud(surface, area, &[line], p, clear_background);
+        return;
+    }
+
     if let Some(pending) = scene.pending {
         let (label, word) = match pending {
             LockPending::Reboot => ("F11", "reboot"),
@@ -97,7 +109,8 @@ pub(super) fn lock_too_small(
     // A still-usable password prompt so the session can always be unlocked.
     let mut value = scene.password_preview.clone();
     value.push(CARET);
-    let prompt = format!("Password: {value}");
+    let label = if scene.authentication_active { "Response" } else { "Password" };
+    let prompt = format!("{label}: {value}");
     surface.text_centered(cx, cy, &prompt, p.fg_primary, true);
     if let Some(message) = scene.message {
         let color = if scene.message_is_error {
@@ -109,4 +122,33 @@ pub(super) fn lock_too_small(
     } else {
         surface.text_centered(cx, cy + 1, "Enter to unlock", p.fg_secondary, false);
     }
+}
+
+pub(super) fn lock_body(
+    scene: &LockScene<'_>,
+    fields: Vec<(&'static str, String, bool)>,
+    content_w: u16,
+    design: &Design,
+) -> Vec<BodyLine> {
+    let mut body = vec![
+        BodyLine::Centered(vec![Segment::bold(
+            banner::caption("LOCKED", content_w as usize, design.border),
+            Role::Accent,
+        )]),
+        BodyLine::Blank,
+    ];
+    push_banner(&mut body, &scene.title);
+    body.push(BodyLine::Blank);
+    push_fields(&mut body, fields);
+    if let Some(message) = scene.message {
+        let role = if scene.message_is_error {
+            Role::Danger
+        } else {
+            Role::Secondary
+        };
+        push_message(&mut body, message, role, content_w);
+    }
+    body.push(BodyLine::Blank); // extra gap before the bottom border
+
+    body
 }

@@ -80,8 +80,16 @@ fn run_greeter_loop(
                 error_message: error_message.as_deref(),
                 terminate: terminate_flag(),
             },
-            &mut |attempt| {
-                login::begin(&config, &wrapper, &limiter, &sessions, &mut parked, attempt)
+            &mut |attempt, conversation| {
+                login::begin(
+                    &config,
+                    &wrapper,
+                    &limiter,
+                    &sessions,
+                    &mut parked,
+                    attempt,
+                    conversation,
+                )
             },
         )?;
 

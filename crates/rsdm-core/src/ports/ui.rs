@@ -3,6 +3,7 @@ use std::sync::atomic::AtomicBool;
 use thiserror::Error;
 
 use crate::domain::{AppConfig, PasswordSecret, Session};
+use super::AuthConversation;
 
 pub trait LoginUi {
     /// Drive the login screen until something leaves it.
@@ -17,7 +18,7 @@ pub trait LoginUi {
     fn run(
         &mut self,
         model: LoginUiModel<'_>,
-        attempt: &mut dyn FnMut(LoginAttempt) -> LoginAttemptOutcome,
+        attempt: &mut dyn FnMut(LoginAttempt, &mut dyn AuthConversation) -> LoginAttemptOutcome,
     ) -> Result<LoginUiEvent, UiError>;
 }
 

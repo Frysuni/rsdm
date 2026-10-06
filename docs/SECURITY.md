@@ -29,13 +29,17 @@ the user's live session; see [display-manager.md](display-manager.md)).
 
 ## PAM conversation
 
-Greeter and Lock support password-style PAM stacks: one username and one secret
-response per transaction. Echoed username prompts receive the submitted account
-name. The password is never reused for a second secret prompt, even in a later
-callback; additional credential prompts fail with a PAM conversation error.
-Password-plus-OTP, interactive MFA, and challenge-response stacks require an
-interactive conversation UI and are currently unsupported. Configure separate
-`rsdm` and `rsdm-lock` PAM stacks compatible with this single-password model.
+Greeter and Lock send the entered password to the first hidden PAM prompt.
+Later hidden prompts request separate credentials, such as an OTP; echoed
+prompts accept visible input. PAM information and error messages are displayed
+alongside the next prompt. Enter submits a response and Esc cancels the
+transaction. Secret responses use zeroizing buffers and are never reused for
+another prompt. Lock keeps processing Wayland events during authentication.
+
+Greeter applies account policy to the final username returned by PAM, including
+stacks that map a submitted identity to a local account. Lock requires that
+PAM's final identity still matches the seated user. An unavailable conversation,
+unsupported PAM message type, or cancelled response fails authentication.
 
 ## Lock screen
 

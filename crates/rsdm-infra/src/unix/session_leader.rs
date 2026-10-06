@@ -3,12 +3,19 @@
 //! It lives outside the greeter service cgroup and uses a two-phase handshake:
 //! authenticate while the UI owns the VT, then launch after the UI releases it.
 
-use std::{io, os::raw::c_int};
+use std::{
+    io,
+    os::{fd::BorrowedFd, raw::c_int},
+};
 
-use rsdm_core::ports::{SessionGate, SessionLaunchError};
+use rsdm_core::ports::{AuthConversation, SessionGate, SessionLaunchError};
 
 pub use super::session_report::LeaderReport;
 use super::session_report::AUTHORIZED_TAG;
+use super::{
+    session_conversation::{LeaderConversation, read_auth_report},
+    session_pipe::{read_frame, write_frame},
+};
 
 pub enum LeaderLaunch {
     Denied(LeaderReport),
@@ -22,6 +29,13 @@ pub struct LeaderGate {
 }
 
 impl LeaderGate {
+    pub fn conversation(&self) -> io::Result<impl AuthConversation + 'static> {
+        // SAFETY: these pipe descriptors are valid for the gate's lifetime.
+        let report = unsafe { BorrowedFd::borrow_raw(self.report_fd) }.try_clone_to_owned()?;
+        let reply = unsafe { BorrowedFd::borrow_raw(self.go_fd) }.try_clone_to_owned()?;
+        Ok(LeaderConversation { report, reply })
+    }
+
     /// Report "authorized" to the greeter and park until it answers that the
     /// terminal is released. An error means the greeter is gone or refused;
     /// the session must not be launched.
@@ -103,7 +117,10 @@ impl Drop for LeaderHandle {
 
 /// Run the PAM/session lifecycle in a detached child and wait for its first
 /// handshake frame.
-pub fn spawn_session_leader(session: impl FnOnce(&LeaderGate) -> LeaderReport) -> LeaderLaunch {
+pub fn spawn_session_leader(
+    conversation: &mut dyn AuthConversation,
+    session: impl FnOnce(&LeaderGate) -> LeaderReport,
+) -> LeaderLaunch {
     let Some((report_read, report_write)) = pipe() else {
         return LeaderLaunch::Denied(LeaderReport::Lost);
     };
@@ -132,21 +149,7 @@ pub fn spawn_session_leader(session: impl FnOnce(&LeaderGate) -> LeaderReport) -
         return LeaderLaunch::Denied(LeaderReport::Lost);
     }
     if pid == 0 {
-        // SAFETY: simple libc calls on valid arguments in the fresh child.
-        unsafe {
-            libc::close(report_read);
-            libc::close(go_write);
-            libc::setsid();
-            libc::signal(libc::SIGPIPE, libc::SIG_IGN);
-        }
-        let gate = LeaderGate {
-            report_fd: report_write,
-            go_fd: go_read,
-        };
-        let report = session(&gate);
-        let _ = write_frame(report_write, &report.encode());
-        // SAFETY: end the child now; it must never return into the greeter loop.
-        unsafe { libc::_exit(0) }
+        run_child((report_read, report_write), (go_read, go_write), session);
     }
 
     // SAFETY: both fds are valid and owned by us.
@@ -154,7 +157,40 @@ pub fn spawn_session_leader(session: impl FnOnce(&LeaderGate) -> LeaderReport) -
         libc::close(report_write);
         libc::close(go_read);
     }
-    match read_frame(report_read) {
+    await_authorization(pid, report_read, go_write, conversation)
+}
+
+fn run_child(
+    report_pipe: (c_int, c_int),
+    go_pipe: (c_int, c_int),
+    session: impl FnOnce(&LeaderGate) -> LeaderReport,
+) -> ! {
+    let (report_read, report_write) = report_pipe;
+    let (go_read, go_write) = go_pipe;
+    // SAFETY: simple libc calls on valid arguments in the fresh child.
+    unsafe {
+        libc::close(report_read);
+        libc::close(go_write);
+        libc::setsid();
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+    let gate = LeaderGate {
+        report_fd: report_write,
+        go_fd: go_read,
+    };
+    let report = session(&gate);
+    let _ = write_frame(report_write, &report.encode());
+    // SAFETY: end the child now; it must never return into the greeter loop.
+    unsafe { libc::_exit(0) }
+}
+
+fn await_authorization(
+    pid: libc::pid_t,
+    report_read: c_int,
+    go_write: c_int,
+    conversation: &mut dyn AuthConversation,
+) -> LeaderLaunch {
+    match read_auth_report(report_read, go_write, conversation) {
         Some(frame) if frame[0] == AUTHORIZED_TAG => LeaderLaunch::Ready(LeaderHandle {
             pid,
             report_fd: report_read,
@@ -186,84 +222,6 @@ fn pipe() -> Option<(c_int, c_int)> {
         return None;
     }
     Some((fds[0], fds[1]))
-}
-
-fn read_frame(fd: c_int) -> Option<[u8; 5]> {
-    let mut buffer = [0u8; 5];
-    let mut filled = 0;
-    while filled < buffer.len() {
-        if !wait_for_report(fd) {
-            return None;
-        }
-        // SAFETY: read into the still-unfilled tail of a valid local buffer.
-        let read = unsafe {
-            libc::read(
-                fd,
-                buffer[filled..].as_mut_ptr().cast(),
-                buffer.len() - filled,
-            )
-        };
-        if read > 0 {
-            filled += read as usize;
-        } else if read == 0 {
-            return None;
-        } else {
-            let error = io::Error::last_os_error();
-            if error.kind() == io::ErrorKind::Interrupted {
-                // A service stop raises SIGTERM (without SA_RESTART) while the
-                // greeter is parked here for the whole session. The child owns
-                // the session either way; report it lost and let the caller
-                // notice the stop flag and exit cleanly.
-                if super::shutdown::terminate_requested() {
-                    return None;
-                }
-                continue;
-            }
-            return None;
-        }
-    }
-    Some(buffer)
-}
-
-fn wait_for_report(fd: c_int) -> bool {
-    let mut poll = libc::pollfd {
-        fd,
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    loop {
-        if super::shutdown::terminate_requested() {
-            return false;
-        }
-        // SAFETY: poll points to one valid descriptor entry. The timeout also
-        // handles SIGTERM arriving just before the blocking call begins.
-        let result = unsafe { libc::poll(&mut poll, 1, 200) };
-        if result > 0 {
-            return true;
-        }
-        if result < 0 && io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
-            return false;
-        }
-    }
-}
-
-fn write_frame(fd: c_int, bytes: &[u8]) -> io::Result<()> {
-    let mut written = 0;
-    while written < bytes.len() {
-        // SAFETY: write from the unwritten tail of a valid local buffer.
-        let wrote =
-            unsafe { libc::write(fd, bytes[written..].as_ptr().cast(), bytes.len() - written) };
-        if wrote > 0 {
-            written += wrote as usize;
-        } else {
-            let error = io::Error::last_os_error();
-            if wrote < 0 && error.kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-            return Err(error);
-        }
-    }
-    Ok(())
 }
 
 fn reap(pid: libc::pid_t) {

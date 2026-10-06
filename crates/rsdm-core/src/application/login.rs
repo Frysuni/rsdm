@@ -4,7 +4,7 @@ use zeroize::Zeroize;
 use crate::{
     domain::{PasswordSecret, Session, SessionExit},
     ports::{
-        AuditLogger, AuthError, AuthProvider, AuthRequest, AuthenticatedSession,
+        AuditLogger, AuthConversation, AuthError, AuthProvider, AuthRequest, AuthenticatedSession,
         LoginAttemptLimitError, LoginAttemptLimiter, SessionGate, SessionLaunchError,
         SessionLaunchRequest, SessionLauncher, UserResolveError, UserResolver,
     },
@@ -22,7 +22,7 @@ pub struct LoginUseCase<'a> {
 }
 
 impl LoginUseCase<'_> {
-    pub fn execute(&self, request: LoginRequest<'_>) -> Result<LoginResult, LoginError> {
+    pub fn execute(&self, mut request: LoginRequest<'_>) -> Result<LoginResult, LoginError> {
         let authenticated = AuthenticateUser {
             auth: self.auth,
             limiter: self.limiter,
@@ -135,10 +135,11 @@ pub struct LoginRequest<'a> {
     pub seat: &'a str,
     /// Argv prefix that wraps the session command (session-manager).
     pub wrapper: &'a [String],
+    pub conversation: Option<Box<dyn AuthConversation>>,
 }
 
 impl<'a> LoginRequest<'a> {
-    fn auth_request(&self) -> AuthRequest<'_> {
+    fn auth_request(&mut self) -> AuthRequest<'_> {
         AuthRequest {
             username: self.username,
             password: self.password,
@@ -147,6 +148,7 @@ impl<'a> LoginRequest<'a> {
             vtnr: self.vtnr,
             seat: self.seat,
             session_desktop: self.session.desktop_names.first().map(String::as_str),
+            conversation: self.conversation.take(),
         }
     }
 }

@@ -34,9 +34,17 @@ impl CredentialVerifier for PamCredentialVerifier {
             "verifying credentials with PAM"
         );
         let password = password_bytes(request.password)?;
-        let mut handle = PamHandle::start(request.pam_service, request.username, password)?;
+        let mut handle = PamHandle::start(
+            request.pam_service,
+            request.username,
+            password,
+            request.conversation,
+        )?;
         handle.authenticate()?;
         handle.account_mgmt()?;
+        if handle.username()? != request.username {
+            return Err(AuthError::AccountDenied);
+        }
         handle.clear_password();
         tracing::debug!(
             username = request.username,
@@ -48,7 +56,7 @@ impl CredentialVerifier for PamCredentialVerifier {
 }
 
 impl AuthProvider for PamAuthProvider {
-    fn authenticate(&self, request: AuthRequest<'_>) -> Result<AuthenticatedSession, AuthError> {
+    fn authenticate(&self, mut request: AuthRequest<'_>) -> Result<AuthenticatedSession, AuthError> {
         tracing::debug!(
             username = request.username,
             pam_service = request.pam_service,
@@ -58,31 +66,21 @@ impl AuthProvider for PamAuthProvider {
             "starting PAM authentication"
         );
         let password = password_bytes(request.password)?;
-        let mut handle = PamHandle::start(request.pam_service, request.username, password)?;
+        let mut handle = PamHandle::start(
+            request.pam_service,
+            request.username,
+            password,
+            request.conversation.take(),
+        )?;
         handle.authenticate()?;
         tracing::debug!(username = request.username, "PAM authenticate succeeded");
         handle.account_mgmt()?;
+        let username = handle.username()?;
         tracing::debug!(
             username = request.username,
             "PAM account management succeeded"
         );
-        handle.establish_credentials()?;
-        tracing::debug!(username = request.username, "PAM credentials established");
-        handle.prepare_session(
-            request.tty,
-            request.vtnr,
-            request.seat,
-            request.session_desktop,
-        )?;
-        tracing::debug!(username = request.username, "PAM environment prepared");
-
-        // Session modules register logind and may unlock the user's keyring.
-        if let Err(error) = handle.open_session() {
-            let _ = handle.delete_credentials();
-            tracing::warn!(username = request.username, %error, "PAM open_session failed");
-            return Err(error);
-        }
-        tracing::debug!(username = request.username, "PAM session opened");
+        open_login_session(&mut handle, &request)?;
         handle.clear_password();
 
         let environment = handle.environment();
@@ -94,9 +92,7 @@ impl AuthProvider for PamAuthProvider {
             );
         }
         Ok(AuthenticatedSession {
-            outcome: AuthOutcome {
-                username: request.username.to_string(),
-            },
+            outcome: AuthOutcome { username },
             pam_session: Box::new(OpenedPamSession {
                 handle: Some(handle),
                 environment,
@@ -105,6 +101,30 @@ impl AuthProvider for PamAuthProvider {
             }),
         })
     }
+}
+
+fn open_login_session(handle: &mut PamHandle, request: &AuthRequest<'_>) -> Result<(), AuthError> {
+    handle.establish_credentials()?;
+    tracing::debug!(username = request.username, "PAM credentials established");
+    let result = handle
+        .prepare_session(
+            request.tty,
+            request.vtnr,
+            request.seat,
+            request.session_desktop,
+        )
+        .and_then(|()| {
+            tracing::debug!(username = request.username, "PAM environment prepared");
+            // Session modules register logind and may unlock the user's keyring.
+            handle.open_session()
+        });
+    if let Err(error) = result {
+        let _ = handle.delete_credentials();
+        tracing::warn!(username = request.username, %error, "PAM session setup failed");
+        return Err(error);
+    }
+    tracing::debug!(username = request.username, "PAM session opened");
+    Ok(())
 }
 
 fn keyring_env_names(environment: &[(String, String)]) -> Option<Vec<&str>> {

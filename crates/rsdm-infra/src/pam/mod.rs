@@ -1,3 +1,4 @@
+mod bindings;
 mod conversation;
 mod ffi;
 mod provider;

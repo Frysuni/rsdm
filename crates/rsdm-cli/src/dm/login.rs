@@ -1,9 +1,10 @@
 use anyhow::Result;
 use rsdm_core::{
-    application::login::{LoginError, LoginRequest, LoginUseCase},
+    application::login::{LoginError, LoginRequest, LoginResult, LoginUseCase},
     domain::{AppConfig, PasswordSecret, Session, SessionExit},
     ports::{
-        LoginAttempt, LoginAttemptLimitError, LoginAttemptLimiter, LoginAttemptOutcome, UserStore,
+        AuthConversation, LoginAttempt, LoginAttemptLimitError, LoginAttemptLimiter,
+        LoginAttemptOutcome, UserStore,
     },
 };
 use rsdm_infra::{
@@ -29,6 +30,7 @@ pub(super) fn begin(
     sessions: &[Session],
     parked: &mut Option<ParkedSession>,
     attempt: LoginAttempt,
+    conversation: &mut dyn AuthConversation,
 ) -> LoginAttemptOutcome {
     let LoginAttempt {
         username,
@@ -51,7 +53,7 @@ pub(super) fn begin(
         session_name = %session.name,
         "login submitted"
     );
-    let launch = spawn_session_leader(|gate| {
+    let launch = spawn_session_leader(conversation, |gate| {
         child_login(config, wrapper, &username, &mut password, session, gate)
     });
     drop(password);
@@ -144,6 +146,9 @@ fn child_login(
     let launcher = UnixSessionLauncher;
     let audit = TracingAuditLogger;
     let limiter = AllowAllLimiter;
+    let Ok(conversation) = gate.conversation() else {
+        return LeaderReport::SessionLaunchFailed;
+    };
 
     let result = LoginUseCase {
         auth: &auth,
@@ -162,8 +167,13 @@ fn child_login(
         vtnr: config.dm.tty.vtnr(),
         seat: &config.dm.tty.seat,
         wrapper,
+        conversation: Some(Box::new(conversation)),
     });
 
+    login_report(result)
+}
+
+fn login_report(result: Result<LoginResult, LoginError>) -> LeaderReport {
     match result {
         Ok(login) => match login.exit {
             SessionExit::Success => LeaderReport::SessionSuccess,

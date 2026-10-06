@@ -1,5 +1,5 @@
 use super::*;
-use crate::surface::testing::VecSurface;
+use crate::{banner, surface::testing::VecSurface};
 use rsdm_core::domain::{DesignConfig, Session, ThemePreset, theme};
 
 fn design() -> Design {
@@ -19,6 +19,7 @@ fn login_renders_title_and_fields() {
         clock: Some("12:00".into()),
         username: "alice",
         password_preview: "***".into(),
+        authentication_active: false,
         field: Field::Password,
         pending: None,
         console_exit_enabled: false,
@@ -50,6 +51,7 @@ fn tiny_surface_shows_notice() {
         clock: None,
         username: "",
         password_preview: String::new(),
+        authentication_active: false,
         field: Field::Username,
         pending: None,
         console_exit_enabled: false,
@@ -74,6 +76,7 @@ fn lock_renders_username_and_caption() {
         clock: Some("12:00".into()),
         username: "alice",
         password_preview: "****".into(),
+        authentication_active: false,
         message: Some("incorrect password"),
         message_is_error: true,
         pending: None,
@@ -99,6 +102,7 @@ fn lock_too_small_keeps_a_usable_prompt() {
         clock: None,
         username: "alice",
         password_preview: "***".into(),
+        authentication_active: false,
         message: None,
         message_is_error: false,
         pending: None,

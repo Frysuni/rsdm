@@ -109,6 +109,7 @@ pub fn preview_png(
         clock,
         username: &username,
         password_preview: model.password_preview(),
+        authentication_active: false,
         message: model.message(),
         message_is_error: model.message_is_error(),
         pending: None,

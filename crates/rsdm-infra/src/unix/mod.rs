@@ -5,6 +5,8 @@ mod group;
 mod launcher;
 mod session_environment;
 mod session_leader;
+mod session_conversation;
+mod session_pipe;
 mod session_report;
 mod shutdown;
 mod user;

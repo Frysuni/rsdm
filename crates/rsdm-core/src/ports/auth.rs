@@ -5,6 +5,24 @@ use crate::domain::PasswordSecret;
 pub const MAX_USERNAME_BYTES: usize = 256;
 pub const MAX_PASSWORD_BYTES: usize = 4096;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthMessageStyle {
+    Secret,
+    Visible,
+    Info,
+    Error,
+}
+
+#[derive(Debug)]
+pub struct AuthMessage {
+    pub style: AuthMessageStyle,
+    pub text: String,
+}
+
+pub trait AuthConversation: std::fmt::Debug + Send {
+    fn respond(&mut self, message: AuthMessage) -> Result<Option<PasswordSecret>, AuthError>;
+}
+
 #[derive(Debug)]
 pub struct AuthRequest<'a> {
     pub username: &'a str,
@@ -20,6 +38,7 @@ pub struct AuthRequest<'a> {
     /// First `DesktopNames=` entry of the selected session, handed to PAM as
     /// `XDG_SESSION_DESKTOP` so logind records which desktop the session runs.
     pub session_desktop: Option<&'a str>,
+    pub conversation: Option<Box<dyn AuthConversation>>,
 }
 
 #[derive(Debug)]
@@ -48,6 +67,7 @@ pub struct VerifyRequest<'a> {
     pub username: &'a str,
     pub password: &'a PasswordSecret,
     pub pam_service: &'a str,
+    pub conversation: Option<Box<dyn AuthConversation>>,
 }
 
 pub trait PamSession: std::fmt::Debug {

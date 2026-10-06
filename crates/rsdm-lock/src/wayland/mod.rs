@@ -1,12 +1,13 @@
 use std::{
     os::fd::AsRawFd,
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result};
 use rsdm_core::domain::{AppConfig, SecondaryOutput};
-use rsdm_infra::{pam::PamCredentialVerifier, security::MemoryLoginAttemptLimiter};
+use rsdm_infra::security::MemoryLoginAttemptLimiter;
 use rsdm_ui::{Design, LockMenuSettings, LockPending, Menu};
 use smithay_client_toolkit::{
     compositor::CompositorState,
@@ -34,6 +35,7 @@ use wayland_protocols::wp::{
 
 use crate::{model::LockModel, render::Wallpaper, util};
 
+mod authentication;
 mod handlers;
 mod input;
 mod output;
@@ -53,8 +55,7 @@ struct LockContext {
     secondary_output: SecondaryOutput,
     config_path: PathBuf,
     design_config: rsdm_core::domain::DesignConfig,
-    verifier: PamCredentialVerifier,
-    limiter: MemoryLoginAttemptLimiter,
+    limiter: Arc<MemoryLoginAttemptLimiter>,
 }
 
 struct LockSurface {
@@ -87,6 +88,7 @@ struct App {
     off_fallback_warned: bool,
     keyboards: Vec<(wl_seat::WlSeat, wl_keyboard::WlKeyboard)>,
     model: LockModel,
+    authentication: Option<crate::auth::AuthenticationJob>,
     ctx: LockContext,
     menu: Menu,
     menu_enabled: bool,
@@ -136,6 +138,7 @@ pub fn run(config: &AppConfig, config_path: &Path) -> Result<()> {
         off_fallback_warned: false,
         keyboards: Vec::new(),
         model: LockModel::new(config.lock.design.password_mode),
+        authentication: None,
         ctx: context,
         menu,
         menu_enabled: config.lock.design.menu,
@@ -176,6 +179,7 @@ fn run_event_loop(
         queue
             .dispatch_pending(app)
             .context("Wayland dispatch failed")?;
+        app.process_authentication();
         if rsdm_infra::unix::emergency_unlock_requested() && app.lock_state.is_some() {
             app.unlock();
         }
@@ -188,7 +192,12 @@ fn run_event_loop(
             break;
         }
 
-        poll_wayland(queue, app.animation_poll_timeout_ms())?;
+        let timeout = if app.authentication.is_some() {
+            app.animation_poll_timeout_ms().min(50)
+        } else {
+            app.animation_poll_timeout_ms()
+        };
+        poll_wayland(queue, timeout)?;
         if app.ctx.design.background.is_animated()
             && app.animation_frame() != app.last_animation_frame
         {
@@ -252,11 +261,10 @@ fn build_context(config: &AppConfig, config_path: &Path) -> Result<LockContext> 
         secondary_output: config.lock.secondary_output,
         config_path: config_path.to_path_buf(),
         design_config: config.lock.design.clone(),
-        verifier: PamCredentialVerifier,
-        limiter: MemoryLoginAttemptLimiter::new(
+        limiter: Arc::new(MemoryLoginAttemptLimiter::new(
             config.security.max_failed_attempts,
             Duration::from_millis(config.security.failure_delay_ms),
-        ),
+        )),
     })
 }
 
