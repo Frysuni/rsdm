@@ -2,8 +2,6 @@
 
 use rsdm_core::domain::SessionManagerConfig;
 
-use super::systemd::best_effort_owned;
-
 /// Variables that exist before the compositor and are safe to export up front.
 pub(super) const BASE_VARS: &[&str] = &[
     "PATH",
@@ -40,13 +38,12 @@ pub(super) fn export(pairs: &[(String, String)]) {
         names = ?pairs.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
         "exporting environment variables"
     );
-    let assignments: Vec<String> = pairs
-        .iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect();
+    let names: Vec<&str> = pairs.iter().map(|(key, _)| key.as_str()).collect();
 
     let mut dbus = std::process::Command::new("dbus-update-activation-environment");
-    dbus.arg("--systemd").args(&assignments);
+    dbus.arg("--systemd")
+        .args(&names)
+        .envs(pairs.iter().map(|(key, value)| (key, value)));
     match dbus.status() {
         Ok(status) if status.success() => return,
         Ok(status) => {
@@ -58,9 +55,16 @@ pub(super) fn export(pairs: &[(String, String)]) {
     }
     // --systemd already updates both environments; use systemctl only when the
     // combined update is unavailable or fails.
-    let mut systemctl = vec!["set-environment".to_string()];
-    systemctl.extend(assignments);
-    best_effort_owned(&systemctl);
+    let result = std::process::Command::new("systemctl")
+        .args(["--user", "import-environment"])
+        .args(&names)
+        .envs(pairs.iter().map(|(key, value)| (key, value)))
+        .status();
+    match result {
+        Ok(status) if status.success() => {}
+        Ok(status) => tracing::warn!(%status, "systemctl import-environment failed"),
+        Err(error) => tracing::debug!(%error, "systemctl unavailable"),
+    }
 }
 
 /// Names of every variable we manage, for export/unset.

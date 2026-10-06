@@ -84,6 +84,7 @@ pub fn start(compositor: &[String], cfg: &SessionManagerConfig) -> Result<i32, S
     let previous_display = manager_wayland_display();
     let unit = unique_unit_name(ManagedUnitKind::Session, program);
     let mut child = Command::new("systemd-run")
+        .envs(session_env.iter().map(|(key, value)| (key, value)))
         .args(systemd_run_args(
             ManagedUnitKind::Session,
             &unit,
@@ -138,6 +139,7 @@ pub fn run_app(argv: &[String]) -> Result<i32, SessionError> {
         "captured app environment"
     );
     let status = Command::new("systemd-run")
+        .envs(app_env.iter().map(|(key, value)| (key, value)))
         .args(systemd_run_args(ManagedUnitKind::App, &unit, &app_env))
         .args(argv)
         .status()
