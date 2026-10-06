@@ -27,6 +27,16 @@ StandardError=journal
 applies those after the unit stops too, onto the VT that by then belongs to
 the user's live session; see [display-manager.md](display-manager.md)).
 
+## PAM conversation
+
+Greeter and Lock support password-style PAM stacks: one username and one secret
+response per transaction. Echoed username prompts receive the submitted account
+name. The password is never reused for a second secret prompt, even in a later
+callback; additional credential prompts fail with a PAM conversation error.
+Password-plus-OTP, interactive MFA, and challenge-response stacks require an
+interactive conversation UI and are currently unsupported. Configure separate
+`rsdm` and `rsdm-lock` PAM stacks compatible with this single-password model.
+
 ## Lock screen
 
 `rsdm lock` is an `ext-session-lock-v1` Wayland client. Its security profile:

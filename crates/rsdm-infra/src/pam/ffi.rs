@@ -57,6 +57,9 @@ impl PamHandle {
         let user = cstring("user", user)?;
         let mut conversation_data = Box::new(ConversationData {
             password: Some(password),
+            username: user.clone(),
+            password_answered: false,
+            username_answered: false,
         });
         let data_ptr = conversation_data.as_mut() as *mut ConversationData;
         let conversation = Box::new(PamConv::new(data_ptr.cast()));
