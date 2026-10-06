@@ -9,6 +9,7 @@ mod session_report;
 mod shutdown;
 mod user;
 mod vt;
+mod vt_owner;
 
 pub use fallback::{FallbackError, exec_fallback};
 pub use getty_query::discover_system_getty;

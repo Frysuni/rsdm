@@ -17,6 +17,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum VtError {
+    #[error("could not restore text mode on {path}: {source}")]
+    Restore {
+        path: String,
+        #[source]
+        source: io::Error,
+    },
     #[error("virtual terminal {path} is already in use by another session")]
     Busy { path: String },
     #[error("another rsdm greeter already owns {path}")]
@@ -111,13 +117,13 @@ fn open_vt(tty_path: &str) -> io::Result<File> {
 const KDGKBTYPE: libc::c_ulong = 0x4B33;
 /// `KDGETMODE` - read the console's KD mode (text or graphics).
 const KDGETMODE: libc::c_ulong = 0x4B3B;
+const KDSETMODE: libc::c_ulong = 0x4B3A;
 const KD_GRAPHICS: libc::c_int = 1;
+const KD_TEXT: libc::c_int = 0;
 
-/// True when the VT is in `KD_GRAPHICS` mode - a compositor (or a boot splash)
-/// currently owns its display. The controlling-terminal scan below cannot see
-/// such an owner: the session-leader and the compositor both `setsid()` away
-/// from the VT, so no process keeps it as controlling terminal while a Wayland
-/// session runs on it. The mode is the reliable signal.
+/// Graphics mode can outlive a crashed compositor. Check process ownership
+/// separately before recovering it; controlling-TTY metadata alone cannot see
+/// a compositor which detached through setsid.
 fn vt_in_graphics_mode(fd: i32) -> bool {
     let mut mode: libc::c_int = 0;
     // SAFETY: KDGETMODE writes one int on a console fd and fails harmlessly
@@ -133,7 +139,10 @@ fn wait_until_vt_is_free(fd: i32, rdev: u64, tty_path: &str) -> Result<(), VtErr
     let mut waited = false;
     loop {
         let graphics = vt_in_graphics_mode(fd);
-        if !graphics && !vt_is_busy(rdev) {
+        if !super::vt_owner::is_busy(rdev) {
+            if graphics {
+                restore_text_mode(fd, tty_path)?;
+            }
             if waited {
                 tracing::info!(path = tty_path, "VT released; starting the greeter");
             }
@@ -160,77 +169,25 @@ fn wait_until_vt_is_free(fd: i32, rdev: u64, tty_path: &str) -> Result<(), VtErr
     }
 }
 
+fn restore_text_mode(fd: i32, tty_path: &str) -> Result<(), VtError> {
+    // SAFETY: fd is the acquired console. Only reset a graphics VT after the
+    // process scan confirmed no foreign session or open VT descriptor remains.
+    if unsafe { libc::ioctl(fd, KDSETMODE, KD_TEXT) } != 0 {
+        return Err(VtError::Restore {
+            path: tty_path.to_string(),
+            source: io::Error::last_os_error(),
+        });
+    }
+    tracing::info!(path = tty_path, "restored an unowned graphics VT to text mode");
+    Ok(())
+}
+
 /// True when `fd` is a Linux virtual console (`KDGKBTYPE` succeeds only there).
 fn is_virtual_terminal(fd: i32) -> bool {
     let mut kb_type: libc::c_char = 0;
     // SAFETY: KDGKBTYPE writes one byte to kb_type on a console fd and simply
     // fails (without touching it) on any other descriptor.
     unsafe { libc::ioctl(fd, KDGKBTYPE, &mut kb_type) == 0 }
-}
-
-/// Detect a foreign session by matching `/proc/<pid>/stat` controlling TTY.
-fn vt_is_busy(rdev: u64) -> bool {
-    let target = encode_tty_nr(rdev);
-    if target == 0 {
-        // No controlling-terminal device number to match (e.g. the path was not
-        // a real VT); nothing to scan for.
-        return false;
-    }
-    // SAFETY: getsid(0) queries our own session id and has no preconditions.
-    let our_sid = unsafe { libc::getsid(0) };
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        tracing::debug!("could not read /proc to check VT ownership; assuming free");
-        return false;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        if name.is_empty() || !name.bytes().all(|byte| byte.is_ascii_digit()) {
-            continue;
-        }
-        let Ok(stat) = std::fs::read_to_string(format!("/proc/{name}/stat")) else {
-            continue; // Process vanished or is unreadable; ignore.
-        };
-        let Some((session, tty_nr)) = parse_session_and_tty(&stat) else {
-            continue;
-        };
-        if tty_nr == target && session > 0 && session != our_sid {
-            tracing::debug!(
-                pid = name,
-                session,
-                our_sid,
-                "found a foreign session on the VT; refusing to take it over"
-            );
-            return true;
-        }
-    }
-    false
-}
-
-/// Encode a device number the way the kernel writes `tty_nr` in
-/// `/proc/<pid>/stat` (`new_encode_dev`), so it can be compared directly. The
-/// input `rdev` is the glibc-encoded `dev_t` from `stat(2)`.
-fn encode_tty_nr(rdev: u64) -> i32 {
-    let major = ((rdev >> 8) & 0x0000_0fff) | ((rdev >> 32) & !0x0000_0fffu64);
-    let minor = (rdev & 0xff) | ((rdev >> 12) & !0xffu64);
-    ((minor & 0xff) | (major << 8) | ((minor & !0xff) << 12)) as i32
-}
-
-/// Parse `(session_id, tty_nr)` from the contents of `/proc/<pid>/stat`. The
-/// `comm` field (2nd) is wrapped in parentheses and may itself contain spaces or
-/// parentheses, so split after the last `)`: the remaining fields are
-/// `state ppid pgrp session tty_nr ...`.
-fn parse_session_and_tty(stat: &str) -> Option<(i32, i32)> {
-    let close = stat.rfind(')')?;
-    let mut fields = stat.get(close + 1..)?.split_whitespace();
-    let _state = fields.next()?;
-    let _ppid = fields.next()?;
-    let _pgrp = fields.next()?;
-    let session = fields.next()?.parse().ok()?;
-    let tty_nr = fields.next()?.parse().ok()?;
-    Some((session, tty_nr))
 }
 
 /// Make the calling process group the VT's foreground so its keystrokes arrive
@@ -295,60 +252,5 @@ fn lock_vt(tty_path: &str) -> LockOutcome {
         LockOutcome::Contended
     } else {
         LockOutcome::Unavailable
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// glibc `makedev(major, minor)` - the encoding `stat(2)` returns in `rdev`.
-    fn makedev(major: u64, minor: u64) -> u64 {
-        ((major & 0xfff) << 8)
-            | ((major & !0xfffu64) << 32)
-            | (minor & 0xff)
-            | ((minor & !0xffu64) << 12)
-    }
-
-    #[test]
-    fn encode_tty_nr_matches_kernel_for_virtual_consoles() {
-        // /dev/tty1 is char 4:1; the kernel writes tty_nr = 1025 in stat.
-        assert_eq!(encode_tty_nr(makedev(4, 1)), 1025);
-        // /dev/tty2 is 4:2 -> 1026, /dev/tty12 is 4:12 -> 1036.
-        assert_eq!(encode_tty_nr(makedev(4, 2)), 1026);
-        assert_eq!(encode_tty_nr(makedev(4, 12)), 1036);
-    }
-
-    #[test]
-    fn encode_tty_nr_handles_large_minor_numbers() {
-        // A minor that spills past 8 bits must round-trip through both halves of
-        // the kernel encoding (e.g. a serial console, 4:300).
-        let major = 4u64;
-        let minor = 300u64;
-        let encoded = encode_tty_nr(makedev(major, minor)) as u64;
-        let decoded_minor = (encoded & 0xff) | ((encoded >> 12) & !0xffu64);
-        let decoded_major = (encoded >> 8) & 0xfff;
-        assert_eq!(decoded_major, major);
-        assert_eq!(decoded_minor, minor);
-    }
-
-    #[test]
-    fn parse_session_and_tty_reads_the_right_fields() {
-        // pid (comm) state ppid pgrp session tty_nr tpgid ...
-        let stat = "1234 (bash) S 1000 1234 1234 1025 1300 ...";
-        assert_eq!(parse_session_and_tty(stat), Some((1234, 1025)));
-    }
-
-    #[test]
-    fn parse_session_and_tty_survives_parens_and_spaces_in_comm() {
-        // comm can contain spaces and parentheses; only the last ')' delimits it.
-        let stat = "42 (weird )(name) R 1 7 9 1026 -1 0";
-        assert_eq!(parse_session_and_tty(stat), Some((9, 1026)));
-    }
-
-    #[test]
-    fn parse_session_and_tty_rejects_garbage() {
-        assert_eq!(parse_session_and_tty("not a stat line"), None);
-        assert_eq!(parse_session_and_tty("123 (x) S 1"), None);
     }
 }

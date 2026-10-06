@@ -77,6 +77,10 @@ the VT belongs to the user's compositor, whose logind session outlives
 `rsdm.service` - the stop-time teardown would vhangup the live session's VT.
 The greeter claims and resets the VT itself.
 
+VT ownership checks include both controlling terminals and open VT descriptors
+held by detached session processes. DM restores a graphics VT to text mode only
+when no foreign holder remains. Unreadable process state is treated as busy.
+
 ## Multiple monitors
 
 The greeter is a Linux VT/fbcon application. A VT has one global character grid
