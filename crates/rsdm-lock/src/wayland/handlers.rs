@@ -108,10 +108,13 @@ impl OutputHandler for App {
         output: wl_output::WlOutput,
     ) {
         tracing::debug!("Wayland output removed");
+        if let Some(surface) = self.surfaces.iter().find(|surface| surface.output == output) {
+            self.powered_off_outputs.retain(|name| name != &surface.output_name);
+        }
         self.surfaces.retain(|surface| surface.output != output);
         if self.primary_output.as_ref() == Some(&output) {
-            self.restore_secondary_outputs();
             self.choose_primary_output();
+            self.power_off_secondary_outputs();
             self.needs_redraw = true;
         }
     }

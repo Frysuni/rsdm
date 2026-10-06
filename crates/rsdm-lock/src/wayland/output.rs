@@ -9,6 +9,7 @@ impl App {
     pub(super) fn choose_primary_output(&mut self) {
         let outputs: Vec<_> = self.output_state.outputs().collect();
         if outputs.is_empty() {
+            self.restore_secondary_outputs();
             self.primary_output = None;
             return;
         }
@@ -48,6 +49,9 @@ impl App {
             .map(|output| self.output_name(output))
             .unwrap_or_else(|| "<none>".to_string());
         tracing::info!(output = %name, "selected primary lock output");
+        // A replacement primary may have been powered off as a secondary.
+        // Restore it before the caller reapplies the policy to the new topology.
+        self.restore_secondary_outputs();
         self.primary_output = selected;
     }
 
