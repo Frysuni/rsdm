@@ -5,6 +5,7 @@ mod group;
 mod launcher;
 mod session_environment;
 mod session_leader;
+mod session_report;
 mod shutdown;
 mod user;
 mod vt;

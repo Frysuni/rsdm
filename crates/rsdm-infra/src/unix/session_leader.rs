@@ -7,48 +7,8 @@ use std::{io, os::raw::c_int};
 
 use rsdm_core::ports::{SessionGate, SessionLaunchError};
 
-/// Fixed-size report sent from the session child to the greeter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LeaderReport {
-    AuthFailed,
-    UserDenied,
-    SessionLaunchFailed,
-    SessionSuccess,
-    SessionFailed(i32),
-    SessionSignaled(i32),
-    Lost,
-}
-
-const AUTHORIZED_TAG: u8 = 7;
-
-impl LeaderReport {
-    fn encode(self) -> [u8; 5] {
-        let (tag, value): (u8, i32) = match self {
-            LeaderReport::AuthFailed => (0, 0),
-            LeaderReport::UserDenied => (1, 0),
-            LeaderReport::SessionLaunchFailed => (2, 0),
-            LeaderReport::SessionSuccess => (3, 0),
-            LeaderReport::SessionFailed(code) => (4, code),
-            LeaderReport::SessionSignaled(signal) => (5, signal),
-            LeaderReport::Lost => (6, 0),
-        };
-        let value = value.to_le_bytes();
-        [tag, value[0], value[1], value[2], value[3]]
-    }
-
-    fn decode(bytes: [u8; 5]) -> LeaderReport {
-        let value = i32::from_le_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]);
-        match bytes[0] {
-            0 => LeaderReport::AuthFailed,
-            1 => LeaderReport::UserDenied,
-            2 => LeaderReport::SessionLaunchFailed,
-            3 => LeaderReport::SessionSuccess,
-            4 => LeaderReport::SessionFailed(value),
-            5 => LeaderReport::SessionSignaled(value),
-            _ => LeaderReport::Lost,
-        }
-    }
-}
+pub use super::session_report::LeaderReport;
+use super::session_report::AUTHORIZED_TAG;
 
 pub enum LeaderLaunch {
     Denied(LeaderReport),
@@ -232,6 +192,9 @@ fn read_frame(fd: c_int) -> Option<[u8; 5]> {
     let mut buffer = [0u8; 5];
     let mut filled = 0;
     while filled < buffer.len() {
+        if !wait_for_report(fd) {
+            return None;
+        }
         // SAFETY: read into the still-unfilled tail of a valid local buffer.
         let read = unsafe {
             libc::read(
@@ -262,6 +225,28 @@ fn read_frame(fd: c_int) -> Option<[u8; 5]> {
     Some(buffer)
 }
 
+fn wait_for_report(fd: c_int) -> bool {
+    let mut poll = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    loop {
+        if super::shutdown::terminate_requested() {
+            return false;
+        }
+        // SAFETY: poll points to one valid descriptor entry. The timeout also
+        // handles SIGTERM arriving just before the blocking call begins.
+        let result = unsafe { libc::poll(&mut poll, 1, 200) };
+        if result > 0 {
+            return true;
+        }
+        if result < 0 && io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+            return false;
+        }
+    }
+}
+
 fn write_frame(fd: c_int, bytes: &[u8]) -> io::Result<()> {
     let mut written = 0;
     while written < bytes.len() {
@@ -285,7 +270,7 @@ fn reap(pid: libc::pid_t) {
     loop {
         let mut status = 0;
         // SAFETY: waitpid on our own child with a valid status pointer.
-        let waited = unsafe { libc::waitpid(pid, &mut status, 0) };
+        let waited = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
         if waited == pid {
             return;
         }
@@ -296,48 +281,11 @@ fn reap(pid: libc::pid_t) {
             }
             return;
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{AUTHORIZED_TAG, LeaderReport};
-
-    #[test]
-    fn report_round_trips_through_the_wire_frame() {
-        for report in [
-            LeaderReport::AuthFailed,
-            LeaderReport::UserDenied,
-            LeaderReport::SessionLaunchFailed,
-            LeaderReport::SessionSuccess,
-            LeaderReport::SessionFailed(0),
-            LeaderReport::SessionFailed(37),
-            LeaderReport::SessionFailed(-1),
-            LeaderReport::SessionSignaled(9),
-            LeaderReport::Lost,
-        ] {
-            assert_eq!(LeaderReport::decode(report.encode()), report);
+        // An active session owns its PAM lifecycle outside the greeter cgroup.
+        // Let it outlive a stopped DM instead of waiting for desktop logout.
+        if super::shutdown::terminate_requested() {
+            return;
         }
-    }
-
-    #[test]
-    fn unknown_tag_decodes_as_lost() {
-        assert_eq!(LeaderReport::decode([99, 0, 0, 0, 0]), LeaderReport::Lost);
-    }
-
-    #[test]
-    fn no_final_report_shares_the_authorized_tag() {
-        // The phase-1 marker must never be a valid final report, or a parked
-        // child could be mistaken for a finished one.
-        for report in [
-            LeaderReport::AuthFailed,
-            LeaderReport::UserDenied,
-            LeaderReport::SessionLaunchFailed,
-            LeaderReport::SessionSuccess,
-            LeaderReport::SessionFailed(1),
-            LeaderReport::SessionSignaled(9),
-        ] {
-            assert_ne!(report.encode()[0], AUTHORIZED_TAG);
-        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
