@@ -75,13 +75,9 @@ fn denied_outcome(
     report: LeaderReport,
 ) -> LoginAttemptOutcome {
     let message = match report {
-        LeaderReport::AuthFailed => {
+        LeaderReport::AuthFailed | LeaderReport::UserDenied => {
             limiter.record_failure(&username);
             "Authentication failed"
-        }
-        LeaderReport::UserDenied => {
-            limiter.record_success(&username);
-            "User is not permitted to log in"
         }
         LeaderReport::SessionLaunchFailed => {
             limiter.record_success(&username);
