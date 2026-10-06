@@ -28,6 +28,46 @@ let
       ];
     }).config;
   stable = evaluate { };
+  stableWithOptions = evaluate {
+    dm = {
+      tty = "tty2";
+      seat = "seat1";
+      fixedSession = "niri-session";
+      sessionDirs = [ "/usr/share/wayland-sessions" ];
+      fallback.enable = false;
+      design = {
+        theme = "catppuccin";
+        borderStyle = "minimal";
+        background = "matrix";
+        titleMode = "hostname";
+        titleText = "Greeter";
+      };
+    };
+    lock = {
+      enable = true;
+      primaryOutput = "DP-1";
+      secondaryOutput = "off";
+      size = 2;
+      design = {
+        theme = "nord";
+        titleMode = "preset-logo";
+        titlePreset = "nixos";
+        wallpaper = "/etc/rsdm-wallpaper.png";
+        wallpaperDim = 4;
+        backgroundOpacity = 7;
+      };
+    };
+    logging.file = "/var/log/rsdm/rsdm.log";
+    extraConfig = {
+      security.allowed_groups = [ "users" ];
+      session_manager.extra_env = [ "XCURSOR_THEME" ];
+    };
+  };
+  rsdmAssertionsHold = cfg:
+    builtins.all (entry: entry.assertion) (builtins.filter (entry:
+      nixpkgs.lib.hasPrefix "services.rsdm" entry.message
+      || nixpkgs.lib.hasPrefix "RSDM" entry.message
+    ) cfg.assertions);
   incompatibleStable = evaluate {
     dm.design.borderStyle = "none";
     lock.design.borderStyle = "none";
@@ -48,12 +88,13 @@ let
 in
 assert stable.services.rsdm.channel == "stable";
 assert stable.services.rsdm.package == self.packages.${system}.rsdm-stable;
-assert builtins.all (entry: entry.assertion) stable.assertions;
+assert rsdmAssertionsHold stable;
+assert rsdmAssertionsHold stableWithOptions;
 assert
-  builtins.all (entry: entry.assertion) incompatibleStable.assertions
+  rsdmAssertionsHold incompatibleStable
   == nixpkgs.lib.versionAtLeast stable.services.rsdm.package.version "2.0.0";
 assert
-  builtins.all (entry: entry.assertion) incompatibleExtraConfig.assertions
+  rsdmAssertionsHold incompatibleExtraConfig
   == nixpkgs.lib.versionAtLeast stable.services.rsdm.package.version "2.0.0";
 assert unstable.services.rsdm.package == self.packages.${system}.rsdm-unstable;
 assert !unstable.services.rsdm.package.allowSubstitutes;
@@ -70,4 +111,10 @@ assert !(idleOnly.systemd.services ? rsdm);
 assert idleOnly.systemd.defaultUnit == "multi-user.target";
 assert idleOnly.systemd.services."getty@tty1".enable;
 assert idleOnly.systemd.user.services ? rsdm-idle;
-pkgs.runCommand "rsdm-module-evaluation" { } "touch $out"
+pkgs.runCommand "rsdm-module-configuration" { } ''
+  ${stable.services.rsdm.package}/bin/rsdm \
+    --config ${stable.environment.etc."rsdm.toml".source} validate-config
+  ${stableWithOptions.services.rsdm.package}/bin/rsdm \
+    --config ${stableWithOptions.environment.etc."rsdm.toml".source} validate-config
+  touch "$out"
+''
