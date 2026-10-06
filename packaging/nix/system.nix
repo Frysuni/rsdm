@@ -11,11 +11,27 @@
   useGnomeKeyring,
   useKwallet,
 }:
+let
+  runtimeConfig = lib.recursiveUpdate (lib.recursiveUpdate baseConfig cfg.config) cfg.extraConfig;
+in
 lib.mkIf cfg.enable {
   assertions = [
     {
       assertion = !cfg.idle.enable || cfg.lock.enable || cfg.idle.lockCommand != [ ];
       message = "services.rsdm.idle.enable with the built-in locker requires services.rsdm.lock.enable";
+    }
+    {
+      assertion =
+        lib.versionAtLeast (cfg.package.version or "0") "2.0.0"
+        || builtins.all (component: runtimeConfig.${component}.design.border_style != "none") [
+          "dm"
+          "lock"
+        ];
+      message = ''
+        RSDM borderStyle = "none" requires a package version of at least 2.0.0.
+        Use channel = "unstable" or select a border supported by the stable package.
+        This also applies to border_style set through config or extraConfig.
+      '';
     }
   ];
 
@@ -42,9 +58,7 @@ lib.mkIf cfg.enable {
   # mkDefault so a host that drives the boot target itself can override it.
   systemd.defaultUnit = lib.mkIf cfg.dm.enable (lib.mkDefault "graphical.target");
 
-  environment.etc."rsdm.toml".source = toml.generate "rsdm.toml" (
-    lib.recursiveUpdate (lib.recursiveUpdate baseConfig cfg.config) cfg.extraConfig
-  );
+  environment.etc."rsdm.toml".source = toml.generate "rsdm.toml" runtimeConfig;
   environment.systemPackages = [ cfg.package ];
 
   services.logrotate.settings.rsdm = lib.mkIf (cfg.logging.file != null) {

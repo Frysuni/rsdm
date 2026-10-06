@@ -1,6 +1,7 @@
 # Complete rsdm configuration example.
 # NixOS installation channel is set with services.rsdm.channel in your flake,
 # not in this runtime configuration. See docs/installation/nixos.md.
+# The "none" border style requires RSDM 2.0.0 or later, including on NixOS.
 #
 # Default path: /etc/rsdm.toml. Override it with --config or RSDM_CONFIG.
 # Every field is optional: an omitted field uses the default shown in its

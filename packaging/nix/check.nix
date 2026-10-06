@@ -28,6 +28,13 @@ let
       ];
     }).config;
   stable = evaluate { };
+  incompatibleStable = evaluate {
+    dm.design.borderStyle = "none";
+    lock.design.borderStyle = "none";
+  };
+  incompatibleExtraConfig = evaluate {
+    extraConfig.lock.design.border_style = "none";
+  };
   unstable = evaluate {
     channel = "unstable";
     dm.design.borderStyle = "none";
@@ -41,6 +48,13 @@ let
 in
 assert stable.services.rsdm.channel == "stable";
 assert stable.services.rsdm.package == self.packages.${system}.rsdm-stable;
+assert builtins.all (entry: entry.assertion) stable.assertions;
+assert
+  builtins.all (entry: entry.assertion) incompatibleStable.assertions
+  == nixpkgs.lib.versionAtLeast stable.services.rsdm.package.version "2.0.0";
+assert
+  builtins.all (entry: entry.assertion) incompatibleExtraConfig.assertions
+  == nixpkgs.lib.versionAtLeast stable.services.rsdm.package.version "2.0.0";
 assert unstable.services.rsdm.package == self.packages.${system}.rsdm-unstable;
 assert !unstable.services.rsdm.package.allowSubstitutes;
 assert unstable.services.rsdm.dm.design.borderStyle == "none";

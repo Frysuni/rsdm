@@ -100,6 +100,11 @@ For direct package use, the flake exposes `rsdm-stable` and `rsdm-unstable`;
 `default` selects stable. `rsdm-prebuilt` and `rsdm-source` remain compatibility
 aliases. An explicit `services.rsdm.package` overrides the channel selection.
 
+The module rejects `dm.design.borderStyle = "none"` and
+`lock.design.borderStyle = "none"` when the selected package is older than 2.0.0,
+including values supplied through `config` or `extraConfig`. Use a supported
+border such as `classic`, or select the unstable channel for this style.
+
 ### Migrating from the GitHub Pages cache
 
 Remove `services.rsdm.binaryCache.enable` from your configuration; this option
