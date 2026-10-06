@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use rsdm_core::domain::{AppConfig, FallbackConfig, TtyConfig};
+use rsdm_core::domain::{AppConfig, FallbackConfig};
 use rsdm_infra::{
     config::{DEFAULT_CONFIG_PATH, load_config},
     unix::exec_fallback,
@@ -233,16 +233,7 @@ const fn enabled(value: bool) -> &'static str {
 }
 
 fn run_dm(path: &Path) -> Result<()> {
-    let config = match load_config(path) {
-        Ok(config) => config,
-        Err(error) => {
-            return fallback_or_error(
-                &FallbackConfig::default(),
-                &TtyConfig::default().path,
-                error.into(),
-            );
-        }
-    };
+    let config = load_config(path).context("loading DM configuration")?;
 
     info!(tty = %config.dm.tty.path, "starting dm runtime");
     let tty_path = config.dm.tty.path.clone();

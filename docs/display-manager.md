@@ -11,8 +11,8 @@ rsdm dm --config /etc/rsdm.toml
 
 ## How it runs
 
-1. Load and validate the config. If the config is unusable it hands the VT to
-   the fallback login instead of looping.
+1. Load and validate the config. If the config is unusable, exit with an error
+   without touching a VT or guessing the fallback policy.
 2. Resolve or discover the Wayland session (fixed or picker).
 3. Acquire the configured VT. A second rsdm is refused; a VT still owned by a
    live session (a restarted greeter while the compositor runs, a console
@@ -100,7 +100,7 @@ journalctl -u rsdm.service -b
 
 ## Fallback
 
-`[dm.fallback]` is the safety net. If the greeter cannot run (VT busy, no
+`[dm.fallback]` is the safety net. If the greeter cannot run (no
 sessions, broken PAM) or the user confirms "exit to console", rsdm execs the
 fallback login on the VT:
 
@@ -114,6 +114,10 @@ command = ["agetty", "--noclear", "tty1", "linux"]
 `login`, which is far more robust than exec'ing `login` directly. The TTY name
 must match `[dm.tty]`. rsdm will not run the fallback onto a VT that is already
 contended.
+
+Fallback requires a successfully loaded configuration. A missing, invalid, or
+incompatible config causes DM to exit; it never substitutes a default VT or
+enables fallback in place of the administrator's policy.
 
 ## Security
 
