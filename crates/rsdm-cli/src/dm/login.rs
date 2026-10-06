@@ -32,7 +32,7 @@ pub(super) fn begin(
 ) -> LoginAttemptOutcome {
     let LoginAttempt {
         username,
-        password,
+        mut password,
         session_id,
     } = attempt;
     let Some(session) = sessions.iter().find(|session| session.id == session_id) else {
@@ -52,8 +52,9 @@ pub(super) fn begin(
         "login submitted"
     );
     let launch = spawn_session_leader(|gate| {
-        child_login(config, wrapper, &username, &password, session, gate)
+        child_login(config, wrapper, &username, &mut password, session, gate)
     });
+    drop(password);
     match launch {
         LeaderLaunch::Ready(handle) => {
             limiter.record_success(&username);
@@ -135,7 +136,7 @@ fn child_login(
     config: &AppConfig,
     wrapper: &[String],
     username: &str,
-    password: &PasswordSecret,
+    password: &mut PasswordSecret,
     session: &Session,
     gate: &LeaderGate,
 ) -> LeaderReport {

@@ -7,7 +7,7 @@ use std::{
 use rsdm_core::ports::AuthError;
 use zeroize::Zeroizing;
 
-use super::conversation::PamConv;
+use super::conversation::{ConversationData, PamConv};
 
 pub const PAM_SUCCESS: c_int = 0;
 const PAM_ESTABLISH_CRED: c_int = 0x2;
@@ -44,7 +44,7 @@ pub struct PamHandle {
     raw: *mut PamHandleRaw,
     last_status: c_int,
     _conversation: Box<PamConv>,
-    _password: Zeroizing<Vec<u8>>,
+    conversation_data: Box<ConversationData>,
 }
 
 impl PamHandle {
@@ -55,8 +55,11 @@ impl PamHandle {
     ) -> Result<Self, AuthError> {
         let service = cstring("service", service)?;
         let user = cstring("user", user)?;
-        let password_ptr = password.as_ptr() as *mut _;
-        let conversation = Box::new(PamConv::new(password_ptr));
+        let mut conversation_data = Box::new(ConversationData {
+            password: Some(password),
+        });
+        let data_ptr = conversation_data.as_mut() as *mut ConversationData;
+        let conversation = Box::new(PamConv::new(data_ptr.cast()));
         let mut raw = ptr::null_mut();
 
         // SAFETY: service/user are valid for the duration of pam_start. The conversation
@@ -91,12 +94,18 @@ impl PamHandle {
             raw,
             last_status: status,
             _conversation: conversation,
-            _password: password,
+            conversation_data,
         })
     }
 
     pub fn authenticate(&mut self) -> Result<(), AuthError> {
         self.run(pam_authenticate, 0, AuthError::InvalidCredentials)
+    }
+
+    pub fn clear_password(&mut self) {
+        // Keep the callback context alive for close_session and pam_end, while
+        // rejecting any later secret prompt instead of retaining the password.
+        self.conversation_data.password.take();
     }
 
     pub fn account_mgmt(&mut self) -> Result<(), AuthError> {

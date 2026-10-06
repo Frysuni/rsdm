@@ -1,4 +1,5 @@
 use thiserror::Error;
+use zeroize::Zeroize;
 
 use crate::{
     domain::{PasswordSecret, Session, SessionExit},
@@ -22,12 +23,14 @@ pub struct LoginUseCase<'a> {
 
 impl LoginUseCase<'_> {
     pub fn execute(&self, request: LoginRequest<'_>) -> Result<LoginResult, LoginError> {
-        let mut authenticated = AuthenticateUser {
+        let authenticated = AuthenticateUser {
             auth: self.auth,
             limiter: self.limiter,
             audit: self.audit,
         }
-        .execute(request.auth_request())?;
+        .execute(request.auth_request());
+        request.password.zeroize();
+        let mut authenticated = authenticated?;
 
         let session_result = StartUserSession {
             resolver: self.resolver,
@@ -124,7 +127,7 @@ impl ReturnToGreeterAfterSessionExit {
 
 pub struct LoginRequest<'a> {
     pub username: &'a str,
-    pub password: &'a PasswordSecret,
+    pub password: &'a mut PasswordSecret,
     pub pam_service: &'a str,
     pub session: &'a Session,
     pub tty: &'a str,
@@ -135,7 +138,7 @@ pub struct LoginRequest<'a> {
 }
 
 impl<'a> LoginRequest<'a> {
-    fn auth_request(&self) -> AuthRequest<'a> {
+    fn auth_request(&self) -> AuthRequest<'_> {
         AuthRequest {
             username: self.username,
             password: self.password,

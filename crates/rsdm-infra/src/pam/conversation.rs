@@ -1,4 +1,5 @@
 use std::os::raw::{c_char, c_int, c_void};
+use zeroize::Zeroizing;
 
 use super::ffi::PAM_SUCCESS;
 
@@ -23,6 +24,10 @@ pub struct PamResponse {
 pub struct PamConv {
     conv: Option<ConversationFn>,
     appdata_ptr: *mut c_void,
+}
+
+pub struct ConversationData {
+    pub password: Option<Zeroizing<Vec<u8>>>,
 }
 
 impl PamConv {
@@ -57,7 +62,9 @@ pub unsafe extern "C" fn conversation(
         return 1;
     }
 
-    let password = appdata_ptr.cast::<c_char>();
+    // SAFETY: PamHandle owns this context for the entire PAM transaction.
+    let data = unsafe { &*appdata_ptr.cast::<ConversationData>() };
+    let password = data.password.as_ref().map(|password| password.as_ptr().cast());
     for index in 0..count {
         if !answer_message(index, msg, responses, password) {
             // SAFETY: responses was allocated by this function. Slots through
@@ -87,7 +94,7 @@ fn answer_message(
     index: usize,
     msg: *mut *const PamMessage,
     responses: *mut PamResponse,
-    password: *const c_char,
+    password: Option<*const c_char>,
 ) -> bool {
     // SAFETY: PAM passes count valid message pointers and we allocated count responses.
     let message = unsafe { *msg.add(index) };
@@ -99,6 +106,9 @@ fn answer_message(
     let response = unsafe { responses.add(index) };
 
     if style == PAM_PROMPT_ECHO_OFF {
+        let Some(password) = password else {
+            return false;
+        };
         // SAFETY: password points at a NUL-terminated buffer valid for the call.
         unsafe {
             (*response).resp = libc::strdup(password);

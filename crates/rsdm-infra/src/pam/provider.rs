@@ -37,6 +37,7 @@ impl CredentialVerifier for PamCredentialVerifier {
         let mut handle = PamHandle::start(request.pam_service, request.username, password)?;
         handle.authenticate()?;
         handle.account_mgmt()?;
+        handle.clear_password();
         tracing::debug!(
             username = request.username,
             "PAM credential verification succeeded"
@@ -82,6 +83,7 @@ impl AuthProvider for PamAuthProvider {
             return Err(error);
         }
         tracing::debug!(username = request.username, "PAM session opened");
+        handle.clear_password();
 
         let environment = handle.environment();
         if let Some(names) = keyring_env_names(&environment) {
