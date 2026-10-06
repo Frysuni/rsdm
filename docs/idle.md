@@ -5,6 +5,10 @@
 compositor decides when the seat is idle; rsdm does not capture global keyboard
 or pointer input.
 
+The monitor follows every seat advertised by this Wayland connection, including
+hotplugged seats, and starts locking only when all of them are idle. Activity on
+any connected seat prevents a different idle seat from locking the session.
+
 ```toml
 [idle]
 enable = true

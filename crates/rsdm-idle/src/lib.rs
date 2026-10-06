@@ -13,17 +13,14 @@ use std::{
 use anyhow::{Context, Result};
 use rsdm_core::domain::IdleConfig;
 use wayland_client::{
-    Connection, Dispatch, Proxy, QueueHandle, delegate_noop,
-    globals::{GlobalListContents, registry_queue_init},
-    protocol::{wl_registry, wl_seat},
+    Connection, Proxy,
+    globals::registry_queue_init,
 };
-use wayland_protocols::ext::idle_notify::v1::client::{
-    ext_idle_notification_v1::{self, ExtIdleNotificationV1},
-    ext_idle_notifier_v1::ExtIdleNotifierV1,
-};
+use wayland_protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
 
 mod hooks;
 mod readiness;
+mod seats;
 use hooks::run_hooks;
 
 static SCOPE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -32,6 +29,9 @@ struct IdleApp {
     config: IdleConfig,
     config_path: PathBuf,
     lock_active: Arc<AtomicBool>,
+    notifier: ExtIdleNotifierV1,
+    timeout_ms: u32,
+    seats: Vec<seats::SeatNotification>,
 }
 
 /// Monitor compositor-reported activity until the Wayland connection closes.
@@ -47,22 +47,14 @@ pub fn run(config: &IdleConfig, config_path: &Path) -> Result<()> {
     let (globals, mut queue) =
         registry_queue_init(&conn).context("initializing idle Wayland registry")?;
     let qh = queue.handle();
-    let seat: wl_seat::WlSeat = globals
-        .bind(&qh, 1..=9, ())
-        .context("compositor has no wl_seat for idle monitoring")?;
     let notifier: ExtIdleNotifierV1 = globals
         .bind(&qh, 1..=2, ())
         .context("compositor does not support ext-idle-notify-v1")?;
-    let _notification = if config.ignore_inhibitors && notifier.version() >= 2 {
-        notifier.get_input_idle_notification(timeout_ms, &seat, &qh, ())
-    } else {
-        if config.ignore_inhibitors {
-            tracing::warn!(
-                "compositor exposes ext-idle-notify-v1 version 1; idle inhibitors remain active"
-            );
-        }
-        notifier.get_idle_notification(timeout_ms, &seat, &qh, ())
-    };
+    if config.ignore_inhibitors && notifier.version() < 2 {
+        tracing::warn!(
+            "compositor exposes ext-idle-notify-v1 version 1; idle inhibitors remain active"
+        );
+    }
 
     tracing::info!(
         timeout_seconds = config.timeout,
@@ -73,30 +65,20 @@ pub fn run(config: &IdleConfig, config_path: &Path) -> Result<()> {
         config: config.clone(),
         config_path: config_path.to_path_buf(),
         lock_active: Arc::new(AtomicBool::new(false)),
+        notifier,
+        timeout_ms,
+        seats: Vec::new(),
     };
+    for global in globals.contents().clone_list() {
+        if global.interface == "wl_seat" {
+            app.add_seat(globals.registry(), global.name, global.version, &qh);
+        }
+    }
+    anyhow::ensure!(!app.seats.is_empty(), "compositor has no wl_seat for idle monitoring");
     loop {
         queue
             .blocking_dispatch(&mut app)
             .context("idle Wayland dispatch failed")?;
-    }
-}
-
-impl Dispatch<ExtIdleNotificationV1, ()> for IdleApp {
-    fn event(
-        state: &mut Self,
-        _proxy: &ExtIdleNotificationV1,
-        event: ext_idle_notification_v1::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-    ) {
-        match event {
-            ext_idle_notification_v1::Event::Idled => state.start_lock_cycle(),
-            ext_idle_notification_v1::Event::Resumed => {
-                tracing::debug!("user activity resumed; an active lock remains locked")
-            }
-            _ => {}
-        }
     }
 }
 
@@ -216,21 +198,6 @@ fn lock_command(argv: &[std::ffi::OsString]) -> (Command, Option<String>) {
         (command, None)
     }
 }
-
-impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for IdleApp {
-    fn event(
-        _state: &mut Self,
-        _proxy: &wl_registry::WlRegistry,
-        _event: wl_registry::Event,
-        _data: &GlobalListContents,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-    ) {
-    }
-}
-
-delegate_noop!(IdleApp: ignore wl_seat::WlSeat);
-delegate_noop!(IdleApp: ExtIdleNotifierV1);
 
 #[cfg(test)]
 mod tests {

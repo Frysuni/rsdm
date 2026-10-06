@@ -11,7 +11,7 @@ use smithay_client_toolkit::{
     delegate_session_lock, delegate_shm,
     output::{OutputHandler, OutputState},
     reexports::client::{
-        Connection, QueueHandle,
+        Connection, Proxy, QueueHandle,
         protocol::{wl_output, wl_seat, wl_surface},
     },
     registry::{ProvidesRegistryState, RegistryState},
@@ -36,11 +36,13 @@ impl SeatHandler for App {
         seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
-        if capability == Capability::Keyboard && self.keyboard.is_none() {
+        if capability == Capability::Keyboard
+            && !self.keyboards.iter().any(|(owner, _)| owner == &seat)
+        {
             match self.seat_state.get_keyboard(qh, &seat, None) {
                 Ok(keyboard) => {
                     tracing::debug!("keyboard acquired for lock screen");
-                    self.keyboard = Some(keyboard);
+                    self.keyboards.push((seat, keyboard));
                 }
                 Err(error) => tracing::error!(%error, "failed to acquire keyboard"),
             }
@@ -51,18 +53,30 @@ impl SeatHandler for App {
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: wl_seat::WlSeat,
+        seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
-        if capability == Capability::Keyboard
-            && let Some(keyboard) = self.keyboard.take()
-        {
-            tracing::debug!("keyboard removed from lock screen");
-            keyboard.release();
+        if capability == Capability::Keyboard {
+            self.release_seat_keyboard(&seat);
         }
     }
 
-    fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+    fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        self.release_seat_keyboard(&seat);
+    }
+}
+
+impl App {
+    fn release_seat_keyboard(&mut self, seat: &wl_seat::WlSeat) {
+        let Some(index) = self.keyboards.iter().position(|(owner, _)| owner == seat) else {
+            return;
+        };
+        let (_, keyboard) = self.keyboards.swap_remove(index);
+        tracing::debug!("keyboard removed from lock screen");
+        if keyboard.version() >= 3 {
+            keyboard.release();
+        }
+    }
 }
 
 impl OutputHandler for App {
