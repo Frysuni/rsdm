@@ -61,7 +61,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 43 | Verify downloadable Arch package artifacts | pending |
 | 44 | Narrow release token write permissions | fixed |
 | 45 | Pin third-party actions to immutable commits | pending |
-| 46 | Pass only required reusable-workflow secrets | pending |
+| 46 | Pass only required reusable-workflow secrets | fixed |
 | 47 | Pin AUR SSH host identity | pending |
 | 48 | Add Clippy to CI | policy exception |
 | 49 | Choose one deterministic automatic keyring | pending |
@@ -141,3 +141,6 @@ Record unexecuted runtime checks explicitly for later verification.
   and stable-channel metadata commits request contents:write; build and reusable
   AUR jobs retain read access. YAML parsing and permission checks passed locally;
   no workflow was dispatched.
+- 46: the AUR workflow receives only its declared SSH key and optional commit
+  author fields; secrets:inherit was removed. YAML parsing and caller/callee
+  secret-contract checks passed locally, without running or publishing anything.

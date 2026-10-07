@@ -158,4 +158,7 @@ jobs:
     uses: ./.github/workflows/aur.yml
     with:
       tag: ${{ github.event.inputs.tag || github.ref_name }}
-    secrets: inherit
+    secrets:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+      AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
