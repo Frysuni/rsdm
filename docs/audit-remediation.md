@@ -18,7 +18,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | --- | --- | --- |
 | 1 | One shutdown deadline across all teardown phases | pending |
 | 2 | Bound application lease acquisition | pending |
-| 3 | Release application leases before slow shutdown work | pending |
+| 3 | Release application leases before slow shutdown work | fixed |
 | 4 | Durable recovery record publication | fixed |
 | 5 | Symmetric record read/write size limits | fixed |
 | 6 | Reap lockers that never confirm readiness | pending |
@@ -96,3 +96,13 @@ order. Mark a row fixed only after its behavior has been checked.
 - 16: emit session-started only after the launcher returns a handle. Login tests
   verify its ordering and its absence when launch fails, while preserving PAM
   closure and shutdown-inhibitor lifetime on all existing error paths.
+- 3: leases cover record mutations only; invocation queries, quit requests, and
+  process waits run after releasing them. The 70 session-manager tests passed,
+  including concurrent lease acquisition during an app wait, single quit
+  ownership, and cancellation identity checks. The Nix lifecycle build was
+  interrupted when battery restrictions resumed; its VM test did not run.
+
+Battery restriction: do not build or run compilation-based test suites. Use
+Rust's syntax-only parse (`rustc -Z unpretty=normal --edition=2024`, output
+discarded) and `git diff --check` for changes made under this restriction.
+Record unexecuted runtime checks explicitly for later verification.

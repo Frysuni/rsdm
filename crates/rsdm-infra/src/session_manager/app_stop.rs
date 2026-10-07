@@ -89,8 +89,7 @@ pub(super) fn prepare_app(
     if !super::apps::pin_pending(manager, runtime, unit)? {
         return Ok(AppOutcome::Closed);
     }
-    let _lease = runtime.app_lease(unit)?;
-    let mut app = runtime.app(unit)?;
+    let app = runtime.app(unit)?;
     if app_processes(manager, &app)?.is_empty() {
         return Ok(AppOutcome::Closed);
     }
@@ -98,6 +97,21 @@ pub(super) fn prepare_app(
         return Ok(AppOutcome::Cancelled);
     }
 
+    let (app, claimed) = claim_preparation(runtime, unit, control)?;
+    let quit_unit = if claimed { request_quit(manager, runtime, &app, control)? } else { None };
+    let result = await_exit(manager, &app, app.deadline_usec.expect("prepared deadline"), control);
+    if let Some(unit) = quit_unit {
+        release_quit(manager, &unit);
+    }
+    if matches!(result, Ok(AppOutcome::Cancelled)) {
+        reset_preparation(runtime, &app)?;
+    }
+    result
+}
+
+fn claim_preparation(runtime: &Runtime, unit: &str, control: &ShutdownControl) -> Result<(AppRecord, bool), SessionError> {
+    let _lease = runtime.app_lease(unit)?;
+    let mut app = runtime.app(unit)?;
     let deadline = app.deadline_usec.get_or_insert(
         monotonic_usec()?.checked_add(app.policy.timeout_secs * 1_000_000)
             .ok_or_else(|| SessionError::State("shutdown deadline overflow".into()))?
@@ -106,26 +120,24 @@ pub(super) fn prepare_app(
     if hard != 0 {
         *deadline = (*deadline).min(hard);
     }
-    let deadline = *deadline;
-    let quit_unit = request_quit(manager, runtime, &mut app, control)?;
-    let result = await_exit(manager, &app, deadline, control);
-    if let Some(unit) = quit_unit {
-        release_quit(manager, &unit);
-    }
-    if matches!(result, Ok(AppOutcome::Cancelled)) {
+    let claimed = !app.quit_started;
+    app.quit_started = true;
+    runtime.save_app(&app)?;
+    Ok((app, claimed))
+}
+
+fn reset_preparation(runtime: &Runtime, prepared: &AppRecord) -> Result<(), SessionError> {
+    let _lease = runtime.app_lease(&prepared.unit)?;
+    let mut app = runtime.app(&prepared.unit)?;
+    if app.invocation_id == prepared.invocation_id && app.deadline_usec == prepared.deadline_usec {
         app.deadline_usec = None;
         app.quit_started = false;
         runtime.save_app(&app)?;
     }
-    result
+    Ok(())
 }
 
-fn request_quit(manager: &UserManager, runtime: &Runtime, app: &mut AppRecord, control: &ShutdownControl) -> Result<Option<String>, SessionError> {
-    if app.quit_started {
-        return Ok(None);
-    }
-    app.quit_started = true;
-    runtime.save_app(app)?;
+fn request_quit(manager: &UserManager, runtime: &Runtime, app: &AppRecord, control: &ShutdownControl) -> Result<Option<String>, SessionError> {
     if !app.policy.quit_command.is_empty() {
         return launch_quit(manager, app).map(Some);
     }
@@ -251,3 +263,7 @@ fn release_quit(manager: &UserManager, unit: &str) {
     }
     let _ = manager.unref(unit);
 }
+
+#[cfg(test)]
+#[path = "app_stop_tests.rs"]
+mod tests;

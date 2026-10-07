@@ -127,16 +127,18 @@ pub fn stop_hook(generation: &str, unit: &str) -> Result<(), SessionError> {
 }
 
 pub(super) fn pin_pending(manager: &UserManager, runtime: &Runtime, unit: &str) -> Result<bool, SessionError> {
-    let _lease = runtime.app_lease(unit)?;
-    let mut app = runtime.app(unit)?;
-    if !app.invocation_id.is_empty() {
+    if !runtime.app(unit)?.invocation_id.is_empty() {
         return Ok(true);
     }
     let Some(id) = super::processes::generation_invocation(manager, unit, &runtime.generation)? else {
         return Ok(false);
     };
-    app.invocation_id = id;
-    runtime.save_app(&app)?;
+    let _lease = runtime.app_lease(unit)?;
+    let mut app = runtime.app(unit)?;
+    if app.invocation_id.is_empty() {
+        app.invocation_id = id;
+        runtime.save_app(&app)?;
+    }
     Ok(true)
 }
 
