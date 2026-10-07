@@ -39,8 +39,10 @@ When `session_manager.enabled = true` the compositor is launched wrapped in
 `[dm] fixed_session`:
 
 - set it - always launch that session and hide the choice. The value is a
-  `.desktop` id (file stem), a session `Name`, or a literal command, e.g.
-  `niri-session`, `Hyprland`, `startplasma-wayland`.
+  `.desktop` id (file stem, preferred), a unique session `Name`/`Exec`, or a
+  literal command, e.g. `niri-session`, `Hyprland`, `startplasma-wayland`. Exact
+  IDs take precedence. If a name or command matches multiple entries, RSDM
+  rejects it and asks for an ID instead.
 - omit it - discover `.desktop` sessions under `[dm] session_dirs` and let the
   user pick.
 

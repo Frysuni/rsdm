@@ -66,7 +66,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 48 | Add Clippy to CI | policy exception |
 | 49 | Choose one deterministic automatic keyring | pending |
 | 50 | Follow Desktop Entry Exec parsing semantics | pending |
-| 51 | Reject ambiguous fixed-session display names | pending |
+| 51 | Reject ambiguous fixed-session display names | implemented; runtime checks pending |
 | 52 | Use logind power capabilities for lock UI | pending |
 | 53 | Validate ready timeout representability | implemented; runtime checks pending |
 | 54 | Document pidfd emergency unlock protection | implemented with 12; runtime checks pending |
@@ -154,3 +154,9 @@ Record unexecuted runtime checks explicitly for later verification.
   The launch-time guard remains. Existing config tests moved beside validation
   to keep the production file small; boundary and TOML-loading regressions were
   added. Rust syntax and sample TOML checks passed; runtime tests are pending.
+- 51: fixed-session selection prefers exact desktop IDs, then permits only a
+  unique Name/Exec match. Duplicate names, commands, and cross-field collisions
+  fail with an ID hint; unmatched literal commands retain their behavior.
+  Selection lives in the Greeter's session module. Regression tests cover order,
+  collisions, metadata preservation, and command fallback; syntax/TOML/diff
+  checks passed, with runtime execution pending under battery restrictions.

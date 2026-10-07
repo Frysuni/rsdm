@@ -8,17 +8,19 @@ use std::{
 use anyhow::{Context, Result, bail};
 use rsdm_core::{
     domain::{AppConfig, Session},
-    ports::{LoginUi, LoginUiEvent, LoginUiModel, SessionDiscoverer, UserStore},
+    ports::{LoginUi, LoginUiEvent, LoginUiModel, UserStore},
 };
 use rsdm_infra::{
     security::MemoryLoginAttemptLimiter,
-    sessions::DesktopSessionDiscoverer,
     storage::FileUserStore,
     unix::{VtGuard, acquire_vt, install_terminate_handler, terminate_flag, terminate_requested},
 };
 use rsdm_tui::RatatuiLoginUi;
 
 mod login;
+mod sessions;
+
+use sessions::resolve_sessions;
 
 pub fn run_dm(config: AppConfig, config_path: &Path) -> Result<()> {
     if !config.dm.enable {
@@ -169,25 +171,6 @@ fn session_wrapper(config: &AppConfig, config_path: &Path) -> Result<Vec<String>
         "start".to_string(),
         "--".to_string(),
     ])
-}
-
-fn resolve_sessions(config: &AppConfig) -> Result<Vec<Session>> {
-    let discovered = DesktopSessionDiscoverer::from_config(&config.dm)
-        .discover()
-        .context("discovering sessions")?;
-
-    if let Some(fixed) = config.dm.fixed_session.as_deref() {
-        let session = discovered
-            .iter()
-            .find(|session| session.id == fixed || session.exec == fixed || session.name == fixed)
-            .cloned()
-            .unwrap_or_else(|| Session::new(fixed, fixed, fixed, "<fixed>"));
-        return Ok(vec![session]);
-    }
-    if discovered.is_empty() {
-        bail!("no Wayland sessions discovered");
-    }
-    Ok(discovered)
 }
 
 fn remembered_username(config: &AppConfig, store: &FileUserStore) -> Option<String> {

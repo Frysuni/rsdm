@@ -19,9 +19,9 @@ pub struct DmConfig {
     pub tty: TtyConfig,
     /// When the greeter cannot run, hand the terminal to this login program.
     pub fallback: FallbackConfig,
-    /// A `.desktop` id, a session Name, or a literal command to always launch,
-    /// hiding the session picker. `None` shows the picker over discovered
-    /// sessions.
+    /// A `.desktop` id, a unique session Name/Exec, or a literal command to
+    /// always launch, hiding the picker. Exact ids take precedence; ambiguous
+    /// aliases are rejected. `None` shows the picker over discovered sessions.
     pub fixed_session: Option<String>,
     /// Directories scanned for `wayland-sessions` `.desktop` files when no fixed
     /// session is set.

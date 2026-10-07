@@ -43,10 +43,11 @@ falls back to its own default - never to the other front's value.
 
 ## Choosing a session (`[dm]`)
 
-Set `fixed_session` to a `.desktop` id, a session Name, or a literal command to
-always launch that one session and hide the picker (for example
-`fixed_session = "niri-session"`). Omit it to show the picker over the sessions
-discovered in `session_dirs`.
+Set `fixed_session` to a `.desktop` id, a unique session Name/Exec, or a literal
+command to always launch that one session and hide the picker (for example
+`fixed_session = "niri-session"`). Prefer the desktop-file ID: it takes
+precedence over names and commands. Ambiguous name/Exec matches are rejected.
+Omit it to show the picker over the sessions discovered in `session_dirs`.
 
 ## Lock outputs (`[lock]`)
 
