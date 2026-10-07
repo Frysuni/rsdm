@@ -20,6 +20,7 @@ impl Coordinator {
         let ready_deadline = Instant::now().checked_add(Duration::from_secs(cfg.ready_timeout_secs))
             .ok_or_else(|| SessionError::State("readiness timeout is too large".into()))?;
         let identity = SessionIdentity::discover()?;
+        let lease = super::session_lease::SessionLease::acquire()?;
         let (sender, requests) = mpsc::channel();
         // Acquire the one-session lease before changing shared manager state.
         let bus = control::serve(control::Endpoint { requests: sender, uid: identity.uid })?;
@@ -103,6 +104,7 @@ impl Coordinator {
             _power_monitor: power,
             notices,
             last_reap: Instant::now(),
+            _lease: lease,
         })
     }
 }

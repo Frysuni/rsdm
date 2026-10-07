@@ -61,6 +61,7 @@ pub(super) struct Coordinator {
     pub _power_monitor: ShutdownMonitor,
     pub notices: Receiver<ShutdownNotice>,
     pub last_reap: Instant,
+    pub _lease: super::session_lease::SessionLease,
 }
 
 pub(super) fn start(argv: &[String], cfg: &SessionManagerConfig, options: &StartOptions) -> Result<i32, SessionError> {

@@ -21,6 +21,7 @@ mod lifecycle;
 mod processes;
 mod provider;
 mod runtime;
+mod session_lease;
 mod session_process;
 mod signals;
 mod startup;

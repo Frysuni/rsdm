@@ -18,6 +18,7 @@ pub fn cleanup(generation: &str) -> Result<(), SessionError> {
     if !runtime.path.join("session.toml").try_exists()? && runtime.apps()?.is_empty() {
         return Ok(());
     }
+    let _lease = super::session_lease::SessionLease::acquire()?;
     let manager = UserManager::connect()?;
     acquire_lease(&manager)?;
     recover(&manager, &runtime)

@@ -61,6 +61,7 @@ impl Fixture {
             preparing: false, forced_units: Vec::new(), exit_code: 0, replies_pending: 0, workers: 0,
             xsmp, _control_bus: connection, ready_deadline: Instant::now(), display_since: None,
             _power_monitor: ShutdownMonitor::idle_for_test(), notices: received, last_reap: Instant::now(),
+            _lease: crate::session_manager::session_lease::SessionLease::acquire_in(&directory).unwrap(),
         };
         Self { coordinator, notices, _server: server.join().unwrap(), directory }
     }
