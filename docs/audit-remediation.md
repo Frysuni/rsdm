@@ -24,7 +24,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 6 | Reap lockers that never confirm readiness | pending |
 | 7 | Bound idle hooks | fixed |
 | 8 | Retain restoration state for removed niri outputs | implemented; compositor checks pending |
-| 9 | Move bounded niri IPC off the Wayland loop | pending |
+| 9 | Move bounded niri IPC off the Wayland loop | fixed |
 | 10 | Cancellable, bounded PAM helper processes | pending |
 | 11 | Remove complex post-PAM fork child work | pending |
 | 12 | Pin emergency unlock targets with pidfds | fixed |
@@ -443,3 +443,26 @@ verification separate from private-peer and unit-test evidence.
   408 tests; workspace/all-targets checking passed on Rust 1.88.0. No changed
   source file exceeds 300 lines or new function exceeds 50. Locker readiness
   recovery (6) remains a separate pending lifecycle issue.
+
+- 9: One output-power worker serializes niri commands outside Wayland handlers.
+  Requests coalesce into one latest topology and a retained restore request;
+  stale Off batches stop before their next command. A policy/primary change
+  restores completed or uncertain Off commands before applying new work.
+  Connector obligations survive output-global removal and failed On replies.
+  Each command uses the existing process-group timeout/reaper with a two-second
+  budget; each restoration pass shares five seconds. Unlock queues restoration
+  without waiting, and App teardown joins bounded cleanup before dropping its
+  lock surfaces. No new configuration field or dependency was added.
+  Seven regressions cover paused helpers, 1,000 coalesced updates, restoration
+  after removed globals/uncertain replies, failed restoration retries, shared
+  deadlines, missing executables, and a genuinely stopped child process.
+  `nix develop --command cargo test --workspace --locked --quiet` passed all
+  415 tests; the existing child-only fixture remains ignored in its parent run.
+  After the final cleanup-order adjustment, `cargo test -p rsdm-lock --locked
+  --quiet` passed all 30 tests inside `nix develop`. Workspace/all-targets and
+  final Lock/all-targets checks passed on Rust 1.88.0. No host compositor, output,
+  or service was touched. Finding 8 still needs a real two-output compositor
+  check; recovery after SIGKILL/crashes (35) is separate and remains open.
+  New source files stay below 300 lines and functions below 50. The existing
+  302-line Wayland orchestration module shrank by one line; its larger run
+  initializer remains necessary to assemble protocol state in one place.

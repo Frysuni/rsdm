@@ -1,5 +1,3 @@
-use std::process::Command;
-
 use rsdm_core::domain::SecondaryOutput;
 use smithay_client_toolkit::reexports::client::{Proxy, protocol::wl_output};
 
@@ -50,7 +48,7 @@ impl App {
             .unwrap_or_else(|| "<none>".to_string());
         tracing::info!(output = %name, "selected primary lock output");
         // A replacement primary may have been powered off as a secondary.
-        // Restore it before the caller reapplies the policy to the new topology.
+        // Serialize restoration ahead of the new topology in the output worker.
         self.restore_secondary_outputs();
         self.primary_output = selected;
     }
@@ -84,32 +82,18 @@ impl App {
             return;
         };
 
-        let outputs: Vec<_> = self.output_state.outputs().collect();
-        for output in outputs {
-            if output == primary {
-                continue;
-            }
-            let name = self.output_name(&output);
-            if self.powered_off_outputs.contains(&name) {
-                continue;
-            }
-            if niri_output_command(&name, "off") {
-                self.powered_off_outputs.push(name);
-            } else if !self.off_fallback_warned {
-                tracing::warn!(
-                    "secondary_output=off is unavailable; painting secondary outputs black"
-                );
-                self.off_fallback_warned = true;
-            }
+        let outputs = self.output_state.outputs()
+            .filter(|output| *output != primary)
+            .map(|output| self.output_name(&output))
+            .collect();
+        if let Some(worker) = &self.output_power {
+            worker.power_off(outputs);
         }
     }
 
     pub(super) fn restore_secondary_outputs(&mut self) {
-        for output in std::mem::take(&mut self.powered_off_outputs) {
-            if !niri_output_command(&output, "on") {
-                tracing::error!(%output, "failed to restore secondary output");
-                self.powered_off_outputs.push(output);
-            }
+        if let Some(worker) = &self.output_power {
+            worker.restore();
         }
     }
 
@@ -153,32 +137,13 @@ impl App {
 
 impl Drop for App {
     fn drop(&mut self) {
-        self.restore_secondary_outputs();
+        // Finish output cleanup before dropping the Wayland lock and surfaces.
+        self.output_power.take();
     }
 }
 
 fn positive_area((width, height): (i32, i32)) -> u64 {
     (width.max(0) as u64).saturating_mul(height.max(0) as u64)
-}
-
-fn niri_output_command(output: &str, action: &str) -> bool {
-    if std::env::var_os("NIRI_SOCKET").is_none() {
-        return false;
-    }
-    match Command::new("niri")
-        .args(["msg", "output", output, action])
-        .status()
-    {
-        Ok(status) if status.success() => true,
-        Ok(status) => {
-            tracing::warn!(%status, %output, %action, "niri output command failed");
-            false
-        }
-        Err(error) => {
-            tracing::warn!(%error, %output, %action, "could not run niri output command");
-            false
-        }
-    }
 }
 
 #[cfg(test)]

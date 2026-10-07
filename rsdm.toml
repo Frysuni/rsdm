@@ -96,7 +96,8 @@ enable = false # optional | bool | default: false | values: true, false
 pam_service = "rsdm-lock" # optional | string | default: "rsdm-lock" | values: PAM service names
 # Unset selects the connected output with the largest pixel area.
 # primary_output = "DP-1" # optional | string or unset | default: unset | values: Wayland output names
-# "off" currently powers outputs down through niri IPC and falls back to black.
+# "off" uses a background niri IPC worker (2s per command) and falls back to black.
+# Ordinary exit restores outputs within a shared 5s budget after any active command.
 secondary_output = "background" # optional | string | default: "background" | values: background, black, off
 # Unset uses the Greeter's actual console font at its native physical pixel size.
 # Explicit values multiply both font dimensions; remove old size overrides to match TTY.

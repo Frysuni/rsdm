@@ -67,6 +67,12 @@ black. `off` temporarily runs niri's supported `output off` IPC operation and
 restores the outputs with `output on` after unlock or an ordinary locker error.
 Restoration keeps track of connector names even if switching an output off
 removes its Wayland output object. On other compositors it falls back to black.
+Output IPC runs in one background worker so a hung helper does not block input,
+redraw, or authentication. Each command has a two-second deadline including
+termination and reaping; restoration commands share a five-second budget.
+Policy changes replace pending work and restore an in-flight `off` before
+applying the new topology. Ordinary process exit waits for bounded cleanup;
+SIGKILL or a locker crash still requires separate output recovery.
 Find niri names with `niri msg outputs`.
 
 Sleep and Hibernate shortcuts are offered only when logind's `CanSuspend` or

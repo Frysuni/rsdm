@@ -110,7 +110,8 @@ Locker (`lock`) runtime path:
    lock surface per active output
 3. Render a physical-pixel shm buffer per output. The primary receives the full
    interactive scene; secondary outputs receive background-only or black. niri
-   `off` outputs are disabled through IPC and restored by the locker guard
+   `off` outputs use one bounded IPC worker, which retains connector restoration
+   obligations even when the corresponding Wayland globals disappear
 4. Verify typed passwords through the `rsdm-lock` PAM service (auth only),
    rate limited
 5. On success send `unlock`, round-trip so the compositor acknowledges it, then
