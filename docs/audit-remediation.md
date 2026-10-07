@@ -589,3 +589,20 @@ verification separate from private-peer and unit-test evidence.
   `git diff --check` passed.
   No live user manager, service, or session is contacted. All changed Rust files
   remain below 300 lines and new functions below 50.
+
+- Helper-start follow-up: quit and logout cleanup now consumes the same typed
+  rejection evidence. A definitely rejected or unsubmitted start never issues
+  StopUnit/UnrefUnit against a conflicting helper name. Accepted starts whose
+  subsequent inspection fails retain the existing cleanup attempt. A replacement
+  peer's uncertain retained reference is not treated as permission to stop that
+  name; generation helper recovery remains open under finding 23.
+  Four private-peer regressions cover both helper callers, real UnitExists and
+  AccessDenied replies, and post-acceptance inspection errors. No command is
+  executed by the fixture and no live manager/session is contacted.
+  `nix develop --command cargo test -p rsdm-infra helper_ --locked --quiet` passed
+  all six matching tests; `nix develop --command cargo test --workspace --locked
+  --quiet` passed all 452 tests plus the existing child-only fixture ignored in
+  its parent run. Workspace/all-targets checking passed on Rust 1.88.0;
+  `git diff --check` passed. All changed Rust files remain below 300 lines and
+  all new functions below 50. The existing coordinator test constructor exceeds
+  50 lines because it assembles its isolated coordinator state; it was unchanged.

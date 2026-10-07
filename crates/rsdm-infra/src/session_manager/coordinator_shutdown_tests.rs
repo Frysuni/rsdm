@@ -202,3 +202,29 @@ mod replies;
 
 #[path = "coordinator_environment_tests.rs"]
 mod environment;
+
+#[test]
+fn a_rejected_logout_helper_never_stops_or_unrefs_a_conflicting_unit() {
+    use crate::session_manager::helper_start_fixture::{self, Mode};
+    let record = helper_start_fixture::record();
+    let provider = Provider { kind: ProviderKind::External, native_unit: None, logout_command: helper_start_fixture::command() };
+    for mode in [Mode::Collision, Mode::Denied] {
+        let fixture = helper_start_fixture::Fixture::new(format!("rsdm-logout-{GENERATION}.service"), mode);
+        assert!(matches!(run_logout_command(&fixture.manager, &record, &provider, Path::new("/")),
+            Err(SessionError::StartRejected { .. })));
+        assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.state.stops.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.state.unrefs.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[test]
+fn an_accepted_logout_helper_with_an_inspection_error_still_attempts_cleanup() {
+    use crate::session_manager::helper_start_fixture::{self, Mode};
+    let record = helper_start_fixture::record();
+    let provider = Provider { kind: ProviderKind::External, native_unit: None, logout_command: helper_start_fixture::command() };
+    let fixture = helper_start_fixture::Fixture::new(format!("rsdm-logout-{GENERATION}.service"), Mode::InspectionDenied);
+    assert!(run_logout_command(&fixture.manager, &record, &provider, Path::new("/")).is_err());
+    assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.state.unrefs.load(Ordering::SeqCst), 1);
+}

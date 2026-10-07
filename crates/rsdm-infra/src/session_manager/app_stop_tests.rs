@@ -141,3 +141,26 @@ fn cancellation_does_not_reset_a_replacement_invocation() {
     assert_eq!(saved.deadline_usec, replacement.deadline_usec);
     assert!(saved.quit_started);
 }
+
+#[test]
+fn a_rejected_quit_helper_never_stops_or_unrefs_a_conflicting_unit() {
+    use crate::session_manager::helper_start_fixture::{self, Mode};
+    let app = helper_start_fixture::app();
+    for mode in [Mode::Collision, Mode::Denied] {
+        let fixture = helper_start_fixture::Fixture::new(app.unit.replacen("app-rsdm-", "rsdm-quit-", 1), mode);
+        assert!(matches!(launch_quit(&fixture.manager, &app), Err(SessionError::StartRejected { .. })));
+        assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.state.stops.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.state.unrefs.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[test]
+fn an_accepted_quit_helper_with_an_inspection_error_still_attempts_cleanup() {
+    use crate::session_manager::helper_start_fixture::{self, Mode};
+    let app = helper_start_fixture::app();
+    let fixture = helper_start_fixture::Fixture::new(app.unit.replacen("app-rsdm-", "rsdm-quit-", 1), Mode::InspectionDenied);
+    assert!(launch_quit(&fixture.manager, &app).is_err());
+    assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.state.unrefs.load(Ordering::SeqCst), 1);
+}

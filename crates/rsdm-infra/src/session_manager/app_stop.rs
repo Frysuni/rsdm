@@ -255,7 +255,9 @@ fn launch_quit(manager: &UserManager, app: &AppRecord) -> Result<String, Session
         ("TimeoutStopUSec", Value::from(1_000_000_u64)),
     ]);
     if let Err(error) = manager.start_service(&unit, &properties) {
-        release_quit(manager, &unit);
+        if !matches!(error, SessionError::StartRejected { .. }) {
+            release_quit(manager, &unit);
+        }
         return Err(error);
     }
     Ok(unit)

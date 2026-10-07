@@ -32,6 +32,9 @@ mod unit_name;
 mod units;
 mod xsmp;
 
+#[cfg(test)]
+mod helper_start_fixture;
+
 use rsdm_core::domain::{SessionManagerConfig, ShutdownPolicy};
 use thiserror::Error;
 

@@ -215,8 +215,10 @@ fn run_logout_command(manager: &UserManager, record: &SessionRecord, provider: &
         if status != 0 { return Err(SessionError::State(format!("logout command failed with status {status}"))); }
         Ok(())
     })();
-    let _ = manager.stop(&unit, Duration::from_secs(3));
-    let _ = manager.unref(&unit);
+    if !matches!(result, Err(SessionError::StartRejected { .. })) {
+        let _ = manager.stop(&unit, Duration::from_secs(3));
+        let _ = manager.unref(&unit);
+    }
     result
 }
 
