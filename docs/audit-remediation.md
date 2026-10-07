@@ -327,3 +327,14 @@ verification separate from private-peer and unit-test evidence.
   interactive-request, lost-reply, hung setup/reply, and invalid-action checks.
   No host logind methods were called. Changed Rust files remain below 300 lines
   and functions below 50; actor responsiveness and VM timing remain pending.
+- Final local verification of these deadline changes:
+  `nix develop --command cargo test --workspace --locked --quiet` passed all
+  387 tests; the existing subprocess-only fixture is ignored in the parent
+  invocation. `cargo check --workspace --all-targets --locked` also passed under
+  the declared Rust 1.88.0 MSRV, using the installed 1.88.0 cargo/rustc inside
+  `nix develop`. This includes the Lock preview example and every test target.
+  The complete commit-range diff passes `git diff --check`. No changed Rust
+  file exceeds 300 lines, and no new function exceeds 50 lines; the existing
+  larger coordinator test fixture retains its explicit initialization.
+  The lifecycle VM remains unverified because its Nix cache download failed
+  DNS resolution. Findings 1, 26, and 56 stay open; no version bump or push.
