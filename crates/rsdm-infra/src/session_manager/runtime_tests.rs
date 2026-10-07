@@ -133,3 +133,15 @@ fn serialized_size_limit_applies_to_session_records_too() {
     assert!(!path.exists());
     assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
 }
+
+#[test]
+fn failed_publication_removes_its_temporary_file() {
+    let directory = Directory::new();
+    let runtime = Runtime::create_at(&directory.0, GENERATION).unwrap();
+    let record = app();
+    let path = runtime.app_path(&record.unit).unwrap();
+    fs::create_dir(&path).unwrap();
+    assert!(runtime.save_app(&record).is_err());
+    assert!(path.is_dir());
+    assert_eq!(fs::read_dir(runtime.path.join("apps")).unwrap().count(), 1);
+}

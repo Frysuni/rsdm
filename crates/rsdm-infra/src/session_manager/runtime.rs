@@ -55,7 +55,11 @@ impl Runtime {
         let path = session_path(base, generation)?;
         for directory in [base.join("rsdm"), base.join("rsdm/sessions"), path.clone(), path.join("apps")] {
             match fs::create_dir(&directory) {
-                Ok(()) => fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?,
+                Ok(()) => {
+                    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+                    sync_directory(&directory)?;
+                    sync_directory(directory.parent().expect("runtime directory has a parent"))?;
+                },
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {},
                 Err(error) => return Err(error.into()),
             }
@@ -187,15 +191,24 @@ fn write_record(path: &Path, record: &impl Serialize) -> Result<(), SessionError
     if encoded.len() > MAX_RECORD_BYTES {
         return Err(SessionError::State("session recovery record is too large".into()));
     }
+    let parent = path.parent().ok_or_else(|| SessionError::State("recovery record has no parent".into()))?;
     let temporary = path.with_extension(format!("{}.tmp", super::identity::new_generation()?));
     let result = (|| {
         let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600)
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC).open(&temporary)?;
         file.write_all(encoded.as_bytes())?;
-        fs::rename(&temporary, path)
+        file.sync_all()?;
+        fs::rename(&temporary, path)?;
+        sync_directory(parent)
     })();
     if result.is_err() { let _ = fs::remove_file(&temporary); }
     Ok(result?)
+}
+
+fn sync_directory(path: &Path) -> std::io::Result<()> {
+    OpenOptions::new().read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)?.sync_all()
 }
 
 fn read_record<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, SessionError> {

@@ -19,7 +19,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 1 | One shutdown deadline across all teardown phases | pending |
 | 2 | Bound application lease acquisition | pending |
 | 3 | Release application leases before slow shutdown work | pending |
-| 4 | Durable recovery record publication | pending |
+| 4 | Durable recovery record publication | fixed |
 | 5 | Symmetric record read/write size limits | fixed |
 | 6 | Reap lockers that never confirm readiness | pending |
 | 7 | Bound idle hooks | pending |
@@ -89,3 +89,7 @@ order. Mark a row fixed only after its behavior has been checked.
 - 5, 55: recovery writes reject serialized TOML over the same 1 MiB read limit
   before creating temporary files. Tests round-trip the exact boundary, preserve
   previous state after an oversized update, and reject oversized session state.
+- 4: synchronize the temporary record before rename and its directory afterward.
+  New generation directories also synchronize their directory entries. Record
+  tests cover replacement and cleanup after publication failure. File-system
+  durability barriers do not preserve `/run` across reboot or power loss.
