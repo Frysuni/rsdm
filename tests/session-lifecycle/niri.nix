@@ -4,7 +4,7 @@ let
   application = pkgs.writeShellScript "test-niri-application" ''
     set -eu
     trap 'systemctl --user is-active --quiet niri.service; test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"; touch "$XDG_RUNTIME_DIR/niri-app-saved"; exit 0' TERM
-    touch "$XDG_RUNTIME_DIR/niri-app-ready"
+    echo "$$" > "$XDG_RUNTIME_DIR/niri-app-ready"
     while :; do sleep 1; done
   '';
   stubborn = pkgs.writeShellScript "test-niri-stubborn" ''
@@ -39,6 +39,7 @@ pkgs.testers.runNixOSTest {
       animations { off; }
     '';
     environment.variables.LIBGL_ALWAYS_SOFTWARE = "1";
+    specialisation.updated.configuration.environment.etc."rsdm-switch-probe".text = "updated";
     programs.bash.loginShellInit = ''
       if [ "$(tty)" = /dev/tty1 ] && [ -z "''${RSDM_SESSION_GENERATION:-}" ]; then
         ${rsdm}/bin/rsdm session start -- ${pkgs.niri}/bin/niri-session > /tmp/rsdm-niri-coordinator.log 2>&1
@@ -72,6 +73,23 @@ pkgs.testers.runNixOSTest {
         machine.fail(session + "rsdm power poweroff")
         machine.fail("test -e /run/user/1000/niri-app-saved")
         machine.succeed(user + "systemctl --user is-active --quiet niri.service")
+
+    with subtest("reload, reexec and NixOS switch preserve native niri and applications"):
+        compositor_pid = machine.succeed(user + "systemctl --user show niri.service --property=MainPID --value").strip()
+        app_pid = machine.succeed("cat /run/user/1000/niri-app-ready").strip()
+        for operation in ["daemon-reload", "daemon-reexec", "daemon-reexec", "switch"]:
+            if operation == "switch":
+                machine.succeed("/run/current-system/specialisation/updated/bin/switch-to-configuration switch")
+                machine.succeed("test \"$(cat /etc/rsdm-switch-probe)\" = updated")
+            else:
+                machine.succeed(user + "systemctl --user " + operation)
+            machine.sleep(2)
+            machine.succeed(session + "rsdm session status | grep '^niri: running '")
+            assert machine.succeed(user + "systemctl --user show niri.service --property=MainPID --value").strip() == compositor_pid
+            machine.succeed("kill -0 " + app_pid)
+            machine.fail("test -e /run/user/1000/niri-app-saved")
+            machine.fail("test -e /tmp/rsdm-niri-exited")
+            machine.succeed(session + "niri msg version")
 
     with subtest("cancel preserves the native compositor and then apps save before native stop"):
         machine.succeed(session + "rsdm app --shutdown-timeout 1 --on-timeout cancel -- ${stubborn}")
