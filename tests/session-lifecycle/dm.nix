@@ -50,6 +50,9 @@ pkgs.testers.runNixOSTest {
     start_all()
     machine.wait_for_unit("rsdm.service")
     machine.wait_until_succeeds("journalctl --no-pager -u rsdm | grep 'display manager initialized'")
+    machine.wait_for_unit("multi-user.target")
+    machine.sleep(2)
+    machine.send_key("ctrl-alt-f1")
     machine.send_chars("alice")
     machine.send_key("tab")
     machine.send_chars("test-password")
@@ -69,6 +72,20 @@ pkgs.testers.runNixOSTest {
     compositor = machine.succeed(user + "systemctl --user list-units --plain --no-legend 'session-rsdm-*' | awk '{print $1}'").strip()
     compositor_pid = machine.succeed(user + "systemctl --user show --property=MainPID --value " + shlex.quote(compositor)).strip()
 
+    with subtest("user manager reload and reexec preserve the session and applications"):
+        machine.succeed(session + "rsdm app -- ${application}")
+        machine.wait_for_file("/run/user/1000/dm-app-ready")
+        dm_pid = machine.succeed("systemctl show rsdm --property=MainPID --value").strip()
+        for operation in ["daemon-reload", "daemon-reexec", "daemon-reexec"]:
+            machine.succeed(user + "systemctl --user " + operation)
+            machine.sleep(2)
+            machine.succeed(session + "rsdm session status | grep ': running '")
+            assert machine.succeed(user + "systemctl --user show --property=MainPID --value " + shlex.quote(compositor)).strip() == compositor_pid
+            assert machine.succeed("systemctl show rsdm --property=MainPID --value").strip() == dm_pid
+            machine.fail("test -e /tmp/dm-app-saved")
+            machine.succeed(session + "swaymsg -t get_outputs --raw | grep '\"active\": true'")
+        machine.fail("journalctl --no-pager -b | grep 'session coordinator failed'")
+
     with subtest("a service restart preserves the seated session and PAM owner"):
         machine.succeed("systemctl restart rsdm")
         machine.wait_for_unit("rsdm.service")
@@ -80,8 +97,6 @@ pkgs.testers.runNixOSTest {
         machine.succeed(session + "rsdm session status | grep ': running '")
 
     with subtest("logout saves applications before PAM closes and returns the Greeter"):
-        machine.succeed(session + "rsdm app -- ${application}")
-        machine.wait_for_file("/run/user/1000/dm-app-ready")
         machine.succeed(session + "rsdm session stop")
         machine.wait_for_file("/tmp/dm-app-saved")
         machine.wait_until_succeeds("journalctl --no-pager -b | grep 'session finished.*exit=Success'")

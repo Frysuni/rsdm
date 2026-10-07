@@ -68,8 +68,8 @@ impl Provider {
             return manager.active(unit);
         }
         match self.kind {
-            ProviderKind::Gnome => native_gnome_running(&manager.connection),
-            ProviderKind::Plasma => native_name_owned(&manager.connection, "org.kde.ksmserver"),
+            ProviderKind::Gnome => manager.read(|| native_gnome_running(&manager.connection)),
+            ProviderKind::Plasma => manager.read(|| native_name_owned(&manager.connection, "org.kde.ksmserver")),
             _ => manager.active(super::units::SESSION_TARGET),
         }
     }
@@ -116,19 +116,15 @@ fn detect_provider(argv: &[String], desktop: &str) -> ProviderKind {
     ProviderKind::Managed
 }
 
-fn native_gnome_running(connection: &zbus::Connection) -> Result<bool, SessionError> {
-    if !native_name_owned(connection, "org.gnome.SessionManager")? { return Ok(false); }
-    async_io::block_on(async {
-        let proxy = zbus::Proxy::new(connection, "org.gnome.SessionManager", "/org/gnome/SessionManager", "org.gnome.SessionManager").await?;
-        Ok(proxy.call("IsSessionRunning", &()).await?)
-    })
+async fn native_gnome_running(connection: &zbus::Connection) -> zbus::Result<bool> {
+    if !native_name_owned(connection, "org.gnome.SessionManager").await? { return Ok(false); }
+    let proxy = zbus::Proxy::new(connection, "org.gnome.SessionManager", "/org/gnome/SessionManager", "org.gnome.SessionManager").await?;
+    proxy.call("IsSessionRunning", &()).await
 }
 
-fn native_name_owned(connection: &zbus::Connection, name: &str) -> Result<bool, SessionError> {
-    async_io::block_on(async {
-        let proxy = zbus::Proxy::new(connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").await?;
-        Ok(proxy.call("NameHasOwner", &(name,)).await?)
-    })
+async fn native_name_owned(connection: &zbus::Connection, name: &str) -> zbus::Result<bool> {
+    let proxy = zbus::Proxy::new(connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").await?;
+    proxy.call("NameHasOwner", &(name,)).await
 }
 
 fn validate_native_unit(unit: &str) -> Result<(), SessionError> {

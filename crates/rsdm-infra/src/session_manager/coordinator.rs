@@ -89,7 +89,12 @@ impl Coordinator {
             if self.lifecycle.phase == SessionPhase::Closed {
                 break;
             }
-            self.observe()?;
+            match self.observe() {
+                Err(SessionError::Bus(error)) if super::bus::retryable_error(&error) => {
+                    tracing::warn!(%error, "deferring session observation while the user manager is unavailable");
+                }
+                other => other?,
+            }
             self.advance()?;
         }
         let deadline = Instant::now() + Duration::from_secs(2);

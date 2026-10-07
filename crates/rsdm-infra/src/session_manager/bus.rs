@@ -1,6 +1,6 @@
 //! Typed user-manager operations and completion of the exact systemd job.
 
-use std::time::Duration;
+use std::{future::Future, time::{Duration, Instant}};
 
 use futures_lite::{StreamExt, future};
 use zbus::{Connection, Proxy, zvariant::{OwnedObjectPath, OwnedValue, Value}};
@@ -91,10 +91,11 @@ impl UserManager {
         T: TryFrom<OwnedValue>,
         T::Error: Into<zbus::Error>,
     {
-        async_io::block_on(async {
+        self.read(|| async {
             let path: OwnedObjectPath = self.proxy().await?.call("GetUnit", &(unit,)).await?;
-            let proxy = Proxy::new(&self.connection, DESTINATION, path, interface).await?;
-            Ok(proxy.get_property(name).await?)
+            let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(&self.connection).destination(DESTINATION)?.path(path)?
+                .interface(interface)?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+            proxy.get_property(name).await
         })
     }
 
@@ -104,25 +105,33 @@ impl UserManager {
 
     #[cfg(feature = "xsmp")]
     pub fn unit_for_pid(&self, pid: u32) -> Result<String, SessionError> {
-        async_io::block_on(async {
+        self.read(|| async {
             let path: OwnedObjectPath = self.proxy().await?.call("GetUnitByPID", &(pid,)).await?;
             let unit = Proxy::new(&self.connection, DESTINATION, path, "org.freedesktop.systemd1.Unit").await?;
-            Ok(unit.get_property("Id").await?)
+            unit.get_property("Id").await
         })
     }
 
     pub fn processes(&self, unit: &str) -> Result<Vec<(String, u32, String)>, SessionError> {
-        async_io::block_on(async {
+        self.read(|| async {
             match self.proxy().await?.call("GetUnitProcesses", &(unit,)).await {
                 Ok(processes) => Ok(processes),
                 Err(error) if missing_unit(&error) => Ok(Vec::new()),
-                Err(error) => Err(error.into()),
+                Err(error) => Err(error),
             }
         })
     }
 
     pub fn environment(&self) -> Result<Vec<String>, SessionError> {
-        async_io::block_on(async { Ok(self.proxy().await?.get_property("Environment").await?) })
+        self.read(|| async { self.proxy().await?.get_property("Environment").await })
+    }
+
+    pub(super) fn read<T, F, Fut>(&self, query: F) -> Result<T, SessionError>
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = zbus::Result<T>>,
+    {
+        async_io::block_on(retry_read(query, Duration::from_secs(5))).map_err(Into::into)
     }
 
     pub fn set_environment(&self, values: &[String]) -> Result<(), SessionError> {
@@ -137,6 +146,53 @@ impl UserManager {
             self.proxy().await?.call::<_, _, ()>("UnsetEnvironment", &(names,)).await?;
             Ok(())
         })
+    }
+}
+
+// Only read operations may be replayed: a lost method reply does not undo a
+// start, stop, power request or reference-count change.
+async fn retry_read<T, F, Fut>(query: F, timeout: Duration) -> zbus::Result<T>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = zbus::Result<T>>,
+{
+    let deadline = Instant::now() + timeout;
+    let mut interrupted = false;
+    loop {
+        let result = future::or(query(), async {
+            async_io::Timer::at(deadline).await;
+            Err(zbus::fdo::Error::TimedOut("user manager read timed out".into()).into())
+        }).await;
+        match result {
+            Err(error) if retryable_error(&error) && Instant::now() < deadline => {
+                if !interrupted {
+                    tracing::warn!(%error, "user manager temporarily unavailable; retrying read");
+                    interrupted = true;
+                }
+            }
+            other => return other,
+        }
+        async_io::Timer::at((Instant::now() + Duration::from_millis(50)).min(deadline)).await;
+    }
+}
+
+pub(super) fn retryable_error(error: &zbus::Error) -> bool {
+    match error {
+        zbus::Error::MethodError(name, _, _) => matches!(name.as_str(),
+            "org.freedesktop.DBus.Error.NoReply" | "org.freedesktop.DBus.Error.Disconnected"
+            | "org.freedesktop.DBus.Error.ServiceUnknown" | "org.freedesktop.DBus.Error.NameHasNoOwner"
+            | "org.freedesktop.DBus.Error.Timeout" | "org.freedesktop.DBus.Error.TimedOut"
+            | "org.freedesktop.DBus.Error.UnknownObject"),
+        zbus::Error::FDO(error) => matches!(**error, zbus::fdo::Error::NoReply(_)
+            | zbus::fdo::Error::Disconnected(_) | zbus::fdo::Error::ServiceUnknown(_)
+            | zbus::fdo::Error::NameHasNoOwner(_) | zbus::fdo::Error::Timeout(_)
+            | zbus::fdo::Error::TimedOut(_) | zbus::fdo::Error::UnknownObject(_)),
+        zbus::Error::InputOutput(error) => matches!(error.kind(),
+            std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::NotConnected
+            | std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::TimedOut
+            | std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound),
+        _ => false,
     }
 }
 

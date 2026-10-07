@@ -91,3 +91,47 @@ fn job_wait_has_a_deadline_even_if_no_matching_signal_arrives() {
         assert!(error.to_string().contains("timed out"));
     });
 }
+
+#[test]
+fn transient_read_errors_are_retried_until_the_manager_returns() {
+    let attempts = std::sync::atomic::AtomicUsize::new(0);
+    let result = async_io::block_on(retry_read(|| async {
+        if attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 {
+            Err(zbus::fdo::Error::NoReply("Remote peer disconnected".into()).into())
+        } else {
+            Ok("active")
+        }
+    }, Duration::from_secs(1))).unwrap();
+    assert_eq!(result, "active");
+    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 3);
+}
+
+#[test]
+fn a_denied_read_is_not_retried() {
+    let attempts = std::sync::atomic::AtomicUsize::new(0);
+    let result: zbus::Result<()> = async_io::block_on(retry_read(|| async {
+        attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(zbus::fdo::Error::AccessDenied("denied".into()).into())
+    }, Duration::from_secs(1)));
+    assert!(result.is_err());
+    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[test]
+fn retry_deadline_also_bounds_a_read_that_never_replies() {
+    let before = Instant::now();
+    let result: zbus::Result<()> = async_io::block_on(retry_read(
+        || std::future::pending(), Duration::from_millis(30),
+    ));
+    assert!(result.is_err());
+    assert!(before.elapsed() < Duration::from_secs(1));
+}
+
+#[test]
+fn only_transport_and_reexecution_errors_are_retryable() {
+    assert!(retryable_error(&zbus::fdo::Error::NoReply("disconnected".into()).into()));
+    assert!(retryable_error(&zbus::fdo::Error::NameHasNoOwner("reexec".into()).into()));
+    assert!(!retryable_error(&zbus::fdo::Error::InvalidArgs("invalid".into()).into()));
+    assert!(!retryable_error(&zbus::fdo::Error::AccessDenied("denied".into()).into()));
+    assert!(!retryable_error(&zbus::Error::Failure("failed".into())));
+}
