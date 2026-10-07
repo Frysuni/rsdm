@@ -218,3 +218,40 @@ fn cancelled_session_and_power_requests_keep_failure_status_in_a_terminal() {
         assert!(tools.calls.lock().unwrap().contains(&format!("stop {GENERATION} {action}")));
     }
 }
+
+#[test]
+fn expired_stop_hook_and_recovery_budgets_skip_the_bus_handshake() {
+    let tools = SessionTools::new(false);
+    let session = tools.root.join("rsdm/sessions").join(GENERATION);
+    for path in [tools.root.join("rsdm"), tools.root.join("rsdm/sessions"), session.clone(), session.join("apps")] {
+        fs::create_dir(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    // SAFETY: geteuid has no preconditions.
+    let uid = unsafe { libc::geteuid() };
+    let record = session.join("session.toml");
+    let contents = format!("anchor_unit = 'rsdm-session-{GENERATION}.service'\n\
+        compositor_invocation = []\nprovider = 'managed'\nowns_targets = false\n\
+        phase = 'preparing'\nshutdown_deadline_usec = 1\n\
+        [identity]\ngeneration = '{GENERATION}'\nlogin_session_id = 'test'\nuid = {uid}\n");
+    fs::write(&record, &contents).unwrap();
+    fs::set_permissions(&record, fs::Permissions::from_mode(0o600)).unwrap();
+    let socket = tools.root.join("silent-bus");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = format!("unix:path={}", socket.display());
+    let unit = format!("app-rsdm-test@{GENERATION}-1.service");
+
+    for args in [
+        vec!["session", "app-stop", "--generation", GENERATION, "--unit", unit.as_str()],
+        vec!["session", "cleanup", "--generation", GENERATION],
+    ] {
+        let before = std::time::Instant::now();
+        let output = tools.command(&args).env("DBUS_SESSION_BUS_ADDRESS", &address).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("session shutdown deadline expired"), "{output:?}");
+        assert!(before.elapsed() < std::time::Duration::from_secs(1));
+        assert_eq!(listener.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        assert_eq!(fs::read_to_string(&record).unwrap(), contents);
+    }
+}

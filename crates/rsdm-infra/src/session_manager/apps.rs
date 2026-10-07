@@ -6,7 +6,7 @@ use rsdm_core::domain::{ShutdownMethod, ShutdownPolicy, TimeoutAction};
 use zbus::zvariant::Value;
 
 use super::{
-    SessionError, bus::UserManager, control::LaunchRequest, env::valid_environment_name,
+    SessionError, bus::UserManager, control::LaunchRequest, deadline::Deadline, env::valid_environment_name,
     identity::GENERATION_ENV, provider::Provider,
     runtime::{AppRecord, Runtime}, unit_name::app_unit_name, units::app_properties,
 };
@@ -116,12 +116,11 @@ pub(super) fn reset_preparation(runtime: &Runtime) -> Result<(), SessionError> {
 
 pub fn stop_hook(generation: &str, unit: &str) -> Result<(), SessionError> {
     let runtime = Runtime::open(generation)?.ok_or_else(|| SessionError::State("session recovery record is missing".into()))?;
-    let manager = UserManager::connect()?;
+    let deadline = Deadline::default();
+    if let Some(saved) = runtime.session()?.shutdown_deadline_usec { deadline.set(saved); }
+    let manager = UserManager::connect_until(deadline)?;
     let control = super::app_stop::ShutdownControl::for_manager(&manager);
     control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
-    if let Some(deadline) = runtime.session()?.shutdown_deadline_usec {
-        control.force(deadline);
-    }
     pin_pending(&manager, &runtime, unit)?;
     super::app_stop::prepare_app(&manager, &runtime, unit, &control)?;
     Ok(())

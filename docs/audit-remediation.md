@@ -308,3 +308,12 @@ verification separate from private-peer and unit-test evidence.
   `cache.nixos.org` could not be resolved. No lifecycle result is claimed;
   rerun after DNS/network access is restored. The working host session was
   untouched.
+- 1 (ExecStop setup): The app-stop helper reads the saved shutdown deadline
+  before constructing its user-manager connection, so a hung bus handshake
+  cannot consume a new independent setup budget after expiry. All 128 session
+  manager tests passed with `nix develop --command cargo test -p rsdm-infra
+  session_manager:: --locked`. The isolated CLI regression
+  `nix develop --command cargo test -p rsdm --test session_lifecycle
+  expired_stop_hook --locked` passed: both app-stop and recovery reject an
+  expired record without connecting to a silent private bus socket or changing
+  that record. Rust files remain below 300 lines and new functions below 50.
