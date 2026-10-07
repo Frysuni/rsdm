@@ -135,3 +135,7 @@ pub fn start_authentication(
         cancelled: false,
     })
 }
+
+#[cfg(test)]
+#[path = "auth_tests.rs"]
+mod tests;

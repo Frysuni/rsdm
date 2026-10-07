@@ -142,6 +142,27 @@ fn arrows_move_between_fields() {
 }
 
 #[test]
+fn enter_on_an_empty_password_starts_pam_authentication() {
+    let config = AppConfig::default();
+    let sessions = sessions();
+    let model = LoginUiModel {
+        config: &config,
+        sessions: &sessions,
+        remembered_username: Some("alice"),
+        remembered_session: None,
+        error_message: None,
+        terminate: &TERMINATE,
+    };
+    let mut form = FormState::new(&model);
+    let Some(FormEvent::Submit(attempt)) = press(&mut form, &model, KeyCode::Enter) else {
+        panic!("PAM must decide whether an empty initial password is acceptable");
+    };
+    assert_eq!(attempt.username, "alice");
+    assert_eq!(attempt.session_id, "niri");
+    assert!(attempt.password.expose_secret().is_empty());
+}
+
+#[test]
 fn enter_while_armed_cancels_and_is_swallowed() {
     let config = AppConfig::default();
     let sessions = sessions();

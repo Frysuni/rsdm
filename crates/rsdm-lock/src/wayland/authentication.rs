@@ -18,9 +18,6 @@ impl App {
             }
             return;
         }
-        if self.model.is_empty() {
-            return;
-        }
         let result = start_authentication(
             self.model.take_password(), self.ctx.username.clone(), self.ctx.pam_service.clone(),
             Arc::clone(&self.ctx.limiter),

@@ -59,7 +59,7 @@ impl FormState {
             self.field = Field::Username;
             return None;
         }
-        if self.password.is_empty() {
+        if self.password.is_empty() && self.field != Field::Password {
             self.field = Field::Password;
             return None;
         }

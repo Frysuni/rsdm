@@ -44,7 +44,8 @@ impl LockModel {
         self.password.zeroize();
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
         self.password.is_empty()
     }
 

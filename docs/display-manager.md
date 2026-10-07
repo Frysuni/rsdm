@@ -135,3 +135,8 @@ uses the system login PAM stack and its own rate limits.
 The greeter never checks passwords itself - PAM does. Password buffers are
 zeroized; the session child drops privileges (supplementary groups, setgid,
 setuid, chdir HOME) before exec. See [SECURITY.md](SECURITY.md).
+
+Press Enter in the password field to start authentication, even when it is
+empty. This lets a configured PAM stack request a fingerprint, security token
+or other credentials. PAM still decides whether authentication succeeds;
+submitting an empty field does not bypass account policy or rate limits.

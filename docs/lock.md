@@ -136,6 +136,10 @@ misconfigured you can still switch to another VT and log in. From that VT,
 verified emergency unlock from the live locker. This deliberately bypasses PAM
 and therefore always requires root authorization.
 
+Enter starts PAM authentication even with an empty password field, allowing
+configured fingerprint or token modules to run. PAM decides whether the attempt
+succeeds, and failed attempts remain rate limited.
+
 ## Preview without a compositor
 
 Render the locker look to a PNG (handy for tuning themes/wallpaper):
