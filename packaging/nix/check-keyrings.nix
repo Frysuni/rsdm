@@ -27,6 +27,8 @@ let
     in
     assert pam.enableGnomeKeyring == case.expectGnome;
     assert pam.kwallet.enable == case.expectKwallet;
+    assert nixpkgs.lib.hasInfix "pam_gnome_keyring.so" pam.text == case.expectGnome;
+    assert nixpkgs.lib.hasInfix "pam_kwallet" pam.text == case.expectKwallet;
     true;
   cases = [
     {

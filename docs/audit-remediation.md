@@ -64,7 +64,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 46 | Pass only required reusable-workflow secrets | fixed |
 | 47 | Pin AUR SSH host identity | fixed |
 | 48 | Add Clippy to CI | policy exception |
-| 49 | Choose one deterministic automatic keyring | implemented; module checks pending |
+| 49 | Choose one deterministic automatic keyring | fixed |
 | 50 | Follow Desktop Entry Exec parsing semantics | pending |
 | 51 | Reject ambiguous fixed-session display names | fixed |
 | 52 | Use logind power capabilities for lock UI | fixed |
@@ -115,8 +115,9 @@ verification separate from private-peer and unit-test evidence.
   and logind-capability regressions for findings 2, 12, 13, 17, 18, 19, 25, 36,
   37, 38, 40, 41, 51, 52, 53, and 54. The deadline foundation tests also pass;
   findings 1 and 26 remain open for the other teardown phases and VM evidence.
-  Finding 8 still needs compositor evidence; finding 49 needs generated-PAM
-  checks. No host services were restarted or power operations requested.
+  Finding 8 still needs compositor evidence. Generated-PAM verification for
+  finding 49 is recorded below. No host services were restarted or power
+  operations requested.
 
 - 2: application leases use nonblocking flock with a 250 ms retry budget for
   short record updates. Contention and successful short-wait regression tests
@@ -268,3 +269,9 @@ verification separate from private-peer and unit-test evidence.
   `nix develop --command cargo test -p rsdm-infra session_manager::session_process --locked`.
   Production/test files have 115/92 lines; no new function exceeds 50 lines.
   Recovery setup/draining and full teardown VM verification remain outstanding.
+- 49: `nix eval .#checks.x86_64-linux.module.drvPath` passed the module
+  assertions, including all ten keyring cases. The check now inspects generated
+  PAM text as well as option values: GNOME/KWallet modules are present exactly
+  when expected. A separately evaluated both-detected auto stack contains only
+  GNOME Keyring, before sufficient pam_unix authentication and during session
+  setup. No system configuration was activated.
