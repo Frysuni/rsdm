@@ -54,7 +54,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 36 | Harden remembered-state reads | fixed |
 | 37 | Harden privileged log file opens | fixed |
 | 38 | Avoid console font temporary-file collisions | fixed |
-| 39 | Reap closed generation lease files safely | pending |
+| 39 | Reap closed generation lease files safely | fixed |
 | 40 | Bound coordinator request backlog | fixed |
 | 41 | Bound launch request payloads | fixed |
 | 42 | Clarify/update Arch release package versions | pending |
@@ -606,6 +606,16 @@ verification separate from private-peer and unit-test evidence.
   `git diff --check` passed. All changed Rust files remain below 300 lines and
   all new functions below 50. The existing coordinator test constructor exceeds
   50 lines because it assembles its isolated coordinator state; it was unchanged.
+
+- 39: Closed-session cleanup now scans only per-app `.lock` files whose matching
+  record is gone. It opens each file with `O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK`,
+  validates owner/type/mode, and removes it only after acquiring a nonblocking
+  exclusive flock. A held inode is retained for its owner and retried during a
+  later closed-generation cleanup; no lock is unlinked while another operation
+  can still use it. Normal coordinator cleanup and recovery both run this pass
+  after application records are finished. Private runtime tests cover records
+  that still exist, stale lock removal, and a contended lock retained until its
+  holder exits. No host runtime directory is accessed.
 
 - 15: LoginAttemptLimiter now receives the directory resolver's canonical
   username before admission, so aliases that map to one account share a failure

@@ -65,6 +65,7 @@ pub(super) fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), Se
     if owns_environment {
         if let Err(error) = env::clear_owned(&manager, &record.exported_environment) { failure.get_or_insert(error); }
     }
+    if let Err(error) = runtime.reap_closed_app_locks() { failure.get_or_insert(error); }
     if let Some(error) = failure { return Err(error); }
     record.phase = rsdm_core::domain::SessionPhase::Closed;
     runtime.save_session(&record)

@@ -129,6 +129,20 @@ impl Runtime {
         Ok(())
     }
 
+    pub fn reap_closed_app_locks(&self) -> Result<usize, SessionError> {
+        let directory = self.path.join("apps");
+        let mut reaped = 0;
+        for entry in fs::read_dir(&directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else { continue; };
+            let Some(unit) = name.strip_suffix(".lock") else { continue; };
+            if directory.join(format!("{unit}.toml")).try_exists()? { continue; }
+            if super::app_record_lease::reap_closed(&path)? { reaped += 1; }
+        }
+        Ok(reaped)
+    }
+
     pub fn app_lease(&self, unit: &str) -> Result<File, SessionError> {
         self.app_lease_until(unit, &Deadline::default())
     }

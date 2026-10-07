@@ -192,6 +192,7 @@ fn finish(
     let _ = manager.unref(&record.anchor_unit);
     if let Err(error) = process.stop(manager, provider, &runtime.generation) { failure.get_or_insert(error); }
     if let Err(error) = env::clear_owned(manager, &record.exported_environment) { failure.get_or_insert(error); }
+    if let Err(error) = runtime.reap_closed_app_locks() { failure.get_or_insert(error); }
     match failure { Some(error) => Err(error), None => Ok(()) }
 }
 

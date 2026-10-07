@@ -24,6 +24,34 @@ pub(super) fn acquire(path: &Path, deadline: &Deadline) -> Result<File, SessionE
     Ok(file)
 }
 
+pub(super) fn reap_closed(path: &Path) -> Result<bool, SessionError> {
+    let file = match OpenOptions::new().read(true).write(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK).open(path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    let metadata = file.metadata()?;
+    // SAFETY: geteuid has no preconditions.
+    if !metadata.is_file() || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o077 != 0
+    {
+        return Err(SessionError::State("unsafe application shutdown lease".into()));
+    }
+    // SAFETY: LOCK_NB makes this probe nonblocking; a holder keeps the inode.
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::WouldBlock { return Ok(false); }
+        return Err(error.into());
+    }
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn lock_record(file: &File, shared: &Deadline) -> Result<(), SessionError> {
     let deadline = Instant::now() + Duration::from_millis(250);
     loop {

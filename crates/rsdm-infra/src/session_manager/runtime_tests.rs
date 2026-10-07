@@ -245,3 +245,34 @@ fn revoking_a_shutdown_deadline_allows_a_short_record_update_to_finish() {
     assert!(result.is_ok());
     assert_eq!(deadline.get(), 0);
 }
+
+#[test]
+fn closed_app_lock_is_reaped_only_after_its_record_is_gone() {
+    let directory = Directory::new();
+    let runtime = Runtime::create_at(&directory.0, GENERATION).unwrap();
+    let record = app();
+    runtime.save_app(&record).unwrap();
+    let lock_path = runtime.app_path(&record.unit).unwrap().with_extension("lock");
+    let lease = runtime.app_lease(&record.unit).unwrap();
+    assert_eq!(runtime.reap_closed_app_locks().unwrap(), 0);
+    assert!(lock_path.exists());
+    drop(lease);
+    runtime.remove_app(&record.unit).unwrap();
+    assert_eq!(runtime.reap_closed_app_locks().unwrap(), 1);
+    assert!(!lock_path.exists());
+}
+
+#[test]
+fn a_contended_closed_app_lock_is_retained_for_its_holder() {
+    let directory = Directory::new();
+    let runtime = Runtime::create_at(&directory.0, GENERATION).unwrap();
+    let record = app();
+    runtime.save_app(&record).unwrap();
+    let lease = runtime.app_lease(&record.unit).unwrap();
+    let lock_path = runtime.app_path(&record.unit).unwrap().with_extension("lock");
+    runtime.remove_app(&record.unit).unwrap();
+    assert_eq!(runtime.reap_closed_app_locks().unwrap(), 0);
+    assert!(lock_path.exists());
+    drop(lease);
+    assert_eq!(runtime.reap_closed_app_locks().unwrap(), 1);
+}
