@@ -317,3 +317,13 @@ verification separate from private-peer and unit-test evidence.
   expired_stop_hook --locked` passed: both app-stop and recovery reject an
   expired record without connecting to a silent private bus socket or changing
   that record. Rust files remain below 300 lines and new functions below 50.
+- 1 (logind request layer): Managed power authorization and the one-shot power
+  request use asynchronous operations inside the coordinator's shared deadline.
+  Revisions interrupt an already pending system-bus handshake or reply. Ordinary
+  callers retain their five-/sixty-second local limits, now covering connection
+  setup as well as method completion. No power mutation is retried.
+  `nix develop --command cargo test -p rsdm-infra power:: --locked` passed all
+  13 private-peer tests, including six new authorization, action routing,
+  interactive-request, lost-reply, hung setup/reply, and invalid-action checks.
+  No host logind methods were called. Changed Rust files remain below 300 lines
+  and functions below 50; actor responsiveness and VM timing remain pending.

@@ -56,7 +56,9 @@ impl Coordinator {
         self.workers += 1;
         thread::spawn(move || {
             let result = (|| {
-                if !native && matches!(action.as_str(), "poweroff" | "reboot") { crate::power::check(&action)?; }
+                if !native && matches!(action.as_str(), "poweroff" | "reboot") {
+                    async_io::block_on(manager.deadline.bound(crate::power::check_async(&action)))?;
+                }
                 app_stop::prepare_apps(&manager, &runtime, apps, control)
             })();
             let _ = events.send(Work::Prepared(result));
@@ -95,7 +97,11 @@ impl Coordinator {
             let action = self.action.clone();
             let events = self.events.clone();
             self.workers += 1;
-            thread::spawn(move || { let _ = events.send(Work::PowerRequested(crate::power::request_direct(&action))); });
+            let deadline = self.manager.deadline.clone();
+            thread::spawn(move || {
+                let result = async_io::block_on(deadline.bound(crate::power::request_direct_async(&action)));
+                let _ = events.send(Work::PowerRequested(result));
+            });
             return Ok(());
         }
         self.begin_finish()

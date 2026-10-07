@@ -66,22 +66,53 @@ async fn available(proxy: &Proxy<'_>, method: &str) -> bool {
 }
 
 pub fn check(action: &str) -> Result<(), SessionError> {
+    async_io::block_on(check_async(action))
+}
+
+pub(crate) async fn check_async(action: &str) -> Result<(), SessionError> {
+    let timeout = Duration::from_secs(5);
+    check_with(connection(timeout), action, timeout).await
+}
+
+async fn check_with(
+    connect: impl Future<Output = Result<Connection, SessionError>>, action: &str, timeout: Duration,
+) -> Result<(), SessionError> {
     let method = format!("Can{}", method(action)?);
-    async_io::block_on(async {
-        let connection = connection(Duration::from_secs(5)).await?;
+    within_timeout(async {
+        let connection = connect.await?;
         let result: String = proxy(&connection).await?.call(method.as_str(), &()).await?;
         if matches!(result.as_str(), "yes" | "challenge") { return Ok(()); }
         Err(SessionError::State(format!("logind does not allow {action}: {result}")))
-    })
+    }, timeout).await
 }
 
 pub fn request_direct(action: &str) -> Result<(), SessionError> {
+    async_io::block_on(request_direct_async(action))
+}
+
+pub(crate) async fn request_direct_async(action: &str) -> Result<(), SessionError> {
+    let timeout = Duration::from_secs(60);
+    request_with(connection(timeout), action, timeout).await
+}
+
+async fn request_with(
+    connect: impl Future<Output = Result<Connection, SessionError>>, action: &str, timeout: Duration,
+) -> Result<(), SessionError> {
     let method = method(action)?;
-    async_io::block_on(async {
-        let connection = connection(Duration::from_secs(60)).await?;
+    within_timeout(async {
+        let connection = connect.await?;
         proxy(&connection).await?.call::<_, _, ()>(method, &(true,)).await?;
         Ok(())
-    })
+    }, timeout).await
+}
+
+async fn within_timeout<T>(
+    operation: impl Future<Output = Result<T, SessionError>>, timeout: Duration,
+) -> Result<T, SessionError> {
+    future::or(operation, async {
+        async_io::Timer::after(timeout).await;
+        Err(zbus::Error::from(zbus::fdo::Error::TimedOut("logind request timed out".into())).into())
+    }).await
 }
 
 pub fn request(action: &str) -> Result<StopOutcome, SessionError> {
@@ -178,3 +209,7 @@ mod tests;
 #[cfg(test)]
 #[path = "power_capability_tests.rs"]
 mod capability_tests;
+
+#[cfg(test)]
+#[path = "power_request_tests.rs"]
+mod request_tests;

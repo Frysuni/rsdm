@@ -285,7 +285,10 @@ the updated configuration also starts the new coordinator.
 
 Managed reboot/poweroff checks logind authorization, prepares apps, then requests
 power as the user. Rejection keeps the compositor/services alive; closed apps
-cannot be restored. Native DE power delegates once to its manager. Suspend and
+cannot be restored. Authorization and the single power request share the
+coordinator's shutdown deadline, including system-bus setup and pending replies;
+a timeout does not replay the request. Native DE power delegates once to its
+manager. Suspend and
 hibernate do not prepare logout. Greeter power actions call logind directly.
 
 The coordinator holds a delay inhibitor and listens for `PrepareForShutdown`.
