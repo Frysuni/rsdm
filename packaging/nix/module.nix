@@ -12,16 +12,9 @@ let
   ttyName = lib.removePrefix "/dev/" cfg.dm.tty;
   ttyPath = if lib.hasPrefix "/dev/" cfg.dm.tty then cfg.dm.tty else "/dev/${cfg.dm.tty}";
 
-  # Decide which keyring rsdm's greeter PAM stack should drive, without any
-  # rsdm-specific or desktop-specific assumptions. "auto" mirrors the whole
-  # system: if the keyring is unlocked for ANY login path on this machine, rsdm
-  # unlocks it too. We therefore scan every PAM service for the keyring toggle
-  # (not just `login` - the user may drive it from greetd, sddm, a custom
-  # service, ...) and also honour the standalone gnome-keyring service. Explicit
-  # "gnome"/"kwallet"/"none" force the choice. A fully custom or non-standard
-  # keyring is handled by overriding security.pam.services.rsdm directly. We
-  # scan only the bool toggles, and we exclude rsdm's own services so computing
-  # rsdm's own toggle below cannot recurse back into this scan.
+  # Auto selects one PAM keyring: prefer detected GNOME Keyring, otherwise
+  # use detected KWallet. Explicit choices override detection. Exclude our own
+  # PAM services so deriving their toggles cannot recurse into this scan.
   scannablePamServices = lib.attrValues (
     removeAttrs config.security.pam.services [
       "rsdm"
@@ -44,7 +37,7 @@ let
     if cfg.keyring == "kwallet" then
       true
     else if cfg.keyring == "auto" then
-      anyServiceEnablesKwallet
+      (!useGnomeKeyring && anyServiceEnablesKwallet)
     else
       false;
   design = import ./design.nix { inherit lib; };

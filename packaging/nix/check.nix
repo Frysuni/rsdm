@@ -106,6 +106,7 @@ let
     package = pkgs.hello;
   };
 in
+assert import ./check-keyrings.nix { inherit self nixpkgs system; };
 assert stable.services.rsdm.channel == "stable";
 assert stable.services.rsdm.package == self.packages.${system}.rsdm-stable;
 assert rsdmAssertionsHold stable;

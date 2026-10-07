@@ -179,7 +179,7 @@ each look under its own `.design`.
 | `idle.ignoreInhibitors`               | consider input only, ignoring application inhibitors |
 | `idle.lockCommand`                    | optional alternate locker argv (`[]` = built-in)   |
 | `idle.onLock` / `idle.onUnlock`       | shell hooks around an idle-started lock             |
-| `keyring`                             | `auto` / `gnome` / `kwallet` / `none`              |
+| `keyring`                             | `auto` selects one detected keyring (GNOME before KWallet); `gnome` / `kwallet` / `none` override it |
 | `sessionManager`                      | wrap the compositor in the systemd `--user` session manager (bool) |
 | `disableGetty`                        | free the greeter VT from getty                     |
 | `displayManagerAlias`                 | alias the unit as `display-manager.service`        |

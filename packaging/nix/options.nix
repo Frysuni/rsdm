@@ -46,10 +46,10 @@
     description = ''
       Which keyring module the greeter PAM stack (`rsdm`) runs, so the keyring
       is unlocked by the same login that authenticates you - exactly as login,
-      gdm and sddm do it. "auto" mirrors the system: gnome-keyring when ANY PAM
-      service enables it (login, greetd, sddm, gdm, a custom service, ...) or
-      services.gnome.gnome-keyring.enable is set; kwallet when any PAM service
-      enables it. "gnome"/"kwallet" force one, "none" runs no keyring module.
+      gdm and sddm do it. "auto" chooses one: gnome-keyring when another PAM
+      service enables it or services.gnome.gnome-keyring.enable is set; otherwise
+      kwallet when another PAM service enables it. If both are detected, GNOME
+      Keyring takes precedence. "gnome"/"kwallet" force one, "none" disables both.
       For a fully custom or non-standard keyring, leave this at "none" and add
       your own module via security.pam.services.rsdm.rules (or .text).
     '';

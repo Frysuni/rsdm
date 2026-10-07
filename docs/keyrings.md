@@ -56,9 +56,10 @@ Set one option:
 services.rsdm.keyring = "auto";  # the default
 ```
 
-- `auto` mirrors the rest of your system: it turns on gnome-keyring if any other
-  login on the machine uses it (or `services.gnome.gnome-keyring.enable`), and
-  kwallet if any login uses it. In practice you set nothing.
+- `auto` selects one detected keyring: GNOME Keyring if another PAM service
+  enables it or `services.gnome.gnome-keyring.enable` is set; otherwise KWallet
+  if another PAM service enables it. If both are detected, GNOME Keyring takes
+  precedence. Set `keyring = "kwallet"` to choose KWallet on a mixed system.
 - `gnome` / `kwallet` force one.
 - `none` runs no keyring module.
 

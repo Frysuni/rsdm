@@ -64,7 +64,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 46 | Pass only required reusable-workflow secrets | fixed |
 | 47 | Pin AUR SSH host identity | pending |
 | 48 | Add Clippy to CI | policy exception |
-| 49 | Choose one deterministic automatic keyring | pending |
+| 49 | Choose one deterministic automatic keyring | implemented; module checks pending |
 | 50 | Follow Desktop Entry Exec parsing semantics | pending |
 | 51 | Reject ambiguous fixed-session display names | implemented; runtime checks pending |
 | 52 | Use logind power capabilities for lock UI | pending |
@@ -160,3 +160,9 @@ Record unexecuted runtime checks explicitly for later verification.
   Selection lives in the Greeter's session module. Regression tests cover order,
   collisions, metadata preservation, and command fallback; syntax/TOML/diff
   checks passed, with runtime execution pending under battery restrictions.
+- 49: NixOS auto keyring detection enables GNOME Keyring when detected,
+  otherwise KWallet; it cannot enable both by itself. Explicit gnome/kwallet/none
+  choices remain authoritative and RSDM's own PAM services remain excluded.
+  Module regressions cover neither, each, both, standalone GNOME, explicit
+  overrides, and a Lock PAM override. Nix syntax/TOML/diff checks passed;
+  full module evaluation and generated-PAM validation remain pending.

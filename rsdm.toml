@@ -40,6 +40,8 @@ cache_dir = "/var/cache/rsdm" # optional | string | default: "/var/cache/rsdm" |
 [dm]
 enable = true # optional | bool | default: true | values: true, false
 # PAM service means the matching /etc/pam.d/<name> stack, not a library path.
+# NixOS services.rsdm.keyring = "auto" selects detected GNOME Keyring before
+# KWallet; use an explicit keyring choice to override that precedence.
 pam_service = "rsdm" # optional | string | default: "rsdm" | values: PAM service names
 # Fixes one session and hides the picker. Leave unset to discover .desktop files.
 # fixed_session = "niri-session" # optional | string or unset | default: unset | values: desktop id (preferred), unique session name/Exec, literal command
