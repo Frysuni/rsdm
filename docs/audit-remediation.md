@@ -57,7 +57,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 39 | Reap closed generation lease files safely | fixed |
 | 40 | Bound coordinator request backlog | fixed |
 | 41 | Bound launch request payloads | fixed |
-| 42 | Clarify/update Arch release package versions | pending |
+| 42 | Clarify/update Arch release package versions | fixed |
 | 43 | Verify downloadable Arch package artifacts | pending |
 | 44 | Narrow release token write permissions | fixed |
 | 45 | Pin third-party actions to immutable commits | fixed |
