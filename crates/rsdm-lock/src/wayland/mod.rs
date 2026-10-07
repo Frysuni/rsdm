@@ -72,6 +72,21 @@ struct LockSurface {
     buffer: Option<Buffer>,
 }
 
+impl Drop for LockSurface {
+    fn drop(&mut self) {
+        // Raw proxies need explicit destruction before SCTK drops the surface.
+        if let Some(scale) = self._fractional_scale.take() {
+            scale.destroy();
+        }
+        if let Some(viewport) = self.viewport.take() {
+            viewport.destroy();
+        }
+    }
+}
+
+#[cfg(test)]
+mod surface_tests;
+
 struct App {
     registry_state: RegistryState,
     output_state: OutputState,
