@@ -70,3 +70,19 @@ fn stop_completion_is_dispatched_before_the_coordinator_can_exit() {
     assert!(matches!(requests.recv_timeout(Duration::from_secs(2)).unwrap(), Request::StopReplySent));
     assert_eq!(worker.join().unwrap().result, "completed");
 }
+
+#[test]
+fn oversized_payloads_do_not_reach_the_coordinator() {
+    // SAFETY: geteuid has no preconditions.
+    let (_server, connection, requests) = connect(unsafe { libc::geteuid() });
+    let mut request = launch();
+    request.argv.push("x".repeat(64 * 1024 + 1));
+    let error = proxy(&connection).unwrap().call::<_, _, String>("Launch", &(request,)).unwrap_err();
+    assert!(error.to_string().contains("InvalidArgs"));
+    assert!(requests.try_recv().is_err());
+
+    let environment = vec![("NAME".to_string(), "x".repeat(64 * 1024 + 1))];
+    let error = proxy(&connection).unwrap().call::<_, _, ()>("Finalize", &(launch().generation, environment)).unwrap_err();
+    assert!(error.to_string().contains("InvalidArgs"));
+    assert!(requests.try_recv().is_err());
+}

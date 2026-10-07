@@ -20,21 +20,24 @@ pub fn run_app(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, SessionE
     policy.validate().map_err(|error| SessionError::State(error.into()))?;
     if std::env::var_os(GENERATION_ENV).is_none() { return basic_launch(argv, policy); }
     let generation = generation()?;
-    let connection = zbus::blocking::connection::Builder::session()?.method_timeout(Duration::from_secs(25)).build()?;
     let request = LaunchRequest {
         generation, argv: argv.to_vec(), environment: env::command_environment(),
         directory: std::env::current_dir()?.to_string_lossy().into_owned(),
         timeout_secs: policy.timeout_secs, on_timeout: policy.on_timeout.to_string(),
         method: policy.method.to_string(), quit_command: policy.quit_command.clone(),
     };
+    control::validate_launch(&request).map_err(SessionError::State)?;
+    let connection = zbus::blocking::connection::Builder::session()?.method_timeout(Duration::from_secs(25)).build()?;
     let _: String = control::proxy(&connection)?.call("Launch", &(request,))?;
     Ok(0)
 }
 
 pub fn finalize(cfg: &SessionManagerConfig, names: &[String]) -> Result<(), SessionError> {
     let generation = generation()?;
+    let pairs = env::collect_present(&cfg.extra_env, names);
+    control::validate_finalize(&generation, &pairs).map_err(SessionError::State)?;
     let connection = zbus::blocking::connection::Builder::session()?.method_timeout(Duration::from_secs(25)).build()?;
-    control::proxy(&connection)?.call::<_, _, ()>("Finalize", &(generation, env::collect_present(&cfg.extra_env, names)))?;
+    control::proxy(&connection)?.call::<_, _, ()>("Finalize", &(generation, pairs))?;
     Ok(())
 }
 

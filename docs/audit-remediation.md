@@ -56,7 +56,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 38 | Avoid console font temporary-file collisions | implemented; runtime checks pending |
 | 39 | Reap closed generation lease files safely | pending |
 | 40 | Bound coordinator request backlog | pending |
-| 41 | Bound launch request payloads | pending |
+| 41 | Bound launch request payloads | implemented; runtime checks pending |
 | 42 | Clarify/update Arch release package versions | pending |
 | 43 | Verify downloadable Arch package artifacts | pending |
 | 44 | Narrow release token write permissions | fixed |
@@ -186,3 +186,9 @@ Record unexecuted runtime checks explicitly for later verification.
   replacement/permissions, and failed-rename cleanup in private directories.
   Existing codec tests are preserved. Syntax/diff checks passed; runtime checks
   remain pending, and `/run` snapshots remain intentionally volatile.
+- 41: control requests bound argument/environment counts, individual strings,
+  encoded quit-command size, and full D-Bus body size before queue admission.
+  Generation/action validity and NUL rejection cover the remaining public
+  methods too. CLI launch/finalize and app registration share the checks.
+  Boundary, encoding-overhead, Unicode/NUL, and private-peer rejection tests
+  were added; syntax/diff checks passed, with runtime execution pending.

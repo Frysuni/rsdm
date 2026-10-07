@@ -277,6 +277,15 @@ Recovery has a short app budget and root bounds its helper wait. Lock handles
 power requests asynchronously and retains opaque surfaces through rejection or
 cancellation; only authentication or privileged emergency unlock releases them.
 
+## Control request limits
+
+The user-bus API accepts at most 4096 application arguments, 1024 environment
+entries, and 64 KiB per string. Quit commands allow up to 256 arguments and
+64 KiB of encoded data. Each complete Launch/Finalize/XSMP request body is
+limited to 256 KiB, including D-Bus encoding overhead. Oversized or NUL-containing
+payloads are rejected before coordinator admission or recovery-record changes.
+The CLI checks launch/finalize payloads before sending them.
+
 ## Configuration and diagnostics
 
 No WM/DE tables or app profiles are needed in `rsdm.toml`:

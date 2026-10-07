@@ -14,6 +14,10 @@ pub(super) const OBJECT_PATH: &str = "/org/rsdm/Session1";
 mod connection;
 pub(super) use connection::Server as ControlServer;
 
+#[path = "control_payload.rs"]
+mod payload;
+pub(super) use payload::{validate_finalize, validate_launch};
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub(super) struct LaunchRequest {
     pub generation: String,
@@ -97,6 +101,7 @@ impl Endpoint {
         #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<String> {
         self.authorize(connection, &header).await?;
+        validate_launch(&request).map_err(zbus::fdo::Error::InvalidArgs)?;
         self.request(|reply| Request::Launch(request, reply)).await
     }
 
@@ -105,6 +110,7 @@ impl Endpoint {
         #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<()> {
         self.authorize(connection, &header).await?;
+        validate_finalize(&generation, &environment).map_err(zbus::fdo::Error::InvalidArgs)?;
         self.request(|reply| Request::Finalize { generation, environment, reply }).await
     }
 
@@ -113,6 +119,7 @@ impl Endpoint {
         #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<ResponseDispatchNotifier<StopOutcome>> {
         self.authorize(connection, &header).await?;
+        payload::validate_stop(&generation, &action).map_err(zbus::fdo::Error::InvalidArgs)?;
         let outcome = self.request(|reply| Request::Stop { generation, action, reply }).await?;
         let (response, sent) = ResponseDispatchNotifier::new(outcome);
         let requests = self.requests.clone();
@@ -128,6 +135,7 @@ impl Endpoint {
         #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<()> {
         self.authorize(connection, &header).await?;
+        payload::validate_generation(&generation).map_err(zbus::fdo::Error::InvalidArgs)?;
         self.request(|reply| Request::Cancel { generation, reply }).await
     }
 
@@ -143,6 +151,7 @@ impl Endpoint {
         #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<Vec<String>> {
         self.authorize(connection, &header).await?;
+        payload::validate_xsmp(&generation, &units).map_err(zbus::fdo::Error::InvalidArgs)?;
         self.request(|reply| Request::XsmpPrepare { generation, units, cancellable, reply }).await
     }
 }

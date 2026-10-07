@@ -14,6 +14,7 @@ use super::{
 pub(super) fn register(
     runtime: &Runtime, provider: &Provider, request: &LaunchRequest,
 ) -> Result<AppRecord, SessionError> {
+    super::control::validate_launch(request).map_err(SessionError::State)?;
     if request.generation != runtime.generation {
         return Err(SessionError::State("session generation mismatch".into()));
     }
