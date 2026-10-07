@@ -1694,6 +1694,7 @@ dependencies = [
  "anyhow",
  "clap",
  "libc",
+ "ratatui",
  "rsdm-core",
  "rsdm-idle",
  "rsdm-infra",

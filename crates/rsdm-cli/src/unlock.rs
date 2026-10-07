@@ -12,10 +12,10 @@ pub fn run(user: Option<&str>, resolved_uid: Option<u32>) -> Result<()> {
 
     let state =
         rsdm_infra::lock_control::request_emergency_unlock(target_uid, Duration::from_secs(5))?;
-    println!(
-        "emergency unlock acknowledged for uid {} (lock pid {})",
+    crate::output::notice("EMERGENCY UNLOCK ACKNOWLEDGED", format!(
+        "emergency unlock acknowledged for uid {} (lock pid {})\n",
         state.uid, state.pid
-    );
+    ), crate::output::SUCCESS).stdout()?;
     Ok(())
 }
 

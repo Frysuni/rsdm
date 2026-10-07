@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, IsTerminal as _},
+    io,
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -11,7 +11,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use rsdm_core::domain::{LoggingConfig, LoggingLevel};
 use rsdm_infra::config::load_config;
 use tracing_subscriber::{
-    EnvFilter, fmt::writer::BoxMakeWriter, layer::SubscriberExt, util::SubscriberInitExt,
+    EnvFilter, Layer, fmt::writer::BoxMakeWriter, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
 pub fn init(config_path: &Path) {
@@ -22,10 +22,15 @@ pub fn init(config_path: &Path) {
     let filter = logging_filter(&logging);
     let (log_file, destination) = open_log_destination(&logging);
 
+    let decorated = crate::output::stderr_is_decorated();
     let stderr_layer = tracing_subscriber::fmt::layer()
         .with_writer(BoxMakeWriter::new(io::stderr))
-        .with_ansi(io::stderr().is_terminal())
-        .with_target(true);
+        .with_ansi(decorated)
+        .with_target(true)
+        // CLI diagnostics already have a terminal report; retain their structured file/journal events.
+        .with_filter(tracing_subscriber::filter::filter_fn(move |metadata| {
+            !decorated || metadata.target() != "rsdm::cli"
+        }));
     let init_result = if let Some(file) = log_file {
         let file_layer = tracing_subscriber::fmt::layer()
             .with_writer(BoxMakeWriter::new(Mutex::new(file)))
@@ -45,7 +50,7 @@ pub fn init(config_path: &Path) {
     };
 
     if let Err(error) = init_result {
-        eprintln!("warning: failed to initialize logging: {error}");
+        let _ = crate::output::notice("LOGGING WARNING", format!("warning: failed to initialize logging: {error}\n"), crate::output::WARNING).stderr();
         return;
     }
 
@@ -70,7 +75,7 @@ fn logging_filter(logging: &LoggingConfig) -> EnvFilter {
         return EnvFilter::new(default_filter(logging.level));
     }
     EnvFilter::try_from_default_env().unwrap_or_else(|error| {
-        eprintln!("warning: invalid RUST_LOG; falling back to config level: {error}");
+        let _ = crate::output::notice("LOGGING WARNING", format!("warning: invalid RUST_LOG; falling back to config level: {error}\n"), crate::output::WARNING).stderr();
         EnvFilter::new(default_filter(logging.level))
     })
 }
@@ -96,10 +101,10 @@ fn open_log_destination(logging: &LoggingConfig) -> (Option<File>, String) {
     match open_log_file(&path) {
         Ok(file) => (Some(file), format!("journald + {}", path.display())),
         Err(error) => {
-            eprintln!(
-                "warning: failed to open log file {}; logging to the journal only: {error}",
+            let _ = crate::output::notice("LOGGING WARNING", format!(
+                "warning: failed to open log file {}; logging to the journal only: {error}\n",
                 path.display()
-            );
+            ), crate::output::WARNING).stderr();
             (None, journald)
         }
     }

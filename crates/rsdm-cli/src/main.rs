@@ -14,7 +14,9 @@ use tracing::{error, info};
 
 mod dm;
 mod logging;
+mod output;
 mod session;
+mod status;
 mod unlock;
 
 use session::SessionAction;
@@ -85,14 +87,17 @@ enum LogComponent {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => return output::usage(error),
+    };
     logging::init(&cli.config);
 
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            error!(error = %format!("{error:#}"), "command failed");
-            eprintln!("error: {error:#}");
+            error!(target: "rsdm::cli", error = %format!("{error:#}"), "command failed");
+            let _ = output::notice("COMMAND FAILED", format!("error: {error:#}\n"), output::ERROR).stderr();
             ExitCode::FAILURE
         }
     }
@@ -109,7 +114,7 @@ fn run(cli: Cli) -> Result<()> {
             lines,
             component,
         } => run_logs(follow, lines, component),
-        Command::Status => run_status(&cli.config),
+        Command::Status => status::run(&cli.config),
         Command::Session { action } => session::run(&cli.config, action),
         Command::App(options) => session::run_app(options),
         Command::Power { action } => session::power(action),
@@ -130,7 +135,7 @@ fn run_idle(path: &Path) -> Result<()> {
 fn validate_config(path: &Path) -> Result<()> {
     let config = load_config(path)?;
     print_config_warnings(&config);
-    println!("configuration is valid: {}", path.display());
+    output::notice("CONFIGURATION VALID", format!("configuration is valid: {}\n", path.display()), output::SUCCESS).stdout()?;
     Ok(())
 }
 
@@ -165,61 +170,6 @@ fn run_logs(follow: bool, lines: u32, component: LogComponent) -> Result<()> {
 
     use std::os::unix::process::CommandExt as _;
     Err(command.exec()).context("opening rsdm journal with journalctl")
-}
-
-fn run_status(path: &Path) -> Result<()> {
-    let config = load_config(path)?;
-    let uid = std::env::var("SUDO_UID")
-        .ok()
-        .and_then(|uid| uid.parse().ok())
-        .unwrap_or_else(rsdm_infra::lock_control::current_uid);
-    let lock = rsdm_infra::lock_control::lock_state(uid);
-
-    println!("config: {}", path.display());
-    println!("dm: {}", enabled(config.dm.enable));
-    println!("lock: {}", enabled(config.lock.enable));
-    println!(
-        "idle: {} (service: {}, timeout: {}s, inhibitors: {})",
-        enabled(config.idle.enable),
-        user_unit_state("rsdm-idle.service"),
-        config.idle.timeout,
-        if config.idle.ignore_inhibitors {
-            "ignored"
-        } else {
-            "honored"
-        }
-    );
-    match lock {
-        Ok(Some(state)) => println!("active lock: pid {} (uid {})", state.pid, state.uid),
-        Ok(None) => println!("active lock: none for uid {uid}"),
-        Err(error) => println!("active lock: invalid runtime state: {error}"),
-    }
-    println!(
-        "wayland: {}",
-        std::env::var("WAYLAND_DISPLAY")
-            .as_deref()
-            .unwrap_or("unavailable")
-    );
-    Ok(())
-}
-
-fn user_unit_state(unit: &str) -> String {
-    let output = ProcessCommand::new("systemctl")
-        .args(["--user", "is-active", unit])
-        .output();
-    let Ok(output) = output else {
-        return "unavailable".to_string();
-    };
-    let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if state.is_empty() {
-        "unknown".to_string()
-    } else {
-        state
-    }
-}
-
-const fn enabled(value: bool) -> &'static str {
-    if value { "enabled" } else { "disabled" }
 }
 
 fn run_dm(path: &Path) -> Result<()> {
@@ -278,10 +228,11 @@ fn fallback_or_error(
 fn print_config_warnings(config: &AppConfig) {
     for warning in config.validation_warnings() {
         tracing::warn!(
+            target: "rsdm::cli",
             field = warning.field,
             message = warning.message,
             "config warning"
         );
-        eprintln!("warning: {}: {}", warning.field, warning.message);
+        let _ = output::notice("CONFIGURATION WARNING", format!("warning: {}: {}\n", warning.field, warning.message), output::WARNING).stderr();
     }
 }

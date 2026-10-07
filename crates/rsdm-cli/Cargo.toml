@@ -17,6 +17,7 @@ xsmp = ["rsdm-infra/xsmp"]
 anyhow.workspace = true
 clap.workspace = true
 libc.workspace = true
+ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
 rsdm-core = { path = "../rsdm-core" }
 rsdm-idle = { path = "../rsdm-idle" }
 rsdm-infra = { path = "../rsdm-infra" }

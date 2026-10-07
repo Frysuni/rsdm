@@ -54,12 +54,13 @@ impl Session {
 
     fn status(&self) -> SessionStatus {
         SessionStatus { generation: GENERATION.into(), login_session_id: "test".into(), desktop_entry_id: "example".into(),
-            provider: "managed".into(), phase: "running".into(), xsmp_available: false, apps: Vec::new() }
+            provider: "managed".into(), phase: "running".into(), xsmp_available: false,
+            apps: vec![("example.service".into(), "term".into(), 30, "registered".into())] }
     }
 
     fn stop(&self, generation: &str, action: &str) -> StopOutcome {
         self.calls.lock().unwrap().push(format!("stop {generation} {action}"));
-        StopOutcome { result: "cancelled".into(), forced_units: Vec::new(), message: "application timed out".into() }
+        StopOutcome { result: "cancelled".into(), forced_units: vec!["earlier.service".into()], message: "application timed out".into() }
     }
 }
 
@@ -140,6 +141,7 @@ fn app_options_preserve_literal_arguments_and_parse_quit_argv_without_a_shell() 
     let output = tools.run(&["app", "--shutdown-timeout", "8", "--on-timeout", "cancel",
         "--quit-command", "examplectl \"quit now\"", "--", "example", "$HOME", "", "--on-timeout"]);
     assert!(output.status.success(), "{:?}", output);
+    assert!(output.stdout.is_empty(), "app launch must remain quiet outside a terminal");
     assert_eq!(*tools.calls.lock().unwrap(), ["launch [\"example\", \"$HOME\", \"\", \"--on-timeout\"] 8 cancel [\"examplectl\", \"quit now\"]"]);
 }
 
@@ -148,5 +150,17 @@ fn cancelled_logout_is_not_reported_as_success() {
     let tools = SessionTools::new(false);
     let output = tools.run(&["session", "stop"]);
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("cancelled"));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "cancelled: application timed out\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("forced shutdown: earlier.service"));
+    assert!(!output.stdout.contains(&0x1b) && !output.stderr.contains(&0x1b));
+}
+
+#[test]
+fn session_status_preserves_the_plain_application_list() {
+    let tools = SessionTools::new(false);
+    let output = tools.run(&["session", "status"]);
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), format!(
+        "managed: running (login test, desktop example, generation {GENERATION})\nRSDM XSMP: unavailable; auto uses the provider's shutdown method\nexample.service: registered, term, 30s\n"));
+    assert!(output.stderr.is_empty());
 }

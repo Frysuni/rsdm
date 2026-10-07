@@ -5,6 +5,8 @@ use clap::{Args, Subcommand};
 use rsdm_core::domain::{SessionMode, ShutdownMethod, ShutdownPolicy, TimeoutAction};
 use rsdm_infra::{config::load_config, session_manager, unix::split_exec};
 
+use crate::output;
+
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum PowerAction { Reboot, Poweroff }
 
@@ -15,6 +17,7 @@ pub fn power(action: PowerAction) -> Result<()> {
 
 #[derive(Debug, Subcommand)]
 pub enum SessionAction {
+    /// Start coordination around the original WM or desktop session command.
     Start {
         #[arg(long, default_value = "auto")]
         mode: SessionMode,
@@ -25,6 +28,7 @@ pub enum SessionAction {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         compositor: Vec<String>,
     },
+    /// Publish the compositor environment and activate the session when ready.
     Finalize { names: Vec<String> },
     /// Close registered applications before stopping the graphical session.
     Stop,
@@ -48,12 +52,16 @@ pub enum SessionAction {
 
 #[derive(Debug, Args)]
 pub struct AppOptions {
+    /// Seconds to wait for the app to exit after a quit request.
     #[arg(long, default_value_t = 30)]
     shutdown_timeout: u64,
+    /// Timeout policy: force termination or cancel preparation.
     #[arg(long, default_value = "force")]
     on_timeout: TimeoutAction,
+    /// Quit method: auto, term or xsmp.
     #[arg(long, default_value = "auto")]
     shutdown_method: ShutdownMethod,
+    /// Application quit command, parsed as arguments without a shell.
     #[arg(long)]
     quit_command: Option<String>,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
@@ -71,16 +79,19 @@ pub fn run(path: &Path, action: SessionAction) -> Result<()> {
         }
         SessionAction::Finalize { names } => {
             let config = load_config(path)?;
-            session_manager::finalize(&config.session_manager, &names).context("finalizing the graphical session")
+            session_manager::finalize(&config.session_manager, &names).context("finalizing the graphical session")?;
+            output::notice("ENVIRONMENT PUBLISHED", "Session environment published.\n", output::SUCCESS).interactive_stdout()?;
+            Ok(())
         }
         SessionAction::Stop => print_outcome(session_manager::stop("logout")?),
-        SessionAction::Cancel => session_manager::cancel().context("cancelling session preparation"),
+        SessionAction::Cancel => {
+            session_manager::cancel().context("cancelling session preparation")?;
+            output::notice("CANCELLATION REQUESTED", "Shutdown cancellation requested.\n", output::WARNING).interactive_stdout()?;
+            Ok(())
+        }
         SessionAction::Status => {
             let status = session_manager::status()?;
-            println!("{}: {} (login {}, desktop {}, generation {})", status.provider, status.phase,
-                status.login_session_id, status.desktop_entry_id, status.generation);
-            println!("RSDM XSMP: {}", if status.xsmp_available { "available" } else { "unavailable; auto uses the provider's shutdown method" });
-            for (unit, method, timeout, state) in status.apps { println!("{unit}: {state}, {method}, {timeout}s"); }
+            output::session_status(&status)?;
             Ok(())
         }
         SessionAction::AppStop { generation, unit } => session_manager::stop_hook(&generation, &unit).context("completing application shutdown"),
@@ -94,12 +105,17 @@ pub fn run_app(options: AppOptions) -> Result<()> {
         method: options.shutdown_method, quit_command: parse_command(options.quit_command)?,
     };
     let code = session_manager::run_app_with_policy(&options.argv, &policy).context("launching app")?;
+    if code == 0 {
+        output::application(&options.argv, &policy)?;
+    }
     std::process::exit(code);
 }
 
 pub fn print_outcome(outcome: session_manager::StopOutcome) -> Result<()> {
-    println!("{}: {}", outcome.result, outcome.message);
-    for unit in outcome.forced_units { eprintln!("forced shutdown: {unit}"); }
+    output::notice("SESSION REQUEST", format!("{}: {}\n", outcome.result, outcome.message), output::state_color(&outcome.result)).stdout()?;
+    for unit in outcome.forced_units {
+        output::notice("FORCED SHUTDOWN", format!("forced shutdown: {unit}\n"), output::WARNING).stderr()?;
+    }
     if matches!(outcome.result.as_str(), "failed" | "cancelled") { bail!("session shutdown {}", outcome.result); }
     Ok(())
 }
