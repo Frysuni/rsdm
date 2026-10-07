@@ -7,9 +7,22 @@ type Events = Rc<RefCell<Vec<&'static str>>>;
 
 struct Services {
     events: Events,
+    cleanup_errors: RefCell<Vec<String>>,
     start_fails: bool,
     wait_fails: bool,
+    cleanup_fails: bool,
     close_fails: bool,
+    exit: SessionExit,
+}
+
+impl Default for Services {
+    fn default() -> Self {
+        Self {
+            events: Events::default(), cleanup_errors: RefCell::default(),
+            start_fails: false, wait_fails: false, cleanup_fails: false, close_fails: false,
+            exit: SessionExit::Success,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -35,13 +48,19 @@ impl AuthProvider for Services {
     }
 }
 
-struct Running { events: Events, fails: bool }
+struct Running { events: Events, wait_fails: bool, cleanup_fails: bool, exit: SessionExit }
 
 impl RunningSession for Running {
     fn wait(&mut self) -> Result<SessionExit, SessionLaunchError> {
+        self.events.borrow_mut().push("wait");
+        if self.wait_fails { return Err(SessionLaunchError::Process("wait failed".into())); }
+        Ok(self.exit)
+    }
+
+    fn cleanup(&mut self) -> Result<(), SessionLaunchError> {
         self.events.borrow_mut().push("cleanup");
-        if self.fails { return Err(SessionLaunchError::Process("cleanup failed".into())); }
-        Ok(SessionExit::Success)
+        if self.cleanup_fails { return Err(SessionLaunchError::Process("cleanup failed".into())); }
+        Ok(())
     }
 }
 
@@ -53,7 +72,8 @@ impl SessionLauncher for Services {
     fn start(&self, _: SessionLaunchRequest<'_>) -> Result<Box<dyn RunningSession>, SessionLaunchError> {
         self.events.borrow_mut().push("launch");
         if self.start_fails { return Err(SessionLaunchError::Process("launch failed".into())); }
-        Ok(Box::new(Running { events: self.events.clone(), fails: self.wait_fails }))
+        Ok(Box::new(Running { events: self.events.clone(), wait_fails: self.wait_fails,
+            cleanup_fails: self.cleanup_fails, exit: self.exit }))
     }
 }
 
@@ -75,7 +95,18 @@ impl AuditLogger for Services {
     fn session_started(&self, _: &ResolvedUser, _: &Session) {
         self.events.borrow_mut().push("session-started");
     }
-    fn session_finished(&self, _: &ResolvedUser, _: &Session, _: SessionExit) {}
+    fn session_finished(&self, _: &ResolvedUser, _: &Session, exit: SessionExit) {
+        assert_eq!(exit, self.exit);
+        self.events.borrow_mut().push("session-finished");
+    }
+    fn session_cleanup_finished(&self, _: &ResolvedUser, _: &Session, error: Option<&str>) {
+        if let Some(error) = error {
+            self.cleanup_errors.borrow_mut().push(error.to_string());
+            self.events.borrow_mut().push("cleanup-failed");
+        } else {
+            self.events.borrow_mut().push("cleanup-finished");
+        }
+    }
 }
 
 fn execute(services: &Services) -> Result<LoginResult, LoginError> {
@@ -92,28 +123,69 @@ fn execute(services: &Services) -> Result<LoginResult, LoginError> {
 
 #[test]
 fn cleanup_and_pam_end_precede_the_shutdown_inhibitor_release() {
-    let services = Services { events: Events::default(), start_fails: false, wait_fails: false, close_fails: false };
+    let services = Services::default();
     assert_eq!(execute(&services).unwrap().exit, SessionExit::Success);
-    assert_eq!(*services.events.borrow(), ["launch", "session-started", "cleanup", "pam-close", "pam-drop", "inhibitor-release"]);
+    assert_eq!(*services.events.borrow(), [
+        "launch", "session-started", "wait", "session-finished", "cleanup",
+        "pam-close", "cleanup-finished", "pam-drop", "inhibitor-release",
+    ]);
 }
 
 #[test]
 fn cleanup_failure_still_closes_pam_before_releasing_the_inhibitor() {
-    let services = Services { events: Events::default(), start_fails: false, wait_fails: true, close_fails: false };
+    let services = Services { cleanup_fails: true, ..Services::default() };
     assert!(matches!(execute(&services), Err(LoginError::Session(_))));
-    assert_eq!(*services.events.borrow(), ["launch", "session-started", "cleanup", "pam-close", "pam-drop", "inhibitor-release"]);
+    assert_eq!(*services.events.borrow(), [
+        "launch", "session-started", "wait", "session-finished", "cleanup",
+        "pam-close", "cleanup-failed", "pam-drop", "inhibitor-release",
+    ]);
 }
 
 #[test]
 fn pam_failure_still_keeps_the_inhibitor_until_pam_is_dropped() {
-    let services = Services { events: Events::default(), start_fails: false, wait_fails: false, close_fails: true };
+    let services = Services { close_fails: true, ..Services::default() };
     assert!(matches!(execute(&services), Err(LoginError::Auth(_))));
-    assert_eq!(*services.events.borrow(), ["launch", "session-started", "cleanup", "pam-close", "pam-drop", "inhibitor-release"]);
+    assert_eq!(*services.events.borrow(), [
+        "launch", "session-started", "wait", "session-finished", "cleanup",
+        "pam-close", "cleanup-failed", "pam-drop", "inhibitor-release",
+    ]);
 }
 
 #[test]
 fn launch_failure_does_not_leave_an_open_pam_session() {
-    let services = Services { events: Events::default(), start_fails: true, wait_fails: false, close_fails: false };
+    let services = Services { start_fails: true, ..Services::default() };
     assert!(matches!(execute(&services), Err(LoginError::Session(_))));
     assert_eq!(*services.events.borrow(), ["launch", "pam-close", "pam-drop"]);
+}
+
+#[test]
+fn an_unknown_exit_is_not_reported_as_finished_but_cleanup_still_runs() {
+    let services = Services { wait_fails: true, ..Services::default() };
+    assert!(matches!(execute(&services), Err(LoginError::Session(_))));
+    assert_eq!(*services.events.borrow(), ["launch", "session-started", "wait", "cleanup",
+        "pam-close", "cleanup-finished", "pam-drop", "inhibitor-release"]);
+}
+
+#[test]
+fn failed_and_signaled_exits_are_audited_before_failed_recovery() {
+    for exit in [SessionExit::Failed(7), SessionExit::Signaled(9)] {
+        let services = Services { cleanup_fails: true, exit, ..Services::default() };
+        assert!(matches!(execute(&services), Err(LoginError::Session(_))));
+        assert_eq!(*services.events.borrow(), ["launch", "session-started", "wait", "session-finished",
+            "cleanup", "pam-close", "cleanup-failed", "pam-drop", "inhibitor-release"]);
+    }
+}
+
+#[test]
+fn combined_recovery_and_pam_errors_are_both_in_the_cleanup_audit() {
+    let services = Services { cleanup_fails: true, close_fails: true, ..Services::default() };
+    assert!(matches!(execute(&services), Err(LoginError::Session(_))));
+    let errors = services.cleanup_errors.borrow();
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].contains("cleanup failed"));
+    assert!(errors[0].contains("close failed"));
+    assert_eq!(*services.events.borrow(), [
+        "launch", "session-started", "wait", "session-finished", "cleanup",
+        "pam-close", "cleanup-failed", "pam-drop", "inhibitor-release",
+    ]);
 }

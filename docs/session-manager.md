@@ -304,6 +304,11 @@ extra_env = []
 ready_timeout_secs = 10
 ```
 
+The DM audit records `session finished` with the session child's exit status
+before recovery starts. `session cleanup completed` or `session cleanup failed`
+then reports recovery and PAM closure separately. The shutdown inhibitor remains
+held until PAM is closed/dropped on all these paths.
+
 `ready_timeout_secs` accepts zero or a positive number of seconds that fits a
 monotonic deadline on the host platform. Configuration validation rejects
 unrepresentable values before the session starts.

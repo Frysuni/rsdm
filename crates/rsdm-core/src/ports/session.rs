@@ -14,7 +14,10 @@ pub trait SessionLauncher {
 
 /// Owns the child and its shutdown guard through the subsequent PAM close.
 pub trait RunningSession {
+    /// Wait for the session child without running recovery or closing PAM.
     fn wait(&mut self) -> Result<SessionExit, SessionLaunchError>;
+    /// Recover generation-owned resources after the wait, even on a wait error.
+    fn cleanup(&mut self) -> Result<(), SessionLaunchError>;
 }
 
 /// Parks the login between "the user is authenticated and authorized" and "the

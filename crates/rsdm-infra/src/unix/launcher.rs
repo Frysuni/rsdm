@@ -122,11 +122,15 @@ impl RunningSession for UnixRunningSession {
     fn wait(&mut self) -> Result<SessionExit, SessionLaunchError> {
         let exit = wait_for_child(self.pid);
         self.reaped = true;
+        let _ = &self.shutdown_guard;
+        exit
+    }
+
+    fn cleanup(&mut self) -> Result<(), SessionLaunchError> {
         if let Some(generation) = &self.plan.generation {
             super::session_cleanup::cleanup(&self.plan.environment, self.plan.uid, self.plan.gid, generation)?;
         }
-        let _ = &self.shutdown_guard;
-        exit
+        Ok(())
     }
 }
 

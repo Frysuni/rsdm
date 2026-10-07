@@ -32,7 +32,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 14 | Honor PAM-requested authentication delay | pending |
 | 15 | Account throttling after PAM identity mapping | pending |
 | 16 | Audit successful starts after launch confirmation | fixed |
-| 17 | Audit termination separately from cleanup failure | pending |
+| 17 | Audit termination separately from cleanup failure | implemented; runtime checks pending |
 | 18 | Move control-bus maintenance off the actor | implemented; runtime checks pending |
 | 19 | Release transport mutex during async reconnect | implemented; runtime checks pending |
 | 20 | Scale reference restoration within bounded work | pending |
@@ -199,3 +199,9 @@ Record unexecuted runtime checks explicitly for later verification.
   excess calls fail with LimitsExceeded without blocking the endpoint executor.
   Tests cover overload, queue saturation, permit lifetime, slot reuse, and
   lifecycle reservations. Syntax/diff checks passed; runtime checks are pending.
+- 17: RunningSession separates child wait from recovery. Login audits a known
+  exit before recovery can fail or stall, then records recovery/PAM closure as a
+  separate cleanup outcome. Unknown waits do not fabricate a finished event;
+  failures still retain the shutdown inhibitor through PAM close/drop.
+  Ordering tests cover success, recovery/PAM failures, unknown wait, and failed
+  or signaled exits. Syntax/diff checks passed; runtime execution is pending.

@@ -32,4 +32,17 @@ impl AuditLogger for TracingAuditLogger {
             "session finished"
         );
     }
+
+    fn session_cleanup_finished(&self, user: &ResolvedUser, session: &Session, error: Option<&str>) {
+        match error {
+            Some(error) => tracing::error!(
+                username = %user.username, session = %session.id, error,
+                "session cleanup failed"
+            ),
+            None => tracing::info!(
+                username = %user.username, session = %session.id,
+                "session cleanup completed"
+            ),
+        }
+    }
 }

@@ -41,26 +41,53 @@ impl LoginUseCase<'_> {
         .execute(&authenticated, &request);
 
         let mut running = None;
+        let mut launched_user = None;
+        let mut cleanup_result = Ok(());
         let session_result = match started {
             Ok((mut handle, user)) => {
-                let result = handle.wait().map_err(LoginError::from);
-                if let Ok(exit) = result {
-                    self.audit.session_finished(&user, request.session, exit);
-                }
+                let (exit, cleanup) = self.wait_and_recover(handle.as_mut(), &user, request.session);
+                cleanup_result = cleanup;
+                launched_user = Some(user);
                 running = Some(handle);
-                result
+                exit
             }
             Err(error) => Err(error),
         };
         let close_result = ReturnToGreeterAfterSessionExit.execute(&mut authenticated);
+        self.audit_cleanup(launched_user.as_ref(), request.session, &cleanup_result, &close_result);
         // The shutdown inhibitor belongs to the running handle, including on
         // wait/cleanup errors. Release it only after PAM has closed.
         drop(authenticated);
         drop(running);
         let exit = session_result?;
+        cleanup_result?;
         close_result?;
 
         Ok(LoginResult { exit })
+    }
+
+    fn wait_and_recover(
+        &self, running: &mut dyn RunningSession, user: &ResolvedUser, session: &Session,
+    ) -> (Result<SessionExit, LoginError>, Result<(), LoginError>) {
+        let exit = running.wait().map_err(LoginError::from);
+        if let Ok(exit) = exit {
+            self.audit.session_finished(user, session, exit);
+        }
+        let cleanup = running.cleanup().map_err(LoginError::from);
+        (exit, cleanup)
+    }
+
+    fn audit_cleanup(
+        &self, user: Option<&ResolvedUser>, session: &Session,
+        recovery: &Result<(), LoginError>, pam: &Result<(), LoginError>,
+    ) {
+        let Some(user) = user else { return; };
+        let error = match (recovery, pam) {
+            (Err(recovery), Err(pam)) => Some(format!("{recovery}; {pam}")),
+            (Err(error), _) | (_, Err(error)) => Some(error.to_string()),
+            _ => None,
+        };
+        self.audit.session_cleanup_finished(user, session, error.as_deref());
     }
 }
 
