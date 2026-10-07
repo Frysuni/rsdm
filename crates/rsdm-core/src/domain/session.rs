@@ -4,6 +4,7 @@ pub struct Session {
     pub id: String,
     pub name: String,
     pub comment: Option<String>,
+    /// Command in launcher syntax, after Desktop Entry field expansion.
     pub exec: String,
     pub desktop_names: Vec<String>,
     pub source_path: String,

@@ -175,4 +175,15 @@ mod tests {
         assert_eq!(&argv_strings(&command)[..4], prefix.as_slice());
         assert!(!is_session_manager_command(&split_exec("rsdm app -- example session start").unwrap()));
     }
+
+    #[test]
+    fn expanded_desktop_arguments_survive_preparation_and_wrapping() {
+        let entry = crate::sessions::parse_desktop_entry(
+            "[Desktop Entry]\nName=Desktop %k\nIcon=icon %f\nExec=program %c %k %i \"\" %%\n",
+        ).unwrap();
+        let session = entry.to_session("desktop", "/entries/a \"quoted\" %c.desktop").unwrap();
+        let command = PreparedCommand::new_wrapped(&["wrapper".into()], &session.exec).unwrap();
+        assert_eq!(argv_strings(&command), ["wrapper", "program", "Desktop %k",
+            "/entries/a \"quoted\" %c.desktop", "--icon", "icon %f", "", "%"]);
+    }
 }

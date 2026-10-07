@@ -1,11 +1,14 @@
 use rsdm_core::domain::Session;
 use thiserror::Error;
 
+use super::{desktop_exec, desktop_locale::{LocalizedValue, current_locale}};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopEntry {
     pub name: Option<String>,
     pub comment: Option<String>,
     pub exec: Option<String>,
+    pub icon: Option<String>,
     pub desktop_names: Vec<String>,
     pub hidden: bool,
     pub no_display: bool,
@@ -19,15 +22,15 @@ impl DesktopEntry {
             return None;
         }
 
-        let name = self.name.as_ref()?.trim();
+        let name = self.name.as_deref()?;
         let exec = self.exec.as_ref()?.trim();
-        if name.is_empty() || exec.is_empty() {
+        if name.trim().is_empty() || exec.is_empty() {
             return None;
         }
-        let exec = clean_exec(exec);
-        if exec.is_empty() {
+        let Some(exec) = desktop_exec::command(exec, name, self.icon.as_deref(), source_path) else {
+            tracing::debug!(source = source_path, "invalid desktop session Exec; skipping");
             return None;
-        }
+        };
 
         Some(Session {
             id: id.to_string(),
@@ -74,35 +77,13 @@ pub fn parse_desktop_entry(input: &str) -> Result<DesktopEntry, DesktopEntryErro
         builder.set(raw_key.trim(), raw_value.trim(), index + 1)?;
     }
 
-    Ok(builder.finish())
-}
-
-fn clean_exec(value: &str) -> String {
-    let mut output = String::with_capacity(value.len());
-    let mut chars = value.chars();
-    while let Some(ch) = chars.next() {
-        if ch != '%' {
-            output.push(ch);
-            continue;
-        }
-
-        match chars.next() {
-            Some('%') => output.push('%'),
-            Some('f' | 'F' | 'u' | 'U' | 'i' | 'c' | 'k' | 'v' | 'm') => {}
-            Some(other) => {
-                output.push('%');
-                output.push(other);
-            }
-            None => output.push('%'),
-        }
-    }
-    output.trim().to_string()
+    Ok(builder.finish(current_locale().as_deref()))
 }
 
 #[derive(Debug, Default)]
 struct DesktopEntryBuilder {
-    name: Option<String>,
-    localized_name_fallback: Option<String>,
+    name: LocalizedValue,
+    icon: LocalizedValue,
     exec: Option<String>,
     comment: Option<String>,
     desktop_names: Vec<String>,
@@ -115,11 +96,10 @@ struct DesktopEntryBuilder {
 impl DesktopEntryBuilder {
     fn set(&mut self, key: &str, value: &str, line: usize) -> Result<(), DesktopEntryError> {
         match base_key(key) {
-            "Name" if key == "Name" => self.name = Some(unescape(value, line)?),
-            "Name" if self.localized_name_fallback.is_none() => {
-                self.localized_name_fallback = Some(unescape(value, line)?);
-            }
-            "Exec" => self.exec = Some(unescape(value, line)?),
+            "Name" => self.name.set(key, unescape(value, line)?),
+            "Icon" => self.icon.set(key, unescape(value, line)?),
+            "Exec" if key == "Exec" => self.exec = Some(desktop_exec::decode(value)
+                .ok_or(DesktopEntryError::InvalidExec { line })?),
             "Comment" if key == "Comment" => self.comment = Some(unescape(value, line)?),
             "TryExec" => self.try_exec = Some(unescape(value, line)?),
             "DesktopNames" => self.desktop_names = parse_list(value, line)?,
@@ -131,9 +111,10 @@ impl DesktopEntryBuilder {
         Ok(())
     }
 
-    fn finish(self) -> DesktopEntry {
+    fn finish(self, locale: Option<&str>) -> DesktopEntry {
         DesktopEntry {
-            name: self.name.or(self.localized_name_fallback),
+            name: self.name.resolve(locale),
+            icon: self.icon.resolve(locale),
             comment: self.comment,
             exec: self.exec,
             desktop_names: self.desktop_names,
@@ -223,6 +204,8 @@ pub enum DesktopEntryError {
     InvalidLine { line: usize },
     #[error("dangling escape in desktop entry line {line}")]
     DanglingEscape { line: usize },
+    #[error("invalid desktop Exec value in line {line}")]
+    InvalidExec { line: usize },
 }
 
 #[cfg(test)]
@@ -248,14 +231,12 @@ mod tests {
 
     #[test]
     fn strips_exec_field_codes() {
-        let text = "[Desktop Entry]\nName=X\nExec=foo %U --bar %f\nType=Application\n";
+        let text = "[Desktop Entry]\nName=X\nExec=foo %U --bar\nType=Application\n";
         let session = parse_desktop_entry(text)
             .unwrap()
             .to_session("x", "x")
             .unwrap();
-        // Field codes are removed; the residual whitespace is harmless because
-        // the argv splitter collapses runs of spaces when launching.
-        assert_eq!(session.exec, "foo  --bar");
+        assert_eq!(session.exec, "foo --bar");
     }
 
     #[test]
@@ -278,5 +259,20 @@ mod tests {
                 .to_session("x", "x")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn localized_name_and_icon_are_used_in_exec_expansion() {
+        let mut builder = DesktopEntryBuilder::default();
+        for (key, value) in [
+            ("Name", "Default"), ("Name[ru]", "Русский рабочий стол"), ("Name[de]", "Deutsch"),
+            ("Icon", "default-icon"), ("Icon[ru]", "русская иконка"), ("Exec", "program %c %i"),
+        ] {
+            builder.set(key, value, 1).unwrap();
+        }
+        let session = builder.finish(Some("ru_RU.UTF-8")).to_session("x", "x.desktop").unwrap();
+        assert_eq!(session.name, "Русский рабочий стол");
+        assert_eq!(crate::unix::split_exec(&session.exec).unwrap(),
+            ["program", "Русский рабочий стол", "--icon", "русская иконка"]);
     }
 }

@@ -65,7 +65,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 47 | Pin AUR SSH host identity | fixed |
 | 48 | Add Clippy to CI | policy exception |
 | 49 | Choose one deterministic automatic keyring | fixed |
-| 50 | Follow Desktop Entry Exec parsing semantics | pending |
+| 50 | Follow Desktop Entry Exec parsing semantics | fixed |
 | 51 | Reject ambiguous fixed-session display names | fixed |
 | 52 | Use logind power capabilities for lock UI | fixed |
 | 53 | Validate ready timeout representability | fixed |
@@ -606,3 +606,31 @@ verification separate from private-peer and unit-test evidence.
   `git diff --check` passed. All changed Rust files remain below 300 lines and
   all new functions below 50. The existing coordinator test constructor exceeds
   50 lines because it assembles its isolated coordinator state; it was unchanged.
+
+- 50: Session discovery decodes the desktop string escape layer, validates whole
+  double-quoted arguments, and expands Exec field codes after tokenization.
+  Unknown/malformed codes and invalid quoted or multi-argument placements are
+  rejected. File arguments are absent when starting a session; deprecated codes
+  disappear, and more than one file/URL code is invalid. The previous stripping
+  fixture contained two such codes; the accepted case now uses one and explicit
+  rejection regressions cover duplicates.
+  Name, source path, and optional Icon expand without splitting whitespace or
+  recursively expanding percent sequences. Name/Icon select locale variants in
+  the specified country/modifier/language order, with the required default.
+  Escaped Name whitespace remains intact. The resulting argv is encoded in the
+  existing launcher's command syntax; this final encoding is lossless transport,
+  not a second Desktop Entry interpretation. Literal configured commands retain
+  the existing launcher syntax. No new dependency or config option is needed.
+  Implementation follows the upstream [Exec rules](https://specifications.freedesktop.org/desktop-entry/latest/exec-variables.html),
+  [string escapes](https://specifications.freedesktop.org/desktop-entry/latest/value-types.html),
+  and [locale matching](https://specifications.freedesktop.org/desktop-entry/latest/localized-keys.html).
+  Seventeen new regressions cover both escape layers, every reserved character,
+  field replacements, localized metadata, malformed entries, lossless argument
+  encoding, discovery across invalid files, and actual PreparedCommand argv with
+  a session wrapper. Tests use private files or in-memory command preparation;
+  they never launch a desktop, contact a user manager, or modify host locale.
+  `nix develop --command cargo test --workspace --locked --quiet` passed all
+  469 tests plus the existing child-only fixture ignored in its parent run.
+  Workspace/all-targets checking passed on Rust 1.88.0; `git diff --check` passed.
+  All changed Rust files remain below 300 lines and all new functions below 50.
+  A real desktop launch is not claimed by these argument/discovery checks.

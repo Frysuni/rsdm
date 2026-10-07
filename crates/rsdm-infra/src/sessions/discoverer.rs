@@ -189,4 +189,19 @@ mod tests {
         assert_eq!(discoverer.discover().unwrap().len(), 1);
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn invalid_exec_entries_are_skipped_while_valid_metadata_expands() {
+        let root = env::temp_dir().join(format!("rsdm-session-exec with spaces-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("valid.desktop"), "[Desktop Entry]\nName=Example Desktop\nExec=program %k %c\n").unwrap();
+        fs::write(root.join("bad-field.desktop"), "[Desktop Entry]\nName=Bad\nExec=program %x\n").unwrap();
+        fs::write(root.join("bad-quote.desktop"), "[Desktop Entry]\nName=Bad\nExec=program 'shell quoting'\n").unwrap();
+        fs::write(root.join("bad-escape.desktop"), "[Desktop Entry]\nName=Bad\nExec=program \\q\n").unwrap();
+        let sessions = DesktopSessionDiscoverer::new([root.clone()]).discover().unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(sessions.len(), 1);
+        let source = root.join("valid.desktop").to_string_lossy().into_owned();
+        assert_eq!(crate::unix::split_exec(&sessions[0].exec).unwrap(), ["program", &source, "Example Desktop"]);
+    }
 }
