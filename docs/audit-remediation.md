@@ -382,3 +382,14 @@ verification separate from private-peer and unit-test evidence.
   Root's separate 90-second cap still needs to follow a trusted shutdown budget;
   root must never read a user-owned recovery record to obtain it. Finding 26
   stays open. Changed Rust files stay below 300 lines and functions below 50.
+- 1 (notification timing): Logind notices carry the absolute monotonic deadline
+  recorded by the monitor, including before its initial shutdown-state query.
+  Processing a delayed notice no longer grants a fresh full budget; repeated
+  notices retain the earlier limit and cancellation still follows logind's
+  authority. Clock failure produces an expired limit rather than no limit.
+  `nix develop --command cargo test -p rsdm-infra --locked --quiet` passed all
+  239 tests, with one existing subprocess-only fixture ignored in the parent
+  run. Two new coordinator regressions preserve queued/expired deadlines;
+  private logind tests verify the original budget and both signal values.
+  The existing actor-read delays and root-helper budget remain open. Changed
+  files stay below 300 lines and new functions below 50.

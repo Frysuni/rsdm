@@ -80,7 +80,7 @@ impl Fixture {
     }
 
     fn notify(&mut self, preparing: bool, budget_usec: u64) {
-        self.notices.send(ShutdownNotice { preparing, budget_usec }).unwrap();
+        self.notices.send(ShutdownNotice::new(preparing, budget_usec)).unwrap();
         self.coordinator.notifications().unwrap();
     }
 
@@ -119,6 +119,28 @@ fn repeated_notices_never_extend_the_original_deadline() {
     let after = monotonic_usec().unwrap();
     assert!((before + 1_000_000..=after + 1_000_000).contains(&fixture.deadline()));
     assert!(fixture.deadline() < original);
+}
+
+#[test]
+fn queued_shutdown_keeps_the_receivers_original_deadline() {
+    let mut fixture = Fixture::new();
+    let notice = ShutdownNotice::new(true, 30_000_000);
+    let deadline = notice.deadline_usec;
+    fixture.notices.send(notice).unwrap();
+    fixture.coordinator.notifications().unwrap();
+    assert_eq!(fixture.deadline(), deadline);
+    assert_eq!(fixture.coordinator.record.shutdown_deadline_usec, Some(deadline));
+}
+
+#[test]
+fn a_queued_expired_shutdown_cannot_receive_a_fresh_budget() {
+    let mut fixture = Fixture::new();
+    let deadline = monotonic_usec().unwrap().saturating_sub(1);
+    fixture.notices.send(ShutdownNotice { preparing: true, deadline_usec: deadline }).unwrap();
+    fixture.coordinator.notifications().unwrap();
+    assert_eq!(fixture.deadline(), deadline);
+    assert!(fixture.coordinator.manager.deadline.remaining(Duration::from_secs(5)).is_err());
+    assert_eq!(fixture.coordinator.runtime.session().unwrap().shutdown_deadline_usec, Some(deadline));
 }
 
 #[test]

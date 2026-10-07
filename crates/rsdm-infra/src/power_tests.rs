@@ -59,18 +59,26 @@ fn inhibitor_descriptor_survives_the_bus_call_until_its_owner_is_dropped() {
 fn monitor_reports_initial_shutdown_and_both_signal_values_with_the_delay_budget() {
     let (connection, server, mut writer, _) = connect(true);
     let (notices, received) = mpsc::channel();
+    let before = crate::session_manager::monotonic_usec().unwrap();
     let monitor = async_io::block_on(ShutdownMonitor::listen(connection, notices)).unwrap();
     let initial = received.recv_timeout(Duration::from_secs(2)).unwrap();
     assert!(initial.preparing);
-    assert_eq!(initial.budget_usec, 4_750_000);
+    let after = crate::session_manager::monotonic_usec().unwrap();
+    assert!((before + 4_750_000..=after + 4_750_000).contains(&initial.deadline_usec));
     for preparing in [false, true] {
+        let before = crate::session_manager::monotonic_usec().unwrap();
         async_io::block_on(async {
             let emitter = SignalEmitter::new(&server, PATH).unwrap();
             Logind::prepare_for_shutdown(&emitter, preparing).await.unwrap();
         });
         let notice = received.recv_timeout(Duration::from_secs(2)).unwrap();
         assert_eq!(notice.preparing, preparing);
-        assert_eq!(notice.budget_usec, 4_750_000);
+        let after = crate::session_manager::monotonic_usec().unwrap();
+        if preparing {
+            assert!((before + 4_750_000..=after + 4_750_000).contains(&notice.deadline_usec));
+        } else {
+            assert_eq!(notice.deadline_usec, 0);
+        }
     }
     writer.write_all(b"monitor owns the guard").unwrap();
     drop(monitor);

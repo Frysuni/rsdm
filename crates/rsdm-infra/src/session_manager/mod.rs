@@ -41,6 +41,7 @@ pub use cleanup::cleanup;
 pub use control::{SessionStatus, StopOutcome};
 pub use provider::StartOptions;
 pub(crate) use identity::new_generation;
+pub(crate) use processes::monotonic_usec;
 
 #[derive(Debug, Error)]
 pub enum SessionError {

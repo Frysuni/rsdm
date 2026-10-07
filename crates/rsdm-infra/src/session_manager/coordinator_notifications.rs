@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 
 use rsdm_core::domain::SessionPhase;
 
-use super::{SessionError, coordinator::Coordinator, processes::monotonic_usec};
+use super::{SessionError, coordinator::Coordinator};
 
 impl Coordinator {
     pub fn notifications(&mut self) -> Result<(), SessionError> {
@@ -23,7 +23,8 @@ impl Coordinator {
         }
         while let Ok(notice) = self.notices.try_recv() {
             if notice.preparing {
-                let proposed = monotonic_usec()?.saturating_add(notice.budget_usec);
+                // Time spent queued behind actor work is already spent budget.
+                let proposed = notice.deadline_usec;
                 self.begin_stop("external-shutdown", Some(proposed))?;
                 let control = self.shutdown.as_ref().expect("shutdown control");
                 let old = control.hard_deadline.get();

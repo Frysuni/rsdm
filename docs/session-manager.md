@@ -301,7 +301,9 @@ hibernate do not prepare logout. Greeter power actions call logind directly.
 The coordinator holds a delay inhibitor and listens for `PrepareForShutdown`.
 External shutdown cannot be cancelled by user requests, but logind can revoke it
 while preparation is running. Its published delay budget limits app timeouts,
-with 250 ms reserved. RSDM does not increase global timeouts or polkit privileges.
+with 250 ms reserved. The monitor records an absolute monotonic deadline when
+it receives the notice; time spent in the coordinator queue consumes that budget.
+RSDM does not increase global timeouts or polkit privileges.
 If a user inhibitor is denied, notifications remain active and RSDM warns that
 it depends on the PAM owner's separate guard. Finite OS delay cannot guarantee
 saving through hung applications, storage or an unresponsive bus.

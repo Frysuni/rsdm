@@ -121,7 +121,7 @@ pub(super) fn terminate_main(manager: &UserManager, app: &AppRecord) -> Result<(
     Ok(())
 }
 
-pub(super) fn monotonic_usec() -> Result<u64, SessionError> {
+pub(crate) fn monotonic_usec() -> Result<u64, SessionError> {
     let mut time = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     // SAFETY: time is a valid writable timespec.
     if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) } != 0 {

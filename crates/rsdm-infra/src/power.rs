@@ -142,7 +142,20 @@ pub fn pam_shutdown_guard() -> Result<OwnedFd, SessionError> {
 #[derive(Debug)]
 pub(crate) struct ShutdownNotice {
     pub preparing: bool,
-    pub budget_usec: u64,
+    pub deadline_usec: u64,
+}
+
+impl ShutdownNotice {
+    pub(crate) fn new(preparing: bool, budget_usec: u64) -> Self {
+        let deadline_usec = if preparing {
+            crate::session_manager::monotonic_usec().map(|now| now.saturating_add(budget_usec))
+                .unwrap_or_else(|error| {
+                    tracing::error!(%error, "cannot timestamp shutdown notice; treating budget as expired");
+                    1
+                })
+        } else { 0 };
+        Self { preparing, deadline_usec }
+    }
 }
 
 pub(crate) struct ShutdownMonitor {
@@ -176,15 +189,16 @@ impl ShutdownMonitor {
         let proxy = proxy(&connection).await?;
         let mut signals = proxy.receive_signal("PrepareForShutdown").await?;
         let maximum: u64 = proxy.get_property("InhibitDelayMaxUSec").await?;
-        let preparing: bool = proxy.get_property("PreparingForShutdown").await?;
         let budget_usec = maximum.saturating_sub(250_000);
-        if preparing { let _ = notices.send(ShutdownNotice { preparing, budget_usec }); }
+        let initial = ShutdownNotice::new(true, budget_usec);
+        let preparing: bool = proxy.get_property("PreparingForShutdown").await?;
+        if preparing { let _ = notices.send(initial); }
         let (stop, stopped) = async_channel::bounded(1);
         let listener = thread::spawn(move || async_io::block_on(async move {
             future::or(async {
                 while let Some(signal) = signals.next().await {
                     match signal.body().deserialize::<bool>() {
-                        Ok(preparing) => { if notices.send(ShutdownNotice { preparing, budget_usec }).is_err() { break; } }
+                        Ok(preparing) => { if notices.send(ShutdownNotice::new(preparing, budget_usec)).is_err() { break; } }
                         Err(error) => tracing::warn!(%error, "invalid logind shutdown notification"),
                     }
                 }
