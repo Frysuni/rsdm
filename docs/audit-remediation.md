@@ -260,3 +260,11 @@ verification separate from private-peer and unit-test evidence.
   revision, revocation, and subsequent reuse. Syntax/diff checks passed; runtime
   execution, child waits, recovery setup/draining, and full lifecycle checks
   remain pending.
+- 1 (launcher child layer): Native/external launcher TERM grace and post-KILL
+  reaping share the deadline, including revisions while already waiting. An
+  expired budget still sends KILL through the original owned pidfd, performs
+  only a nonblocking reap, and reports unconfirmed cleanup instead of blocking
+  in Child::wait. Five isolated-child regressions passed with
+  `nix develop --command cargo test -p rsdm-infra session_manager::session_process --locked`.
+  Production/test files have 115/92 lines; no new function exceeds 50 lines.
+  Recovery setup/draining and full teardown VM verification remain outstanding.

@@ -1,8 +1,8 @@
 //! Observing a managed compositor or an unchanged native session launcher.
 
-use std::{os::unix::process::ExitStatusExt, path::Path, process::{Child, Command, ExitStatus}, time::Duration};
+use std::{os::unix::process::ExitStatusExt, path::Path, process::{Child, Command, ExitStatus}, time::{Duration, Instant}};
 
-use super::{SessionError, bus::UserManager, provider::{Provider, ProviderKind}};
+use super::{SessionError, bus::UserManager, deadline::Deadline, processes::ProcessHandle, provider::{Provider, ProviderKind}};
 
 pub(super) struct SessionProcess {
     pub unit: Option<String>,
@@ -70,20 +70,46 @@ impl SessionProcess {
             if let Err(error) = result { failure = Some(error); }
         }
         if let Some(child) = &mut self.child {
-            if child.try_wait()?.is_none() {
-                // The unreaped child and its pidfd keep this signal bound to the
-                // original launcher, including launchers without a native unit.
-                if let Some(handle) = super::processes::ProcessHandle::open(child.id())? {
-                    handle.signal(libc::SIGTERM)?;
-                }
-                let deadline = std::time::Instant::now() + Duration::from_secs(5);
-                while child.try_wait()?.is_none() && std::time::Instant::now() < deadline {
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                if child.try_wait()?.is_none() { child.kill()?; }
+            if let Err(error) = async_io::block_on(stop_launcher(child, &manager.deadline)) {
+                failure.get_or_insert(error);
             }
-            child.wait()?;
         }
         match failure { Some(error) => Err(error), None => Ok(()) }
     }
 }
+
+async fn stop_launcher(child: &mut Child, deadline: &Deadline) -> Result<(), SessionError> {
+    if child.try_wait()?.is_some() { return Ok(()); }
+    // The unreaped child cannot be replaced before this handle is opened.
+    // Keep that same handle for escalation, even when the budget expires.
+    let handle = ProcessHandle::open(child.id())?;
+    let graceful = deadline.bound(async {
+        if let Some(handle) = &handle { handle.signal(libc::SIGTERM)?; }
+        wait_for_launcher(child, Duration::from_secs(5)).await
+    }).await;
+    if matches!(graceful, Ok(true)) { return Ok(()); }
+
+    if let Some(handle) = &handle { handle.signal(libc::SIGKILL)?; }
+    if let Err(error) = graceful {
+        // Reap if already exited, but do not wait beyond the shared deadline.
+        // An unconfirmed exit must remain a cleanup failure for recovery.
+        let _ = child.try_wait();
+        return Err(error);
+    }
+    if deadline.bound(wait_for_launcher(child, Duration::from_secs(1))).await? { return Ok(()); }
+    Err(SessionError::State("session launcher did not exit after SIGKILL".into()))
+}
+
+async fn wait_for_launcher(child: &mut Child, timeout: Duration) -> Result<bool, SessionError> {
+    let limit = Instant::now() + timeout;
+    loop {
+        if child.try_wait()?.is_some() { return Ok(true); }
+        let now = Instant::now();
+        if now >= limit { return Ok(false); }
+        async_io::Timer::at((now + Duration::from_millis(50)).min(limit)).await;
+    }
+}
+
+#[cfg(test)]
+#[path = "session_process_tests.rs"]
+mod tests;
