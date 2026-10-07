@@ -35,7 +35,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 17 | Audit termination separately from cleanup failure | fixed |
 | 18 | Move control-bus maintenance off the actor | fixed |
 | 19 | Release transport mutex during async reconnect | fixed |
-| 20 | Scale reference restoration within bounded work | pending |
+| 20 | Scale reference restoration within bounded work | fixed |
 | 21 | Roll back definitely failed app registrations | fixed |
 | 22 | Roll back definitely failed start references | fixed |
 | 23 | Recover generation-owned quit/logout helpers | pending |
@@ -634,3 +634,21 @@ verification separate from private-peer and unit-test evidence.
   Workspace/all-targets checking passed on Rust 1.88.0; `git diff --check` passed.
   All changed Rust files remain below 300 lines and all new functions below 50.
   A real desktop launch is not claimed by these argument/discovery checks.
+
+- 20: User-bus reconnect restores remembered transient-unit references in
+  bounded batches of eight concurrent unit checks. Each batch still shares the
+  reconnect deadline, and the transport publishes the candidate connection
+  only after every batch and activation-environment check succeeds. A failed or
+  stale candidate is closed, so partial RefUnit ownership is not published as
+  the active transport. The batch width bounds D-Bus work and descriptor/task
+  pressure while avoiding the previous one-unit-at-a-time convoy.
+  A private peer regression restores 24 references with delayed RefUnit calls,
+  observes parallel progress, and verifies the concurrency ceiling. Existing
+  reconnect, replacement, stale-publication, and mutex-responsiveness tests
+  remain in the same isolated suite. No live bus or session is contacted.
+  `nix develop --command cargo test -p rsdm-infra reference_restoration --locked
+  --quiet` passed; workspace tests and Rust 1.88 checking are recorded after
+  the complete audit batch. `git diff --check` passed. The existing reconnect
+  operation retains one five-second deadline; a genuinely unavailable bus can
+  still exhaust it, while large healthy reference sets now scale by bounded
+  concurrency.

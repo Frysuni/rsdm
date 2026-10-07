@@ -1,6 +1,6 @@
 //! References are restored only for the same owned transient invocation.
 
-use std::{os::unix::net::UnixStream, sync::atomic::{AtomicUsize, Ordering}, thread};
+use std::{os::unix::net::UnixStream, sync::atomic::{AtomicUsize, Ordering}, thread, time::Duration};
 
 use super::*;
 
@@ -12,6 +12,9 @@ struct UnitState {
     transient: bool,
     replaced: bool,
     pause: Option<Pause>,
+    delay: Duration,
+    in_flight: AtomicUsize,
+    max_in_flight: AtomicUsize,
 }
 
 struct Pause {
@@ -29,10 +32,14 @@ impl Manager {
     fn get_unit(&self, _name: &str) -> OwnedObjectPath { OwnedObjectPath::try_from("/unit").unwrap() }
     async fn ref_unit(&self, _name: &str) {
         self.0.refs.fetch_add(1, Ordering::SeqCst);
+        let current = self.0.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        self.0.max_in_flight.fetch_max(current, Ordering::SeqCst);
         if let Some(pause) = &self.0.pause {
             let _ = pause.entered.send(());
             let _ = pause.resume.recv().await;
         }
+        if !self.0.delay.is_zero() { async_io::Timer::after(self.0.delay).await; }
+        self.0.in_flight.fetch_sub(1, Ordering::SeqCst);
     }
     fn unref_unit(&self, _name: &str) { self.0.unrefs.fetch_add(1, Ordering::SeqCst); }
 }
@@ -78,7 +85,8 @@ fn fixture(state: UnitState) -> (Connection, Connection, Arc<UnitState>) {
 
 fn state() -> UnitState {
     UnitState { refs: AtomicUsize::new(0), unrefs: AtomicUsize::new(0), generation: "ours",
-        invocation: vec![1; 16], transient: true, replaced: false, pause: None }
+        invocation: vec![1; 16], transient: true, replaced: false, pause: None,
+        delay: Duration::ZERO, in_flight: AtomicUsize::new(0), max_in_flight: AtomicUsize::new(0) }
 }
 
 #[test]
@@ -167,6 +175,26 @@ fn slow_restoration_does_not_lock_state_or_publish_a_forgotten_reference() {
     assert!(!published);
     assert_eq!(owner.epoch(), 0);
     assert!(owner.0.lock().unwrap().references.is_empty());
+}
+
+#[test]
+fn reference_restoration_uses_bounded_parallel_batches() {
+    let mut initial = state();
+    initial.delay = Duration::from_millis(20);
+    let (connection, _server, state) = fixture(initial);
+    let references: Vec<_> = (0..24)
+        .map(|_| ("example.service".to_string(), Reference { invocation: Some(vec![1; 16]), ..Reference::new("ours".into()) }))
+        .collect();
+    let entries: Vec<_> = references.iter().map(|(unit, reference)| (unit, reference)).collect();
+    async_io::block_on(async {
+        for batch in entries.chunks(REFERENCE_RESTORE_BATCH) {
+            restore_reference_batch(&connection, batch).await.unwrap();
+        }
+    });
+    assert_eq!(state.refs.load(Ordering::SeqCst), 24);
+    assert_eq!(state.unrefs.load(Ordering::SeqCst), 0);
+    assert!(state.max_in_flight.load(Ordering::SeqCst) > 1);
+    assert!(state.max_in_flight.load(Ordering::SeqCst) <= REFERENCE_RESTORE_BATCH);
 }
 
 #[test]

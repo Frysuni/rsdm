@@ -1,6 +1,8 @@
 //! Clones share reconnections and the references owned by this bus peer.
 
-use std::{collections::BTreeMap, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}};
+use std::{collections::BTreeMap, future::Future, pin::Pin, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}};
+
+use futures_lite::future;
 
 use super::*;
 
@@ -188,8 +190,8 @@ impl Transport {
         let snapshot = self.0.lock().unwrap_or_else(|error| error.into_inner()).clone();
         if snapshot.epoch != observed_epoch { return Ok(false); }
         validate_connection(connection).await?;
-        for (unit, reference) in &snapshot.references {
-            restore_reference(connection, unit, reference).await?;
+        for batch in snapshot.references.iter().collect::<Vec<_>>().chunks(REFERENCE_RESTORE_BATCH) {
+            restore_reference_batch(connection, batch).await?;
         }
         restore_activation(connection, snapshot.activation_environment).await?;
 
@@ -199,6 +201,26 @@ impl Transport {
         state.epoch += 1;
         Ok(true)
     }
+}
+
+const REFERENCE_RESTORE_BATCH: usize = 8;
+
+async fn restore_reference_batch(
+    connection: &Connection,
+    references: &[(&String, &Reference)],
+) -> zbus::Result<()> {
+    let mut combined: Pin<Box<dyn Future<Output = zbus::Result<()>> + Send + '_>> =
+        Box::pin(async { Ok(()) });
+    for (unit, reference) in references {
+        let connection = connection.clone();
+        let unit = (*unit).clone();
+        let reference = (*reference).clone();
+        combined = Box::pin(async move {
+            let ((), ()) = future::try_zip(combined, restore_reference(&connection, &unit, &reference)).await?;
+            Ok(())
+        });
+    }
+    combined.await
 }
 
 async fn restore_activation(connection: &Connection, pairs: BTreeMap<String, String>) -> zbus::Result<()> {
