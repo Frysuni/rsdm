@@ -22,7 +22,7 @@ mod unlock;
 use session::SessionAction;
 
 #[derive(Debug, Parser)]
-#[command(author, version, about)]
+#[command(author, version, about, after_help = "Examples:\n  rsdm status\n  rsdm app -- foot\n  rsdm session stop\n  rsdm power reboot")]
 struct Cli {
     #[arg(
         long,
@@ -39,12 +39,16 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Run the display manager greeter on the configured TTY.
+    #[command(after_help = "Usage notes:\n  DM starts the Greeter on its configured VT, normally through rsdm.service.\n\nExamples:\n  rsdm validate-config\n  rsdm logs --component dm")]
     Dm,
     /// Lock the current Wayland session.
+    #[command(after_help = "Examples:\n  rsdm lock\n  rsdm lock --config /etc/rsdm.toml")]
     Lock,
     /// Monitor Wayland activity and lock after the idle timeout.
+    #[command(after_help = "Examples:\n  rsdm idle\n  rsdm logs --component idle --follow")]
     Idle,
     /// Privileged emergency unlock for an unresponsive rsdm lock screen.
+    #[command(after_help = "Examples:\n  rsdm unlock\n  rsdm unlock --user alice")]
     Unlock {
         #[arg(long)]
         user: Option<String>,
@@ -52,6 +56,7 @@ enum Command {
         uid: Option<u32>,
     },
     /// Open rsdm's journal.
+    #[command(after_help = "Examples:\n  rsdm logs --follow\n  rsdm logs --component dm --lines 50\n  rsdm logs --component lock")]
     Logs {
         #[arg(short, long)]
         follow: bool,
@@ -61,20 +66,25 @@ enum Command {
         component: LogComponent,
     },
     /// Show configured features and live lock state.
+    #[command(after_help = "Examples:\n  rsdm status\n  env NO_COLOR=1 rsdm status")]
     Status,
     /// Manage the systemd user graphical session.
+    #[command(after_help = "Examples:\n  rsdm session status\n  rsdm session stop\n  rsdm session cancel")]
     Session {
         #[command(subcommand)]
         action: SessionAction,
     },
     /// Launch an application inside the graphical session.
+    #[command(after_help = "Examples:\n  rsdm app -- foot\n  rsdm app --shutdown-timeout 60 --on-timeout cancel -- foot")]
     App(session::AppOptions),
     /// Prepare the current session and ask logind or the native desktop for power.
+    #[command(after_help = "Examples:\n  rsdm power reboot\n  rsdm power poweroff")]
     Power {
         #[arg(value_enum)]
         action: session::PowerAction,
     },
     /// Validate the TOML configuration file.
+    #[command(after_help = "Examples:\n  rsdm validate-config\n  rsdm validate-config --config ./rsdm.toml")]
     ValidateConfig,
 }
 

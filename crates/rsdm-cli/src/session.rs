@@ -18,6 +18,7 @@ pub fn power(action: PowerAction) -> Result<()> {
 #[derive(Debug, Subcommand)]
 pub enum SessionAction {
     /// Start coordination around the original WM or desktop session command.
+    #[command(after_help = "Usage notes:\n  DM wraps the selected session automatically when session management is enabled.\n\nExamples:\n  rsdm session start -- niri-session\n  rsdm session start --mode managed -- sway")]
     Start {
         #[arg(long, default_value = "auto")]
         mode: SessionMode,
@@ -29,12 +30,16 @@ pub enum SessionAction {
         compositor: Vec<String>,
     },
     /// Publish the compositor environment and activate the session when ready.
+    #[command(after_help = "Examples:\n  rsdm session finalize\n  rsdm session finalize MY_VAR ANOTHER_VAR")]
     Finalize { names: Vec<String> },
     /// Close registered applications before stopping the graphical session.
+    #[command(after_help = "Examples:\n  rsdm session stop\n\nUse this command in your WM's logout binding to prepare apps before teardown.")]
     Stop,
     /// Cancel preparation while the compositor is still running.
+    #[command(after_help = "Examples:\n  rsdm session cancel\n\nApps that already closed are not restarted.")]
     Cancel,
     /// Show the coordinator and its registered applications.
+    #[command(after_help = "Examples:\n  rsdm session status\n  rsdm session status > session-status.txt")]
     Status,
     #[command(hide = true)]
     AppStop {

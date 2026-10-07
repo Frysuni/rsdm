@@ -3,14 +3,14 @@ use std::{io::{self, IsTerminal, Write}, os::fd::AsRawFd};
 use ratatui::{
     backend::IntoCrossterm,
     buffer::Buffer,
-    crossterm::{queue, style::{Attribute, SetAttribute, SetForegroundColor}},
+    crossterm::{queue, style::{Attribute, SetAttribute, SetForegroundColor, SetBackgroundColor}},
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Padding, Paragraph, Widget, Wrap},
 };
 
-use super::{MUTED, Report};
+use super::{ACCENT, BORDER, MUTED, Report};
 
 pub(super) enum Stream { Stdout, Stderr }
 
@@ -50,12 +50,13 @@ pub(super) fn report(report: &Report, width: u16) -> Option<Vec<u8>> {
     let area = Rect::new(0, 0, width, height);
     let mut buffer = Buffer::empty(area);
     let title = Line::from(vec![
-        Span::styled(" RSDM ", Style::new().fg(report.accent).bold()),
-        Span::styled(format!(" / {} ", report.title), Style::new().bold()),
+        Span::styled(" RSDM ", Style::new().fg(ACCENT).bold()),
+        Span::styled(" / ", Style::new().fg(BORDER)),
+        Span::styled(format!("{} ", report.title), Style::new().fg(report.accent).bold()),
     ]);
     let footer = Line::styled(format!(" CLI · v{} ", env!("CARGO_PKG_VERSION")), Style::new().fg(MUTED)).right_aligned();
     let block = Block::bordered().border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(report.accent)).title(title).title_bottom(footer)
+        .border_style(Style::new().fg(BORDER)).title(title).title_bottom(footer)
         .padding(Padding::new(1, 1, 1, 1));
     let inner = block.inner(area);
     block.render(area, &mut buffer);
@@ -69,12 +70,13 @@ fn write_buffer(buffer: &Buffer, writer: &mut impl Write) -> io::Result<()> {
     writeln!(writer)?;
     for y in buffer.area.y..buffer.area.bottom() {
         let mut x = buffer.area.x;
-        let mut style = (Color::Reset, Modifier::empty());
+        let mut style = (Color::Reset, Color::Reset, Modifier::empty());
         while x < buffer.area.right() {
             let cell = &buffer[(x, y)];
-            let next = (cell.fg, cell.modifier);
+            let next = (cell.fg, cell.bg, cell.modifier);
             if next != style {
-                queue!(writer, SetAttribute(Attribute::Reset), SetForegroundColor(cell.fg.into_crossterm()))?;
+                queue!(writer, SetAttribute(Attribute::Reset),
+                    SetForegroundColor(cell.fg.into_crossterm()), SetBackgroundColor(cell.bg.into_crossterm()))?;
                 if cell.modifier.contains(Modifier::BOLD) {
                     queue!(writer, SetAttribute(Attribute::Bold))?;
                 }

@@ -4,14 +4,14 @@ use ratatui::{style::Style, text::{Line, Span}};
 use rsdm_core::domain::ShutdownPolicy;
 use rsdm_infra::session_manager::SessionStatus;
 
-use super::{ACCENT, MUTED, Report, SUCCESS, WARNING, safe_text, state_color};
+use super::{ACCENT, MUTED, Report, SUCCESS, WARNING, badge, safe_text, state_color};
 
 pub fn session_status(status: &SessionStatus) -> io::Result<()> {
     let mut report = Report::new("SESSION STATUS", ACCENT);
     let summary = format!("{}: {} (login {}, desktop {}, generation {})\n", status.provider,
         status.phase, status.login_session_id, status.desktop_entry_id, status.generation);
     report.message(summary, vec![Line::from(vec![
-        Span::styled(format!("● {}", safe_text(&status.phase)), Style::new().fg(state_color(&status.phase)).bold()),
+        badge(&status.phase, state_color(&status.phase)),
         Span::styled(format!("  /  {}", safe_text(&status.provider)), Style::new().fg(ACCENT)),
     ])]);
     // The plain status format is kept intact for pipes and existing callers.
@@ -36,7 +36,8 @@ pub fn session_status(status: &SessionStatus) -> io::Result<()> {
         report.message(format!("{unit}: {state}, {method}, {timeout}s\n"), vec![
             Line::styled(safe_text(unit), Style::new().fg(ACCENT).bold()),
             Line::from(vec![
-                Span::styled(format!("  ● {}", safe_text(state)), Style::new().fg(state_color(state))),
+                Span::raw("  "),
+                badge(state, state_color(state)),
                 Span::styled("   method ", Style::new().fg(MUTED)),
                 Span::raw(safe_text(method)),
                 Span::styled("   timeout ", Style::new().fg(MUTED)),

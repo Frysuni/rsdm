@@ -14,11 +14,13 @@ use ratatui::{
 pub use usage::usage;
 pub use session::{application, session_status};
 
-pub const ACCENT: Color = Color::Cyan;
-pub const SUCCESS: Color = Color::Green;
-pub const WARNING: Color = Color::Yellow;
-pub const ERROR: Color = Color::Red;
-pub const MUTED: Color = Color::DarkGray;
+pub const ACCENT: Color = Color::Rgb(94, 234, 212);
+pub const SECONDARY: Color = Color::Rgb(167, 139, 250);
+pub const SUCCESS: Color = Color::Rgb(134, 239, 172);
+pub const WARNING: Color = Color::Rgb(253, 224, 71);
+pub const ERROR: Color = Color::Rgb(251, 113, 133);
+pub const MUTED: Color = Color::Rgb(148, 163, 184);
+pub const BORDER: Color = Color::Rgb(71, 85, 105);
 
 pub struct Report {
     title: String,
@@ -35,17 +37,25 @@ impl Report {
     pub fn field(&mut self, label: &str, value: impl Into<String>, color: Color) {
         let value = value.into();
         self.plain.push_str(&format!("{label}: {value}\n"));
-        self.lines.push(Line::from(vec![
-            Span::styled(format!("{label:<13} "), Style::new().fg(MUTED)),
-            Span::styled(safe_text(&value), Style::new().fg(color)),
-        ]));
+        let mut spans = vec![Span::styled(format!("{label:<13} "), Style::new().fg(MUTED))];
+        let (state, detail) = value.split_once(' ').unwrap_or((&value, ""));
+        if matches!(state, "enabled" | "disabled" | "active" | "inactive" | "failed") {
+            spans.push(badge(state, color));
+            spans.push(Span::raw(format!(" {}", safe_text(detail))));
+        } else {
+            spans.push(Span::styled(safe_text(&value), Style::new().fg(color)));
+        }
+        self.lines.push(Line::from(spans));
     }
 
     pub fn section(&mut self, title: impl Into<String>) {
         if !self.lines.is_empty() {
             self.lines.push(Line::default());
         }
-        self.lines.push(Line::styled(title.into(), Style::new().fg(self.accent).bold()));
+        self.lines.push(Line::from(vec![
+            Span::styled("── ", Style::new().fg(BORDER)),
+            Span::styled(title.into(), Style::new().fg(SECONDARY).bold()),
+        ]));
     }
 
     pub fn message(&mut self, plain: impl Into<String>, lines: Vec<Line<'static>>) {
@@ -80,7 +90,11 @@ impl Report {
 pub fn notice(title: &str, text: impl Into<String>, color: Color) -> Report {
     let mut report = Report::new(title, color);
     let text = text.into();
-    let lines = text.lines().map(|line| Line::raw(safe_text(line))).collect();
+    let mut lines: Vec<_> = text.lines().map(|line| Line::raw(safe_text(line))).collect();
+    if let Some(first) = lines.first_mut() {
+        let symbol = match color { SUCCESS => "✓", WARNING => "!", ERROR => "×", _ => "◆" };
+        first.spans.insert(0, Span::styled(format!("{symbol}  "), Style::new().fg(color).bold()));
+    }
     report.message(text, lines);
     report
 }
@@ -96,6 +110,10 @@ pub fn state_color(state: &str) -> Color {
         "failed" | "invalid" => ERROR,
         _ => MUTED,
     }
+}
+
+pub fn badge(text: &str, color: Color) -> Span<'static> {
+    Span::styled(format!(" {} ", safe_text(text)), Style::new().fg(Color::Black).bg(color).bold())
 }
 
 fn safe_text(text: &str) -> String {

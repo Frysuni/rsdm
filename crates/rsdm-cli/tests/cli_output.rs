@@ -81,12 +81,28 @@ fn assert_only_styles(text: &str) {
 #[test]
 fn terminal_reports_are_colored_and_do_not_control_the_screen() {
     let cli = CliTest::new();
-    for args in [&["--help"][..], &["app", "--help"], &["status"], &["validate-config"], &["--version"]] {
+    let commands: &[&[&str]] = &[
+        &["--help"], &["dm", "--help"], &["lock", "--help"], &["idle", "--help"],
+        &["unlock", "--help"], &["logs", "--help"], &["status", "--help"], &["session", "--help"],
+        &["session", "start", "--help"], &["session", "finalize", "--help"], &["session", "stop", "--help"],
+        &["session", "cancel", "--help"], &["session", "status", "--help"], &["app", "--help"],
+        &["power", "--help"], &["validate-config", "--help"], &["help", "session", "status"],
+        &["status"], &["validate-config"], &["--version"],
+    ];
+    for args in commands {
         let (status, text) = terminal(cli.command(args), 80);
         assert!(status.success(), "{text}");
         assert!(text.contains("RSDM"), "{text}");
         assert!(text.contains("\x1b["), "{text}");
         assert!(text.contains('╭') && text.contains('╰'), "{text}");
+        if *args == ["status"] {
+            assert!(text.contains("\x1b[48;2;148;163;184m"), "{text}");
+            assert!(text.contains("\x1b[49m"), "background must reset after the badge");
+        }
+        if args.contains(&"--help") || args.first() == Some(&"help") {
+            assert!(text.contains("Examples:"), "{args:?}: {text}");
+            assert!(!text.contains("app-stop") && !text.contains("cleanup"));
+        }
         assert_only_styles(&text);
     }
 }
