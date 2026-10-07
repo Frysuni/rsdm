@@ -156,3 +156,11 @@ it to the journal (`journalctl -u rsdm`). `level` sets the verbosity
 (`error` `warn` `info` `debug` `trace`; `RUST_LOG` overrides it for one-off
 debugging). Setting `file` to an absolute path tees the same records into an
 extra plain-text log file - it never replaces the journal.
+
+The file must be regular, owned by the user running rsdm, and not writable by
+group or others. Parent directories must belong to that user or root and forbid
+shared writes; trusted sticky ancestors such as `/tmp` may lead to a private
+directory but cannot directly contain the log. Symlinks in the log path are
+rejected. Missing directories are created with mode `0750` and new files with
+mode `0640` (subject to umask). An unsafe path leaves journal/stderr logging
+active and emits a warning.

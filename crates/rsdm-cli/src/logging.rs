@@ -1,18 +1,17 @@
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::File,
     io,
     path::{Path, PathBuf},
     sync::Mutex,
 };
-
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 
 use rsdm_core::domain::{LoggingConfig, LoggingLevel};
 use rsdm_infra::config::load_config;
 use tracing_subscriber::{
     EnvFilter, Layer, fmt::writer::BoxMakeWriter, layer::SubscriberExt, util::SubscriberInitExt,
 };
+
+mod file;
 
 pub fn init(config_path: &Path) {
     let (logging, load_error) = match load_config(config_path) {
@@ -99,7 +98,7 @@ fn open_log_destination(logging: &LoggingConfig) -> (Option<File>, String) {
         return (None, journald);
     };
 
-    match open_log_file(&path) {
+    match file::open(&path) {
         Ok(file) => (Some(file), format!("journald + {}", path.display())),
         Err(error) => {
             let _ = crate::output::notice("LOGGING WARNING", format!(
@@ -111,21 +110,8 @@ fn open_log_destination(logging: &LoggingConfig) -> (Option<File>, String) {
     }
 }
 
-fn open_log_file(path: &Path) -> io::Result<File> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut options = OpenOptions::new();
-    options.create(true).append(true);
-    #[cfg(unix)]
-    options.mode(0o640);
-    options.open(path)
-}
-
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
-
     use super::*;
 
     #[test]
@@ -134,26 +120,5 @@ mod tests {
             default_filter(LoggingLevel::Debug),
             "warn,rsdm=debug,rsdm_core=debug,rsdm_idle=debug,rsdm_infra=debug,rsdm_lock=debug,rsdm_tui=debug"
         );
-    }
-
-    #[test]
-    fn log_file_creates_parent_directory_and_appends() {
-        let dir = std::env::temp_dir().join(format!("rsdm-log-test-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        let path = dir.join("nested").join("rsdm.log");
-
-        {
-            let mut file = open_log_file(&path).expect("open log file");
-            writeln!(file, "first").expect("write first line");
-        }
-        {
-            let mut file = open_log_file(&path).expect("reopen log file");
-            writeln!(file, "second").expect("write second line");
-        }
-
-        let text = fs::read_to_string(&path).expect("read log file");
-        assert!(text.contains("first"));
-        assert!(text.contains("second"));
-        fs::remove_dir_all(&dir).expect("remove temp log dir");
     }
 }

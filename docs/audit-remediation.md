@@ -52,7 +52,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 34 | Cache scaled wallpaper | pending |
 | 35 | Recover output-power changes after locker crashes | pending |
 | 36 | Harden remembered-state reads | implemented; runtime checks pending |
-| 37 | Harden privileged log file opens | pending |
+| 37 | Harden privileged log file opens | implemented; runtime checks pending |
 | 38 | Avoid console font temporary-file collisions | implemented; runtime checks pending |
 | 39 | Reap closed generation lease files safely | pending |
 | 40 | Bound coordinator request backlog | implemented; runtime checks pending |
@@ -210,3 +210,10 @@ Record unexecuted runtime checks explicitly for later verification.
   for retry and runs on policy/primary changes and ordinary exit. Syntax/diff
   checks passed; a real niri two-output check is pending. Bounded asynchronous
   IPC and restoration after hard crashes remain tracked separately as 9 and 35.
+- 37: Log files are opened relative to pinned, owner/permission-checked parent
+  descriptors. Paths cannot traverse symlinks or parent components; leaf opens
+  use NOFOLLOW/NONBLOCK/CLOEXEC and verify regular-file type, effective ownership,
+  and absence of shared write access. Trusted sticky ancestors are allowed only
+  above a private parent. Tests cover append, creation, links, directory replacement,
+  unsafe modes/ancestors, FIFO/type checks, and root-only foreign ownership.
+  Rust syntax, sample TOML, and diff checks passed; runtime tests are pending.

@@ -23,6 +23,7 @@ ready_timeout_secs = 10 # optional | integer | default: 10 | values: >= 0, secon
 [logging]
 level = "info" # optional | string | default: "info" | values: error, warn, info, debug, trace
 # Adds a plain-text file; journald remains enabled. The path must be absolute.
+# Use a regular file owned by the rsdm user, trusted directories, and no symlinks/shared writes.
 # file = "/var/log/rsdm/rsdm.log" # optional | string or unset | default: unset | values: absolute paths
 
 [security]
