@@ -6,7 +6,7 @@ use rsdm_core::domain::{ShutdownMethod, ShutdownPolicy, TimeoutAction};
 use zbus::zvariant::Value;
 
 use super::{
-    SessionError, bus::UserManager, control::LaunchRequest, deadline::Deadline, env::valid_environment_name,
+    SessionError, bus::{UnitProperties, UserManager}, control::LaunchRequest, deadline::Deadline, env::valid_environment_name,
     identity::GENERATION_ENV, provider::Provider,
     runtime::{AppRecord, Runtime}, unit_name::app_unit_name, units::app_properties,
 };
@@ -53,6 +53,36 @@ pub(super) fn register(
 pub(super) fn launch(
     manager: &UserManager, runtime: &Runtime, anchor: &str, request: &LaunchRequest, mut app: AppRecord,
 ) -> Result<String, SessionError> {
+    let properties = match launch_properties(runtime, anchor, request, &app) {
+        Ok(properties) => properties,
+        Err(error) => return Err(rollback_launch(manager, runtime, &app, error)),
+    };
+    let started = manager.start_service(&app.unit, &properties);
+    if let Err(error @ SessionError::StartRejected { .. }) = started {
+        return Err(rollback_launch(manager, runtime, &app, error));
+    }
+    let invocation = super::processes::generation_invocation(manager, &app.unit, &runtime.generation)
+        .and_then(|id| id.ok_or_else(|| SessionError::State("application invocation is unavailable after start".into())));
+    match invocation {
+        Ok(id) => {
+            let _lease = runtime.app_lease_until(&app.unit, &manager.deadline)?;
+            app = runtime.app(&app.unit)?;
+            app.invocation_id = id;
+            runtime.save_app(&app)?;
+        }
+        Err(error) => {
+            if started.is_ok() { return Err(error); }
+            // A timed-out start job can still be running. Preserve its record.
+            tracing::warn!(unit = app.unit, %error, "could not capture application invocation");
+        }
+    }
+    started?;
+    Ok(app.unit)
+}
+
+fn launch_properties(
+    runtime: &Runtime, anchor: &str, request: &LaunchRequest, app: &AppRecord,
+) -> Result<UnitProperties, SessionError> {
     let mut environment = request.environment.clone();
     environment.retain(|(name, _)| name != GENERATION_ENV);
     environment.push((GENERATION_ENV.into(), runtime.generation.clone()));
@@ -64,24 +94,27 @@ pub(super) fn launch(
         ("ExecStopEx", Value::new(stop_command)),
         ("TimeoutStopUSec", Value::from(app.policy.timeout_secs.saturating_add(20).saturating_mul(1_000_000))),
     ]);
-    let started = manager.start_service(&app.unit, &properties);
-    match manager.invocation_id(&app.unit) {
-        Ok(id) => {
-            let _lease = runtime.app_lease_until(&app.unit, &manager.deadline)?;
-            app = runtime.app(&app.unit)?;
-            app.invocation_id = id;
-            runtime.save_app(&app)?;
+    Ok(properties)
+}
+
+fn rollback_launch(manager: &UserManager, runtime: &Runtime, app: &AppRecord, error: SessionError) -> SessionError {
+    if matches!(error, SessionError::StartRejected { reference_retained: true, .. }) { return error; }
+    let rollback = (|| {
+        let _lease = runtime.app_lease_until(&app.unit, &manager.deadline)?;
+        let current = match runtime.app(&app.unit) {
+            Ok(current) => current,
+            Err(SessionError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        if !current.invocation_id.is_empty() || current.policy != app.policy {
+            return Err(SessionError::State("application registration changed before rollback".into()));
         }
-        Err(error) => {
-            if started.is_ok() {
-                return Err(error);
-            }
-            // A timed-out start job can still be running. Preserve its record.
-            tracing::warn!(unit = app.unit, %error, "could not capture application invocation");
-        }
+        runtime.remove_app(&app.unit)
+    })();
+    match rollback {
+        Ok(()) => error,
+        Err(cleanup) => SessionError::State(format!("{error}; could not roll back application registration: {cleanup}")),
     }
-    started?;
-    Ok(app.unit)
 }
 
 pub(super) fn release_closed(manager: &UserManager, runtime: &Runtime) -> Result<(), SessionError> {
@@ -151,3 +184,7 @@ pub(super) fn finish(manager: &UserManager, runtime: &Runtime, app: &AppRecord) 
     }
     runtime.remove_app(&app.unit)
 }
+
+#[cfg(test)]
+#[path = "apps_launch_tests.rs"]
+mod launch_tests;

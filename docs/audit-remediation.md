@@ -36,7 +36,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 18 | Move control-bus maintenance off the actor | fixed |
 | 19 | Release transport mutex during async reconnect | fixed |
 | 20 | Scale reference restoration within bounded work | pending |
-| 21 | Roll back definitely failed app registrations | pending |
+| 21 | Roll back definitely failed app registrations | fixed |
 | 22 | Roll back definitely failed start references | fixed |
 | 23 | Recover generation-owned quit/logout helpers | pending |
 | 24 | Bound shutdown concurrency and polling | pending |
@@ -567,6 +567,25 @@ verification separate from private-peer and unit-test evidence.
   ignored in its parent run. Workspace/all-targets checking passed on Rust
   1.88.0; `git diff --check` passed. All changed source files remain below 300
   lines and new functions below 50. No host bus/session/service was touched.
-  Application-record rollback (21) now has typed evidence to consume and remains
-  the next separate implementation step. Partial or unconfirmed ownership is
-  intentionally retained for ordinary cleanup/recovery.
+  Application-record rollback (21) consumes this typed evidence in the separate
+  implementation below. Partial or unconfirmed ownership is intentionally
+  retained for ordinary cleanup/recovery.
+
+- 21: Application launch rolls back its unpublished invocation record after
+  local preparation failure or a definitely rejected start. Rollback holds only
+  a short bounded record lease and preserves records already claimed by another
+  invocation. A replacement peer's retained reference keeps the recovery record.
+  A rejected start never reads or pins a conflicting unit's invocation; other
+  starts validate the generation and stable invocation before publication.
+  Lost replies, partial creation, and post-acceptance inspection failures retain
+  recovery state without replaying StartTransientUnit. Cleanup contention or
+  file-system failure reports both errors rather than claiming successful rollback.
+  Nine private-peer/record regressions exercise these paths, including cleanup
+  retry after contention and ordinary release of a partially created unit.
+  `nix develop --command cargo test -p rsdm-infra session_manager::apps:: --locked`
+  passed all nine tests; `nix develop --command cargo test --workspace --locked
+  --quiet` passed all 448 tests plus the existing child-only fixture ignored in
+  its parent run. Workspace/all-targets checking passed on Rust 1.88.0;
+  `git diff --check` passed.
+  No live user manager, service, or session is contacted. All changed Rust files
+  remain below 300 lines and new functions below 50.
