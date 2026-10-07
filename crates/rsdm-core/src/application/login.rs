@@ -25,6 +25,7 @@ impl LoginUseCase<'_> {
     pub fn execute(&self, mut request: LoginRequest<'_>) -> Result<LoginResult, LoginError> {
         let authenticated = AuthenticateUser {
             auth: self.auth,
+            resolver: self.resolver,
             limiter: self.limiter,
             audit: self.audit,
         }
@@ -93,24 +94,26 @@ impl LoginUseCase<'_> {
 
 struct AuthenticateUser<'a> {
     auth: &'a dyn AuthProvider,
+    resolver: &'a dyn UserResolver,
     limiter: &'a dyn LoginAttemptLimiter,
     audit: &'a dyn AuditLogger,
 }
 
 impl AuthenticateUser<'_> {
     fn execute(&self, request: AuthRequest<'_>) -> Result<AuthenticatedSession, LoginError> {
-        self.limiter.check_allowed(request.username)?;
-        let username = request.username;
+        let limiter_username = self.resolver.canonical_username(request.username)
+            .unwrap_or_else(|_| request.username.to_string());
+        self.limiter.check_allowed(&limiter_username)?;
 
         match self.auth.authenticate(request) {
             Ok(session) => {
-                self.limiter.record_success(&session.outcome.username);
+                self.limiter.record_success(&limiter_username);
                 self.audit.auth_success(&session.outcome.username);
                 Ok(session)
             }
             Err(error) => {
-                self.limiter.record_failure(username);
-                self.audit.auth_failure(username, error.audit_reason());
+                self.limiter.record_failure(&limiter_username);
+                self.audit.auth_failure(&limiter_username, error.audit_reason());
                 Err(LoginError::Auth(error))
             }
         }

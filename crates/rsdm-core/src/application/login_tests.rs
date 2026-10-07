@@ -13,6 +13,8 @@ struct Services {
     cleanup_fails: bool,
     close_fails: bool,
     exit: SessionExit,
+    canonical: Option<String>,
+    limiter_keys: RefCell<Vec<String>>,
 }
 
 impl Default for Services {
@@ -20,7 +22,7 @@ impl Default for Services {
         Self {
             events: Events::default(), cleanup_errors: RefCell::default(),
             start_fails: false, wait_fails: false, cleanup_fails: false, close_fails: false,
-            exit: SessionExit::Success,
+            exit: SessionExit::Success, canonical: None, limiter_keys: RefCell::default(),
         }
     }
 }
@@ -78,15 +80,22 @@ impl SessionLauncher for Services {
 }
 
 impl UserResolver for Services {
+    fn canonical_username(&self, username: &str) -> Result<String, UserResolveError> {
+        Ok(self.canonical.clone().unwrap_or_else(|| username.to_string()))
+    }
+
     fn resolve_user(&self, username: &str) -> Result<ResolvedUser, UserResolveError> {
         Ok(ResolvedUser { username: username.into(), uid: 1000, gid: 1000, home: "/home/example".into(), shell: "/bin/sh".into() })
     }
 }
 
 impl LoginAttemptLimiter for Services {
-    fn check_allowed(&self, _: &str) -> Result<(), LoginAttemptLimitError> { Ok(()) }
-    fn record_failure(&self, _: &str) {}
-    fn record_success(&self, _: &str) {}
+    fn check_allowed(&self, username: &str) -> Result<(), LoginAttemptLimitError> {
+        self.limiter_keys.borrow_mut().push(format!("check:{username}"));
+        Ok(())
+    }
+    fn record_failure(&self, username: &str) { self.limiter_keys.borrow_mut().push(format!("failure:{username}")); }
+    fn record_success(&self, username: &str) { self.limiter_keys.borrow_mut().push(format!("success:{username}")); }
 }
 
 impl AuditLogger for Services {
@@ -188,4 +197,18 @@ fn combined_recovery_and_pam_errors_are_both_in_the_cleanup_audit() {
         "launch", "session-started", "wait", "session-finished", "cleanup",
         "pam-close", "cleanup-failed", "pam-drop", "inhibitor-release",
     ]);
+}
+
+#[test]
+fn aliases_share_one_limiter_identity_after_directory_canonicalization() {
+    let services = Services { canonical: Some("alice".into()), ..Services::default() };
+    let mut password = PasswordSecret::new("secret");
+    let session = Session::new("example", "Example", "example-session", "/example.desktop");
+    let result = LoginUseCase { auth: &services, resolver: &services, launcher: &services,
+        limiter: &services, audit: &services, gate: None }.execute(LoginRequest {
+            username: "ALICE@example", password: &mut password, pam_service: "test", session: &session,
+            tty: "tty1", vtnr: Some(1), seat: "seat0", wrapper: &[], conversation: None,
+        });
+    assert!(result.is_ok());
+    assert_eq!(&*services.limiter_keys.borrow(), &vec![String::from("check:alice"), String::from("success:alice")]);
 }

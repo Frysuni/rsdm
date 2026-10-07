@@ -26,6 +26,10 @@ impl UnixUserResolver {
 }
 
 impl UserResolver for UnixUserResolver {
+    fn canonical_username(&self, username: &str) -> Result<String, UserResolveError> {
+        Ok(lookup_user(username)?.username)
+    }
+
     fn resolve_user(&self, username: &str) -> Result<ResolvedUser, UserResolveError> {
         let user = lookup_user(username)?;
         if self.deny_root && user.uid == 0 {

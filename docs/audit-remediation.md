@@ -30,7 +30,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 12 | Pin emergency unlock targets with pidfds | fixed |
 | 13 | Validate lock state through one open descriptor | fixed |
 | 14 | Honor PAM-requested authentication delay | pending |
-| 15 | Account throttling after PAM identity mapping | pending |
+| 15 | Account throttling after PAM identity mapping | fixed |
 | 16 | Audit successful starts after launch confirmation | fixed |
 | 17 | Audit termination separately from cleanup failure | fixed |
 | 18 | Move control-bus maintenance off the actor | fixed |
@@ -606,6 +606,19 @@ verification separate from private-peer and unit-test evidence.
   `git diff --check` passed. All changed Rust files remain below 300 lines and
   all new functions below 50. The existing coordinator test constructor exceeds
   50 lines because it assembles its isolated coordinator state; it was unchanged.
+
+- 15: LoginAttemptLimiter now receives the directory resolver's canonical
+  username before admission, so aliases that map to one account share a failure
+  bucket. UnixUserResolver derives that key from the same reentrant passwd lookup
+  used for account resolution. If canonical lookup fails, authentication keeps
+  its previous behavior and the submitted name is used for limiting; this avoids
+  turning an identity lookup failure into a new authentication outcome. Successful
+  limiter updates use the same canonical key, while PAM audit/session identity
+  remains the name returned by PAM.
+  A core login regression maps `ALICE@example` to `alice` and verifies both the
+  admission and success events use `alice`. Existing resolver implementations
+  retain a default identity method. No live PAM, NSS, user session, or limiter
+  state is touched by the test.
 
 - 50: Session discovery decodes the desktop string escape layer, validates whole
   double-quoted arguments, and expands Exec field codes after tokenization.
