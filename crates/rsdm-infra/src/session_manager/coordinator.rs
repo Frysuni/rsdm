@@ -103,13 +103,21 @@ impl Coordinator {
             }
             self.advance()?;
         }
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while self.replies_pending > 0 && Instant::now() < deadline {
-            if let Ok(request) = self.requests.recv_timeout(Duration::from_millis(50)) {
+        self.finish_reply_delivery()?;
+        Ok(self.exit_code)
+    }
+
+    pub(super) fn finish_reply_delivery(&mut self) -> Result<(), SessionError> {
+        let limit = Instant::now() + Duration::from_secs(2);
+        while self.replies_pending > 0 {
+            let local = limit.saturating_duration_since(Instant::now());
+            if local.is_zero() { break; }
+            let Ok(wait) = self.manager.deadline.remaining(local.min(Duration::from_millis(50))) else { break; };
+            if let Ok(request) = self.requests.recv_timeout(wait) {
                 self.request(request)?;
             }
         }
-        Ok(self.exit_code)
+        Ok(())
     }
 
     pub fn booting(&self) -> bool {

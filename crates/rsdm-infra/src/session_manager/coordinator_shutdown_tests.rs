@@ -164,3 +164,6 @@ mod completion;
 
 #[path = "coordinator_recovery_tests.rs"]
 mod recovery;
+
+#[path = "coordinator_reply_tests.rs"]
+mod replies;

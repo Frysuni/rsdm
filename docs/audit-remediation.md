@@ -296,3 +296,15 @@ verification separate from private-peer and unit-test evidence.
   expired budgets and completed-work/request handling. Files stay below 300
   lines and new functions below 50. Root-helper waits, app escalation, reply
   acknowledgements, actor reads, and whole-session VM timing remain open.
+- 1 (reply delivery): The closed coordinator's final response-acknowledgement
+  wait uses the remaining shared shutdown budget instead of adding two fresh
+  seconds. The two-second local cap remains for normal logout. Four private
+  regressions passed with `nix develop --command cargo test -p rsdm-infra
+  session_manager::coordinator_shutdown::tests::replies --locked`, covering
+  expiry, remaining time, real endpoint acknowledgement, and queued status.
+  Changed source/test files remain below 300 lines; no new function exceeds 50.
+- Lifecycle verification attempt: `nix build --no-link --print-build-logs
+  .#checks.x86_64-linux.session-lifecycle` failed before VM startup because
+  `cache.nixos.org` could not be resolved. No lifecycle result is claimed;
+  rerun after DNS/network access is restored. The working host session was
+  untouched.
