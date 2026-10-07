@@ -1,6 +1,7 @@
 //! One-shot CLI reports: ratatui layout, normal terminal scrollback, no input loop.
 
 mod render;
+mod events;
 mod journal;
 mod session;
 mod usage;
@@ -13,6 +14,7 @@ use ratatui::{
 };
 
 pub use usage::usage;
+pub use events::ConsoleFormat;
 pub use session::{application, session_status};
 pub use journal::journal_record;
 

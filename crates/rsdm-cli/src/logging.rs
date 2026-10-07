@@ -25,8 +25,9 @@ pub fn init(config_path: &Path) {
     let decorated = crate::output::stderr_is_decorated();
     let stderr_layer = tracing_subscriber::fmt::layer()
         .with_writer(BoxMakeWriter::new(io::stderr))
-        .with_ansi(decorated)
+        .with_ansi(false)
         .with_target(true)
+        .event_format(crate::output::ConsoleFormat)
         // CLI diagnostics already have a terminal report; retain their structured file/journal events.
         .with_filter(tracing_subscriber::filter::filter_fn(move |metadata| {
             !decorated || metadata.target() != "rsdm::cli"

@@ -241,3 +241,24 @@ fn journal_plain_mode_and_failure_exit_codes_are_preserved() {
     failed.env("JOURNAL_EXIT", "7");
     assert_eq!(failed.output().unwrap().status.code(), Some(7));
 }
+
+#[test]
+fn runtime_diagnostics_share_the_palette_and_preserve_fields() {
+    let cli = CliTest::new();
+    let mut command = cli.command(&["validate-config"]);
+    command.env("RUST_LOG", "rsdm=debug");
+    let (status, text) = terminal(command, 80);
+    assert!(status.success(), "{text}");
+    for expected in ["DEBUG", "rsdm::logging", "logging initialized", "destination=", "level=", "config="] {
+        assert!(text.contains(expected), "missing {expected}: {text}");
+    }
+    assert!(text.contains("  │ "), "{text}");
+    assert_only_styles(&text);
+
+    let mut command = cli.command(&["validate-config"]);
+    command.env("RUST_LOG", "rsdm=debug");
+    let output = command.output().unwrap();
+    assert!(output.status.success());
+    assert!(!output.stderr.contains(&0x1b));
+    assert!(String::from_utf8(output.stderr).unwrap().contains("logging initialized"));
+}
