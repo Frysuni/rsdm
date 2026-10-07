@@ -48,6 +48,7 @@ pub(super) struct Coordinator {
     pub action: String,
     pub ready_busy: bool,
     pub ready_once: bool,
+    pub pending_ready: bool,
     pub preparing: bool,
     pub forced_units: Vec<String>,
     pub exit_code: i32,
@@ -89,6 +90,7 @@ impl Coordinator {
             if self.lifecycle.phase == SessionPhase::Closed {
                 break;
             }
+            self.verify_readiness()?;
             match self.observe() {
                 Err(SessionError::Bus(error)) if super::bus::retryable_error(&error) => {
                     tracing::warn!(%error, "deferring session observation while the user manager is unavailable");

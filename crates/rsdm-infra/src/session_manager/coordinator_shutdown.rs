@@ -138,13 +138,14 @@ impl Coordinator {
     fn resume(&mut self, result: &str, message: &str) -> Result<(), SessionError> {
         self.xsmp.cancel();
         self.respond_stop(result, message);
-        self.lifecycle.phase = if self.manager.active(&self.record.anchor_unit)? { SessionPhase::Running } else { SessionPhase::Starting };
+        // Restore the last verified phase. Observation will confirm any real
+        // anchor stop once the manager is available again.
+        self.lifecycle.phase = if self.ready_once { SessionPhase::Running } else { SessionPhase::Starting };
         self.shutdown = None;
         self.record.shutdown_deadline_usec = None;
         self.action.clear();
         self.preparing = false;
         self.stopping.store(false, Ordering::SeqCst);
-        apps::release_closed(&self.manager, &self.runtime)?;
         apps::reset_preparation(&self.runtime)?;
         self.save()
     }

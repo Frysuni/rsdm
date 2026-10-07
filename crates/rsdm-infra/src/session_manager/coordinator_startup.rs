@@ -90,6 +90,7 @@ impl Coordinator {
             action: String::new(),
             ready_busy: false,
             ready_once: false,
+            pending_ready: false,
             preparing: false,
             forced_units: Vec::new(),
             exit_code: 0,

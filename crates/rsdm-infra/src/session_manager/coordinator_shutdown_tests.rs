@@ -23,6 +23,8 @@ impl Fixture {
             std::process::id(), NEXT_ID.fetch_add(1, Ordering::Relaxed)));
         fs::create_dir(&directory).unwrap();
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::create_dir(directory.join("apps")).unwrap();
+        fs::set_permissions(directory.join("apps"), fs::Permissions::from_mode(0o700)).unwrap();
         let runtime = Runtime { path: directory.clone(), generation: GENERATION.into() };
         let (server_socket, client_socket) = UnixStream::pair().unwrap();
         let server = thread::spawn(move || async_io::block_on(async {
@@ -55,6 +57,7 @@ impl Fixture {
             directory: directory.clone(), requests, work, events, queued: Default::default(),
             finalize_replies: Vec::new(), stop_replies: Vec::new(), stopping: Arc::default(),
             shutdown: None, action: String::new(), ready_busy: false, ready_once: true,
+            pending_ready: false,
             preparing: false, forced_units: Vec::new(), exit_code: 0, replies_pending: 0, workers: 0,
             xsmp, _control_bus: connection, ready_deadline: Instant::now(), display_since: None,
             _power_monitor: ShutdownMonitor::idle_for_test(), notices: received, last_reap: Instant::now(),
@@ -151,3 +154,6 @@ fn notices_during_infrastructure_stop_record_the_budget_without_reopening_prepar
     fixture.notify(false, 30_000_000);
     assert!(fixture.coordinator.shutdown.as_ref().unwrap().noncancelable.load(Ordering::SeqCst));
 }
+
+#[path = "coordinator_completion_tests.rs"]
+mod completion;

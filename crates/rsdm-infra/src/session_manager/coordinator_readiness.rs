@@ -96,25 +96,14 @@ impl Coordinator {
     }
 
     pub fn ready_completed(&mut self, result: Result<bool, SessionError>) -> Result<(), SessionError> {
-        self.ready_busy = false;
         match result {
             Ok(owns_targets) => {
                 self.record.owns_targets |= owns_targets;
-                let ready = self.manager.active(&self.record.anchor_unit)? && self.lifecycle.accepts_finalize();
-                if ready {
-                    self.ready_once = true;
-                    self.lifecycle.ready();
-                }
-                for reply in self.finalize_replies.drain(..) {
-                    let result = if ready {
-                        Ok(())
-                    } else {
-                        Err("session shutdown interrupted activation".into())
-                    };
-                    let _ = reply.try_send(result);
-                }
+                self.pending_ready = true;
+                return self.verify_readiness();
             }
             Err(error) => {
+                self.ready_busy = false;
                 for reply in self.finalize_replies.drain(..) {
                     let _ = reply.try_send(Err(error.to_string()));
                 }
@@ -122,11 +111,39 @@ impl Coordinator {
                 self.ready_deadline = Instant::now();
             }
         }
+        Ok(())
+    }
+
+    pub fn verify_readiness(&mut self) -> Result<(), SessionError> {
+        if !self.pending_ready {
+            return Ok(());
+        }
+        let ready = if self.lifecycle.accepts_finalize() {
+            match self.manager.active(&self.record.anchor_unit) {
+                Err(SessionError::Bus(error)) if super::bus::retryable_error(&error) => {
+                    tracing::warn!(%error, "deferring activation verification while the user manager is unavailable");
+                    return Ok(());
+                }
+                other => other?,
+            }
+        } else {
+            false
+        };
+        self.pending_ready = false;
+        self.ready_busy = false;
+        if ready {
+            self.ready_once = true;
+            self.lifecycle.ready();
+        }
+        for reply in self.finalize_replies.drain(..) {
+            let result = if ready { Ok(()) } else { Err("session shutdown interrupted activation".into()) };
+            let _ = reply.try_send(result);
+        }
         if self.lifecycle.phase == SessionPhase::Running {
             while let Some((request, reply, _)) = self.queued.pop_front() {
                 self.launch(request, reply)?;
             }
         }
-        Ok(())
+        self.save()
     }
 }
