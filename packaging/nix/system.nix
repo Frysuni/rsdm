@@ -14,12 +14,15 @@ let
   ttyName = lib.removePrefix "/dev/" ttyPath;
   displayManagerAlias =
     if cfg.displayManagerAlias == null then ttyName == "tty1" else cfg.displayManagerAlias;
+  dmEnabled = runtimeConfig.dm.enable;
+  lockEnabled = runtimeConfig.lock.enable;
+  idleEnabled = runtimeConfig.idle.enable;
 in
 lib.mkIf cfg.enable {
   assertions = [
     {
-      assertion = !cfg.idle.enable || cfg.lock.enable || cfg.idle.lockCommand != [ ];
-      message = "services.rsdm.idle.enable with the built-in locker requires services.rsdm.lock.enable";
+      assertion = !idleEnabled || lockEnabled || runtimeConfig.idle.lock_command != [ ];
+      message = "RSDM idle.enable requires lock.enable or idle.lock_command in the merged configuration.";
     }
     {
       assertion =
@@ -48,8 +51,8 @@ lib.mkIf cfg.enable {
   # corrupts amdgpu's present path (desktop drops to ~20-30fps until a reboot).
   # Disabling autovt is not enough - logind StartUnit's it by name regardless
   # of WantedBy symlinks - so it must be masked to be refused.
-  systemd.services."getty@${ttyName}".enable = lib.mkIf (cfg.dm.enable && cfg.disableGetty) false;
-  systemd.services."autovt@${ttyName}".enable = lib.mkIf (cfg.dm.enable && cfg.disableGetty) false;
+  systemd.services."getty@${ttyName}".enable = lib.mkIf (dmEnabled && cfg.disableGetty) false;
+  systemd.services."autovt@${ttyName}".enable = lib.mkIf (dmEnabled && cfg.disableGetty) false;
 
   # rsdm is the display manager, so it owns the boot target. Without this the
   # system keeps systemd's default of multi-user.target, graphical.target is
@@ -57,7 +60,7 @@ lib.mkIf cfg.enable {
   # boot - the user lands on a bare console and has to launch the session by
   # hand. Every NixOS DM module promotes the default unit the same way. Use
   # mkDefault so a host that drives the boot target itself can override it.
-  systemd.defaultUnit = lib.mkIf cfg.dm.enable (lib.mkDefault "graphical.target");
+  systemd.defaultUnit = lib.mkIf dmEnabled (lib.mkDefault "graphical.target");
 
   environment.etc."rsdm.toml".source = toml.generate "rsdm.toml" runtimeConfig;
   environment.systemPackages = [ cfg.package ];
@@ -98,7 +101,7 @@ lib.mkIf cfg.enable {
     account   include   login
   '';
 
-  systemd.services.rsdm = lib.mkIf cfg.dm.enable {
+  systemd.services.rsdm = lib.mkIf dmEnabled {
     description = "rsdm display manager";
     conflicts = [ "getty@${ttyName}.service" ];
     after = [
@@ -153,7 +156,7 @@ lib.mkIf cfg.enable {
     };
   };
 
-  systemd.user.services.rsdm-idle = lib.mkIf cfg.idle.enable {
+  systemd.user.services.rsdm-idle = lib.mkIf idleEnabled {
     description = "rsdm Wayland idle monitor";
     documentation = [ "https://github.com/Frysuni/rsdm/blob/main/docs/idle.md" ];
     wantedBy = [ "graphical-session.target" ];

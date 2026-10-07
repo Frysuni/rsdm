@@ -86,6 +86,21 @@ let
     config.dm.tty.path = "/dev/tty3";
     extraConfig.dm.tty.path = "/dev/tty2";
   };
+  disabledThroughConfig = evaluate {
+    extraConfig.dm.enable = false;
+    extraConfig.idle.enable = false;
+  };
+  enabledThroughConfig = evaluate {
+    dm.enable = false;
+    idle.enable = false;
+    extraConfig.dm.enable = true;
+    extraConfig.idle.enable = true;
+  };
+  customLockerThroughConfig = evaluate {
+    lock.enable = false;
+    extraConfig.idle.lock_command = [ "custom-locker" ];
+  };
+  disabledLockerThroughConfig = evaluate { extraConfig.lock.enable = false; };
   override = evaluate {
     channel = "unstable";
     package = pkgs.hello;
@@ -122,6 +137,16 @@ assert overriddenTty.systemd.services.rsdm.aliases == [ ];
 assert !(overriddenTty.systemd.services."getty@tty2".enable);
 assert !(overriddenTty.systemd.services."autovt@tty2".enable);
 assert overriddenTty.systemd.services."getty@tty1".enable or true;
+assert !(disabledThroughConfig.systemd.services ? rsdm);
+assert !(disabledThroughConfig.systemd.user.services ? rsdm-idle);
+assert disabledThroughConfig.systemd.defaultUnit == "multi-user.target";
+assert disabledThroughConfig.systemd.services."getty@tty1".enable or true;
+assert enabledThroughConfig.systemd.services ? rsdm;
+assert enabledThroughConfig.systemd.user.services ? rsdm-idle;
+assert enabledThroughConfig.systemd.defaultUnit == "graphical.target";
+assert !(enabledThroughConfig.systemd.services."getty@tty1".enable);
+assert rsdmAssertionsHold customLockerThroughConfig;
+assert !(rsdmAssertionsHold disabledLockerThroughConfig);
 pkgs.runCommand "rsdm-module-configuration" { } ''
   ${stable.services.rsdm.package}/bin/rsdm \
     --config ${stable.environment.etc."rsdm.toml".source} validate-config

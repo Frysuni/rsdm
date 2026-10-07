@@ -150,6 +150,8 @@ The module:
 TTY overrides in `config` or `extraConfig` also apply to the service's
 `TTYPath`, getty/autovt masking and automatic display-manager alias. The service
 and `/etc/rsdm.toml` therefore use the same VT.
+The merged DM/Lock/Idle enable flags also control service creation, getty
+masking, the boot target and the built-in locker requirement.
 
 ## Common options
 
