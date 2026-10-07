@@ -23,7 +23,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 5 | Symmetric record read/write size limits | fixed |
 | 6 | Reap lockers that never confirm readiness | pending |
 | 7 | Bound idle hooks | pending |
-| 8 | Retain restoration state for removed niri outputs | pending |
+| 8 | Retain restoration state for removed niri outputs | implemented; compositor checks pending |
 | 9 | Move bounded niri IPC off the Wayland loop | pending |
 | 10 | Cancellable, bounded PAM helper processes | pending |
 | 11 | Remove complex post-PAM fork child work | pending |
@@ -205,3 +205,8 @@ Record unexecuted runtime checks explicitly for later verification.
   failures still retain the shutdown inhibitor through PAM close/drop.
   Ordering tests cover success, recovery/PAM failures, unknown wait, and failed
   or signaled exits. Syntax/diff checks passed; runtime execution is pending.
+- 8: Removing a Wayland output no longer drops its connector from the locker's
+  restoration obligations. The existing output-on path retains failed restores
+  for retry and runs on policy/primary changes and ordinary exit. Syntax/diff
+  checks passed; a real niri two-output check is pending. Bounded asynchronous
+  IPC and restoration after hard crashes remain tracked separately as 9 and 35.

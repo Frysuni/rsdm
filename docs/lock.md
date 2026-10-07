@@ -64,9 +64,10 @@ secondary_output = "background" # background | black | off
 
 `background` keeps only `[lock.design]` wallpaper/effects. `black` paints opaque
 black. `off` temporarily runs niri's supported `output off` IPC operation and
-restores the outputs with `output on` after unlock or an ordinary locker error;
-on other compositors it falls back to black. Find niri names with
-`niri msg outputs`.
+restores the outputs with `output on` after unlock or an ordinary locker error.
+Restoration keeps track of connector names even if switching an output off
+removes its Wayland output object. On other compositors it falls back to black.
+Find niri names with `niri msg outputs`.
 
 The locker renders a separate physical-pixel buffer for every output. On
 fractionally scaled outputs (for example niri `scale 1.5`) it follows
