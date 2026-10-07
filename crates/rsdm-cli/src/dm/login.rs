@@ -13,7 +13,7 @@ use rsdm_infra::{
     storage::FileUserStore,
     unix::{
         LeaderGate, LeaderHandle, LeaderLaunch, LeaderReport, UnixSessionLauncher,
-        UnixUserResolver, spawn_session_leader, terminate_requested,
+        UnixUserResolver, VtGuard, spawn_session_leader, terminate_requested,
     },
 };
 
@@ -25,6 +25,7 @@ pub(super) struct ParkedSession {
 
 pub(super) fn begin(
     config: &AppConfig,
+    vt: &mut VtGuard,
     wrapper: &[String],
     limiter: &dyn LoginAttemptLimiter,
     sessions: &[Session],
@@ -54,6 +55,7 @@ pub(super) fn begin(
         "login submitted"
     );
     let launch = spawn_session_leader(conversation, |gate| {
+        vt.release_in_session_child();
         child_login(config, wrapper, &username, &mut password, session, gate)
     });
     drop(password);

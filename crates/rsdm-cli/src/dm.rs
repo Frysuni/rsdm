@@ -49,7 +49,7 @@ pub fn run_dm(config: AppConfig, config_path: &Path) -> Result<()> {
 
 fn run_greeter_loop(
     config: AppConfig,
-    vt: VtGuard,
+    mut vt: VtGuard,
     wrapper: Vec<String>,
     sessions: Vec<Session>,
     store: FileUserStore,
@@ -82,6 +82,7 @@ fn run_greeter_loop(
             &mut |attempt, conversation| {
                 login::begin(
                     &config,
+                    &mut vt,
                     &wrapper,
                     &limiter,
                     &sessions,

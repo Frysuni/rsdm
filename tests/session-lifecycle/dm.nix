@@ -72,6 +72,9 @@ pkgs.testers.runNixOSTest {
     with subtest("a service restart preserves the seated session and PAM owner"):
         machine.succeed("systemctl restart rsdm")
         machine.wait_for_unit("rsdm.service")
+        machine.wait_until_succeeds("journalctl --no-pager -u rsdm | grep 'VT is owned by a live session; waiting for it to end'")
+        machine.succeed("test \"$(systemctl show rsdm --property=NRestarts --value)\" = 0")
+        machine.fail("journalctl --no-pager -u rsdm | grep 'another rsdm greeter already owns'")
         machine.succeed("loginctl show-session " + shlex.quote(session_id) + " --property=State")
         assert machine.succeed(user + "systemctl --user show --property=MainPID --value " + shlex.quote(compositor)).strip() == compositor_pid
         machine.succeed(session + "rsdm session status | grep ': running '")

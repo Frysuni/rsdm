@@ -45,6 +45,14 @@ pub struct VtGuard {
 }
 
 impl VtGuard {
+    /// Close the inherited lock descriptor in the forked session leader.
+    /// Call this only in the child, before opening its PAM session.
+    /// Only the greeter must keep the claim alive; unlocking explicitly would
+    /// also release its lock because fork shares the open file description.
+    pub fn release_in_session_child(&mut self) {
+        self._lock.take();
+    }
+
     /// Re-claim the VT foreground when control returns to the greeter after a
     /// session exits. While the session ran, the compositor became the VT's
     /// foreground; reclaiming makes the freshly redrawn greeter receive
@@ -254,3 +262,7 @@ fn lock_vt(tty_path: &str) -> LockOutcome {
         LockOutcome::Unavailable
     }
 }
+
+#[cfg(test)]
+#[path = "vt_tests.rs"]
+mod tests;
