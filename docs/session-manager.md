@@ -286,6 +286,13 @@ limited to 256 KiB, including D-Bus encoding overhead. Oversized or NUL-containi
 payloads are rejected before coordinator admission or recovery-record changes.
 The CLI checks launch/finalize payloads before sending them.
 
+Admission allows 64 unfinished Launch/Finalize/Status requests. Stop, Cancel,
+and XSMP preparation have independent limits of 4, 2, and 2 so launch traffic
+cannot consume their slots. Excess calls receive D-Bus `LimitsExceeded` and
+may be retried after outstanding work finishes. Slots remain held through
+queued/worker work and replies, including when a caller disconnects. Stop
+acknowledgements retain their slot until the coordinator receives them.
+
 ## Configuration and diagnostics
 
 No WM/DE tables or app profiles are needed in `rsdm.toml`:

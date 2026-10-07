@@ -31,8 +31,7 @@ fn fixture() -> (Server, Connection, mpsc::Receiver<()>, async_channel::Sender<(
     let connection = async_io::block_on(async {
         zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()
     });
-    let (requests, _received) = mpsc::channel();
-    let endpoint = Endpoint { requests, uid: crate::lock_control::current_uid() };
+    let (endpoint, _received) = Endpoint::channel(crate::lock_control::current_uid());
     (Server::with_connection(connection, endpoint), peer.join().unwrap(), ready, resume)
 }
 

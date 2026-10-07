@@ -27,8 +27,9 @@ impl Coordinator {
             Request::Status(reply) => {
                 let _ = reply.try_send(Ok(self.status()?));
             }
-            Request::StopReplySent => {
+            Request::StopReplySent(permit) => {
                 self.replies_pending = self.replies_pending.saturating_sub(1);
+                drop(permit);
             }
             Request::XsmpPrepare { generation, units, cancellable, reply } => {
                 if generation != self.runtime.generation || self.lifecycle.phase == SessionPhase::Closed {

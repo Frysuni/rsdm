@@ -1,6 +1,6 @@
 //! User-bus requests; lifecycle decisions are serialized by the coordinator.
 
-use std::sync::mpsc::Sender;
+use std::sync::{Arc, mpsc::{self, Receiver, SyncSender, TrySendError}};
 
 use serde::{Deserialize, Serialize};
 use zbus::{Connection, message::Header, object_server::ResponseDispatchNotifier, zvariant::Type};
@@ -48,7 +48,10 @@ pub struct StopOutcome {
     pub message: String,
 }
 
-pub(super) type Reply<T> = async_channel::Sender<Result<T, String>>;
+#[path = "control_admission.rs"]
+mod admission;
+use admission::{Admission, Class, Permit};
+pub(super) use admission::Reply;
 
 pub(super) enum Request {
     Launch(LaunchRequest, Reply<String>),
@@ -57,24 +60,35 @@ pub(super) enum Request {
     Cancel { generation: String, reply: Reply<()> },
     Status(Reply<SessionStatus>),
     XsmpPrepare { generation: String, units: Vec<String>, cancellable: bool, reply: Reply<Vec<String>> },
-    StopReplySent,
+    StopReplySent(Arc<Permit>),
 }
 
 #[derive(Clone)]
 pub(super) struct Endpoint {
-    pub requests: Sender<Request>,
-    pub uid: u32,
+    requests: SyncSender<Request>,
+    uid: u32,
+    admission: Admission,
 }
 
 impl Endpoint {
+    pub fn channel(uid: u32) -> (Self, Receiver<Request>) {
+        let (requests, received) = mpsc::sync_channel(admission::QUEUE_CAPACITY);
+        (Self { requests, uid, admission: Admission::default() }, received)
+    }
+
     async fn request<T: Send + 'static>(
-        &self, make_request: impl FnOnce(Reply<T>) -> Request + Send,
+        &self, permit: Arc<Permit>, make_request: impl FnOnce(Reply<T>) -> Request + Send,
     ) -> zbus::fdo::Result<T> {
-        let (reply, result) = async_channel::bounded(1);
-        self.requests.send(make_request(reply))
-            .map_err(|_| zbus::fdo::Error::Failed("session coordinator stopped".into()))?;
-        result.recv().await.map_err(|_| zbus::fdo::Error::Failed("session request was interrupted".into()))?
-            .map_err(zbus::fdo::Error::Failed)
+        let (sender, result) = async_channel::bounded(1);
+        let reply = Reply::new(sender, permit.clone());
+        self.requests.try_send(make_request(reply)).map_err(|error| match error {
+            TrySendError::Full(_) => zbus::fdo::Error::LimitsExceeded("session coordinator queue is full".into()),
+            TrySendError::Disconnected(_) => zbus::fdo::Error::Failed("session coordinator stopped".into()),
+        })?;
+        let outcome = result.recv().await
+            .map_err(|_| zbus::fdo::Error::Failed("session request was interrupted".into()))?;
+        drop(permit);
+        outcome.map_err(zbus::fdo::Error::Failed)
     }
 
     async fn authorize(&self, connection: &Connection, header: &Header<'_>) -> zbus::fdo::Result<()> {
@@ -100,32 +114,35 @@ impl Endpoint {
         &self, request: LaunchRequest,
         #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<String> {
+        let permit = self.admission.acquire(Class::Regular)?;
         self.authorize(connection, &header).await?;
         validate_launch(&request).map_err(zbus::fdo::Error::InvalidArgs)?;
-        self.request(|reply| Request::Launch(request, reply)).await
+        self.request(permit, |reply| Request::Launch(request, reply)).await
     }
 
     async fn finalize(
         &self, generation: String, environment: Vec<(String, String)>,
         #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<()> {
+        let permit = self.admission.acquire(Class::Regular)?;
         self.authorize(connection, &header).await?;
         validate_finalize(&generation, &environment).map_err(zbus::fdo::Error::InvalidArgs)?;
-        self.request(|reply| Request::Finalize { generation, environment, reply }).await
+        self.request(permit, |reply| Request::Finalize { generation, environment, reply }).await
     }
 
     async fn stop(
         &self, generation: String, action: String,
         #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<ResponseDispatchNotifier<StopOutcome>> {
+        let permit = self.admission.acquire(Class::Stop)?;
         self.authorize(connection, &header).await?;
         payload::validate_stop(&generation, &action).map_err(zbus::fdo::Error::InvalidArgs)?;
-        let outcome = self.request(|reply| Request::Stop { generation, action, reply }).await?;
+        let outcome = self.request(permit.clone(), |reply| Request::Stop { generation, action, reply }).await?;
         let (response, sent) = ResponseDispatchNotifier::new(outcome);
         let requests = self.requests.clone();
         connection.executor().spawn(async move {
             sent.await;
-            let _ = requests.send(Request::StopReplySent);
+            let _ = requests.try_send(Request::StopReplySent(permit));
         }, "rsdm session stop response").detach();
         Ok(response)
     }
@@ -134,25 +151,28 @@ impl Endpoint {
         &self, generation: String,
         #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<()> {
+        let permit = self.admission.acquire(Class::Cancel)?;
         self.authorize(connection, &header).await?;
         payload::validate_generation(&generation).map_err(zbus::fdo::Error::InvalidArgs)?;
-        self.request(|reply| Request::Cancel { generation, reply }).await
+        self.request(permit, |reply| Request::Cancel { generation, reply }).await
     }
 
     async fn status(
         &self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<SessionStatus> {
+        let permit = self.admission.acquire(Class::Regular)?;
         self.authorize(connection, &header).await?;
-        self.request(Request::Status).await
+        self.request(permit, Request::Status).await
     }
 
     async fn xsmp_prepare(
         &self, generation: String, units: Vec<String>, cancellable: bool,
         #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<Vec<String>> {
+        let permit = self.admission.acquire(Class::Xsmp)?;
         self.authorize(connection, &header).await?;
         payload::validate_xsmp(&generation, &units).map_err(zbus::fdo::Error::InvalidArgs)?;
-        self.request(|reply| Request::XsmpPrepare { generation, units, cancellable, reply }).await
+        self.request(permit, |reply| Request::XsmpPrepare { generation, units, cancellable, reply }).await
     }
 }
 

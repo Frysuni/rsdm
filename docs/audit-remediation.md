@@ -55,7 +55,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 37 | Harden privileged log file opens | pending |
 | 38 | Avoid console font temporary-file collisions | implemented; runtime checks pending |
 | 39 | Reap closed generation lease files safely | pending |
-| 40 | Bound coordinator request backlog | pending |
+| 40 | Bound coordinator request backlog | implemented; runtime checks pending |
 | 41 | Bound launch request payloads | implemented; runtime checks pending |
 | 42 | Clarify/update Arch release package versions | pending |
 | 43 | Verify downloadable Arch package artifacts | pending |
@@ -192,3 +192,10 @@ Record unexecuted runtime checks explicitly for later verification.
   methods too. CLI launch/finalize and app registration share the checks.
   Boundary, encoding-overhead, Unicode/NUL, and private-peer rejection tests
   were added; syntax/diff checks passed, with runtime execution pending.
+- 40: bounded control queue plus shared admission permits bound unfinished
+  requests across authorization, queued startup, workers, pending replies, and
+  stop delivery acknowledgements. Reply clones keep their permit even if the
+  caller disconnects. Separate stop/cancel/XSMP slots survive launch saturation;
+  excess calls fail with LimitsExceeded without blocking the endpoint executor.
+  Tests cover overload, queue saturation, permit lifetime, slot reuse, and
+  lifecycle reservations. Syntax/diff checks passed; runtime checks are pending.

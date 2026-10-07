@@ -21,9 +21,9 @@ impl Coordinator {
             .ok_or_else(|| SessionError::State("readiness timeout is too large".into()))?;
         let identity = SessionIdentity::discover()?;
         let lease = super::session_lease::SessionLease::acquire()?;
-        let (sender, requests) = mpsc::channel();
+        let (endpoint, requests) = control::Endpoint::channel(identity.uid);
         // Acquire the one-session lease before changing shared manager state.
-        let bus = control::ControlServer::start(control::Endpoint { requests: sender, uid: identity.uid })?;
+        let bus = control::ControlServer::start(endpoint)?;
         let manager = UserManager::connect()?;
         super::processes::require_pidfds()?;
         if manager.active(units::SESSION_TARGET)? {

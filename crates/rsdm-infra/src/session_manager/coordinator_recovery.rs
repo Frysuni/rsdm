@@ -71,6 +71,6 @@ fn reject(request: Request) {
         Request::Stop { reply, .. } => { let _ = reply.try_send(Err(message)); }
         Request::Status(reply) => { let _ = reply.try_send(Err(message)); }
         Request::XsmpPrepare { reply, .. } => { let _ = reply.try_send(Err(message)); }
-        Request::StopReplySent => {},
+        Request::StopReplySent(permit) => drop(permit),
     }
 }

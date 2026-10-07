@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 
 use zbus::zvariant::OwnedObjectPath;
 
+use crate::session_manager::control::Reply;
+
 use super::*;
 
 #[derive(Default)]
@@ -125,7 +127,7 @@ fn readiness_completion_waits_for_reads_without_repeating_activation() {
     fixture.coordinator.ready_once = false;
     fixture.coordinator.ready_busy = true;
     let (reply, received) = async_channel::bounded(1);
-    fixture.coordinator.finalize_replies.push(reply);
+    fixture.coordinator.finalize_replies.push(Reply::for_test(reply));
 
     fixture.coordinator.ready_completed(Ok(true)).unwrap();
     assert!(fixture.coordinator.pending_ready);
@@ -155,7 +157,7 @@ fn shutdown_releases_pending_readiness_even_during_an_outage() {
     fixture.coordinator.ready_busy = true;
     fixture.coordinator.pending_ready = true;
     let (reply, received) = async_channel::bounded(1);
-    fixture.coordinator.finalize_replies.push(reply);
+    fixture.coordinator.finalize_replies.push(Reply::for_test(reply));
 
     fixture.coordinator.begin_stop("logout", None).unwrap();
     fixture.coordinator.verify_readiness().unwrap();
@@ -178,7 +180,7 @@ fn preparation_failure_and_native_delegation_resume_without_manager_reads() {
             fixture.coordinator.begin_stop("logout", None).unwrap();
             fixture.coordinator.preparing = true;
             let (reply, received) = async_channel::bounded(1);
-            fixture.coordinator.stop_replies.push(reply);
+            fixture.coordinator.stop_replies.push(Reply::for_test(reply));
 
             if delegated {
                 fixture.coordinator.lifecycle.phase = SessionPhase::StoppingSession;

@@ -47,7 +47,7 @@ impl Fixture {
             phase: SessionPhase::Running, exported_environment: Vec::new(), shutdown_deadline_usec: None,
         };
         runtime.save_session(&record).unwrap();
-        let (sender, requests) = std::sync::mpsc::channel();
+        let (endpoint, requests) = crate::session_manager::control::Endpoint::channel(uid);
         let (events, work) = std::sync::mpsc::channel();
         let (notices, received) = std::sync::mpsc::channel();
         let mut lifecycle = Lifecycle::new();
@@ -61,7 +61,7 @@ impl Fixture {
             pending_boot: false,
             preparing: false, forced_units: Vec::new(), exit_code: 0, replies_pending: 0, workers: 0,
             xsmp, control_bus: crate::session_manager::control::ControlServer::with_connection(
-                connection, crate::session_manager::control::Endpoint { requests: sender, uid },
+                connection, endpoint,
             ), ready_deadline: Instant::now(), display_since: None,
             _power_monitor: ShutdownMonitor::idle_for_test(), notices: received, last_reap: Instant::now(),
             _lease: crate::session_manager::session_lease::SessionLease::acquire_in(&directory).unwrap(),
