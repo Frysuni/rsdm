@@ -29,7 +29,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 11 | Remove complex post-PAM fork child work | pending |
 | 12 | Pin emergency unlock targets with pidfds | fixed |
 | 13 | Validate lock state through one open descriptor | fixed |
-| 14 | Honor PAM-requested authentication delay | pending |
+| 14 | Honor PAM-requested authentication delay | fixed |
 | 15 | Account throttling after PAM identity mapping | fixed |
 | 16 | Audit successful starts after launch confirmation | fixed |
 | 17 | Audit termination separately from cleanup failure | fixed |
@@ -619,6 +619,14 @@ verification separate from private-peer and unit-test evidence.
   admission and success events use `alice`. Existing resolver implementations
   retain a default identity method. No live PAM, NSS, user session, or limiter
   state is touched by the test.
+
+- 14: PamHandle no longer installs a no-op `PAM_FAIL_DELAY` callback. Linux-PAM
+  and its configured modules retain ownership of the requested authentication
+  delay, including module-specific aggregation and randomization. RSDM's
+  username limiter remains an additional admission control and no longer
+  overrides the PAM stack's delay policy. The change removes the unused FFI
+  constant and callback; PAM setup/authentication tests still pass without
+  contacting a real authentication service.
 
 - 50: Session discovery decodes the desktop string escape layer, validates whole
   double-quoted arguments, and expands Exec field codes after tokenization.

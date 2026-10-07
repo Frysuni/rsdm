@@ -9,7 +9,6 @@ pub(super) const PAM_ESTABLISH_CRED: c_int = 0x2;
 pub(super) const PAM_DELETE_CRED: c_int = 0x4;
 pub(super) const PAM_TTY: c_int = 3;
 pub(super) const PAM_USER: c_int = 2;
-pub(super) const PAM_FAIL_DELAY: c_int = 10;
 
 #[repr(C)]
 pub struct PamHandleRaw {

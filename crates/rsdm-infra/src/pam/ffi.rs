@@ -1,6 +1,6 @@
 use std::{
     ffi::{CStr, CString},
-    os::raw::{c_int, c_void},
+    os::raw::c_int,
     ptr,
 };
 
@@ -55,16 +55,6 @@ impl PamHandle {
             return Err(AuthError::Backend(
                 "pam_start returned a null handle".to_string(),
             ));
-        }
-        // Linux-PAM sleeps ~2 seconds inside pam_authenticate on a wrong
-        // password (the pam_unix fail delay) unless the application installs
-        // its own delay handler. rsdm rate-limits attempts itself and shows
-        // the failure on the login screen, so the stock delay only freezes
-        // the UI; a no-op handler disables it. Best-effort, like in gdm.
-        // SAFETY: raw is a live handle; PAM stores the function pointer for
-        // the lifetime of the transaction.
-        unsafe {
-            pam_set_item(raw, PAM_FAIL_DELAY, no_fail_delay as *const c_void);
         }
         Ok(Self {
             raw,
@@ -270,7 +260,3 @@ impl Drop for PamHandle {
 fn cstring(label: &str, value: &str) -> Result<CString, AuthError> {
     CString::new(value).map_err(|_| AuthError::Backend(format!("{label} contains NUL byte")))
 }
-
-/// The application-provided PAM fail-delay handler: doing nothing here replaces
-/// the library's blocking sleep on failed authentication.
-extern "C" fn no_fail_delay(_retval: c_int, _usec_delay: libc::c_uint, _appdata: *mut c_void) {}
