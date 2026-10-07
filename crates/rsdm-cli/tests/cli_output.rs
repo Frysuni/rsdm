@@ -1,7 +1,7 @@
 //! Verify real terminal output without executing desktop or power actions.
 
 use std::{
-    fs, io::{self, Read}, os::fd::{FromRawFd, OwnedFd}, path::PathBuf,
+    fs, io::{self, Read}, os::{fd::{FromRawFd, OwnedFd}, unix::fs::PermissionsExt}, path::PathBuf,
     process::{Command, ExitStatus, Output, Stdio},
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -28,6 +28,23 @@ impl CliTest {
 
     fn pipe(&self, args: &[&str]) -> Output {
         self.command(args).output().unwrap()
+    }
+
+    fn journal(&self) {
+        let script = r#"#!/bin/sh
+printf '%s\n' "$@" > "$HOME/journal-args"
+case "$*" in
+    *--output=json*)
+        printf '%s\n' '{"__REALTIME_TIMESTAMP":"1234567","PRIORITY":"4","SYSLOG_IDENTIFIER":"rsdm","MESSAGE":"timeout warning\nsecond line\u001b[2J"}'
+        printf '%s\n' '{"__REALTIME_TIMESTAMP":"2234567","PRIORITY":"6","_SYSTEMD_USER_UNIT":"rsdm-idle.service","MESSAGE":[208,159,209,128,208,184,208,178,208,181,209,130]}'
+        ;;
+    *) printf 'plain journal entry\n' ;;
+esac
+exit "${JOURNAL_EXIT:-0}"
+"#;
+        let path = self.root.join("journalctl");
+        fs::write(&path, script).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
 }
 
@@ -176,4 +193,51 @@ fn warnings_stay_on_stderr_and_in_the_log_file() {
     assert!(text.contains("CONFIGURATION WARNING"));
     assert!(!text.contains("config warning field="), "{text}");
     assert_only_styles(&text);
+}
+
+#[test]
+fn journal_styles_records_and_preserves_component_filters() {
+    let cli = CliTest::new();
+    cli.journal();
+    for (component, filter) in [
+        ("all", "SYSLOG_IDENTIFIER=rsdm"), ("dm", "--unit=rsdm.service"),
+        ("idle", "--user-unit=rsdm-idle.service"), ("lock", "--grep=rsdm_lock|lock screen|session lock|idle locker"),
+    ] {
+        let (status, text) = terminal(cli.command(&["logs", "--follow", "--lines", "12", "--component", component]), 80);
+        assert!(status.success(), "{text}");
+        for expected in ["JOURNAL", "UTC", "WARN", "INFO", "rsdm-idle.service", "timeout warning", "second line", "Привет", "Ctrl+C"] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+        assert!(!text.contains("MESSAGE") && !text.contains("PRIORITY"), "{text}");
+        assert_only_styles(&text);
+        let args = fs::read_to_string(cli.root.join("journal-args")).unwrap();
+        for arg in [filter, "--follow", "--lines=12", "--output=json", "--all", "--no-pager", "--boot"] {
+            assert!(args.lines().any(|line| line == arg), "{args}");
+        }
+    }
+}
+
+#[test]
+fn journal_plain_mode_and_failure_exit_codes_are_preserved() {
+    let cli = CliTest::new();
+    cli.journal();
+    let pipe = cli.pipe(&["logs"]);
+    assert!(pipe.status.success());
+    assert_eq!(pipe.stdout, b"plain journal entry\n");
+    assert!(pipe.stderr.is_empty());
+    let mut plain = cli.command(&["logs"]);
+    plain.env("NO_COLOR", "1");
+    let (status, text) = terminal(plain, 80);
+    assert!(status.success());
+    assert_eq!(text, "plain journal entry\r\n");
+    let args = fs::read_to_string(cli.root.join("journal-args")).unwrap();
+    assert!(args.contains("--output=short-precise") && !args.contains("--output=json"));
+
+    let mut failed = cli.command(&["logs"]);
+    failed.env("JOURNAL_EXIT", "7");
+    let (status, text) = terminal(failed, 80);
+    assert_eq!(status.code(), Some(7), "{text}");
+    let mut failed = cli.command(&["logs"]);
+    failed.env("JOURNAL_EXIT", "7");
+    assert_eq!(failed.output().unwrap().status.code(), Some(7));
 }

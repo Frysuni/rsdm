@@ -91,3 +91,14 @@ fn write_buffer(buffer: &Buffer, writer: &mut impl Write) -> io::Result<()> {
     }
     writeln!(writer)
 }
+
+pub(super) fn fragment(lines: Vec<Line<'static>>, width: u16) -> Option<Vec<u8>> {
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let height = u16::try_from(paragraph.line_count(width)).ok()?;
+    let area = Rect::new(0, 0, width, height);
+    let mut buffer = Buffer::empty(area);
+    paragraph.render(area, &mut buffer);
+    let mut bytes = Vec::new();
+    write_buffer(&buffer, &mut bytes).ok()?;
+    Some(bytes)
+}

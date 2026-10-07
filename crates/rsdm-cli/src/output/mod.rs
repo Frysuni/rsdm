@@ -1,6 +1,7 @@
 //! One-shot CLI reports: ratatui layout, normal terminal scrollback, no input loop.
 
 mod render;
+mod journal;
 mod session;
 mod usage;
 
@@ -13,6 +14,7 @@ use ratatui::{
 
 pub use usage::usage;
 pub use session::{application, session_status};
+pub use journal::journal_record;
 
 pub const ACCENT: Color = Color::Rgb(94, 234, 212);
 pub const SECONDARY: Color = Color::Rgb(167, 139, 250);
@@ -101,6 +103,10 @@ pub fn notice(title: &str, text: impl Into<String>, color: Color) -> Report {
 
 pub fn stderr_is_decorated() -> bool {
     render::Stream::Stderr.width().is_some()
+}
+
+pub fn stdout_is_decorated() -> bool {
+    render::Stream::Stdout.width().is_some()
 }
 
 pub fn state_color(state: &str) -> Color {

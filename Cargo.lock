@@ -1700,6 +1700,8 @@ dependencies = [
  "rsdm-infra",
  "rsdm-lock",
  "rsdm-tui",
+ "serde_json",
+ "time",
  "tracing",
  "tracing-subscriber",
  "zbus",

@@ -1,6 +1,6 @@
 use std::{
     path::{Path, PathBuf},
-    process::{Command as ProcessCommand, ExitCode},
+    process::ExitCode,
 };
 
 use anyhow::{Context, Result};
@@ -14,6 +14,7 @@ use tracing::{error, info};
 
 mod dm;
 mod logging;
+mod logs;
 mod output;
 mod session;
 mod status;
@@ -123,7 +124,7 @@ fn run(cli: Cli) -> Result<()> {
             follow,
             lines,
             component,
-        } => run_logs(follow, lines, component),
+        } => logs::run(follow, lines, component),
         Command::Status => status::run(&cli.config),
         Command::Session { action } => session::run(&cli.config, action),
         Command::App(options) => session::run_app(options),
@@ -147,39 +148,6 @@ fn validate_config(path: &Path) -> Result<()> {
     print_config_warnings(&config);
     output::notice("CONFIGURATION VALID", format!("configuration is valid: {}\n", path.display()), output::SUCCESS).stdout()?;
     Ok(())
-}
-
-fn run_logs(follow: bool, lines: u32, component: LogComponent) -> Result<()> {
-    let mut command = ProcessCommand::new("journalctl");
-    command
-        .arg("--boot")
-        .arg("--output=short-precise")
-        .arg("--no-hostname")
-        .arg("--pager-end")
-        .arg(format!("--lines={lines}"));
-    if follow {
-        command.arg("--follow");
-    }
-
-    match component {
-        LogComponent::All => {
-            command.arg("SYSLOG_IDENTIFIER=rsdm");
-        }
-        LogComponent::Dm => {
-            command.arg("--unit=rsdm.service");
-        }
-        LogComponent::Idle => {
-            command.arg("--user-unit=rsdm-idle.service");
-        }
-        LogComponent::Lock => {
-            command
-                .arg("SYSLOG_IDENTIFIER=rsdm")
-                .arg("--grep=rsdm_lock|lock screen|session lock|idle locker");
-        }
-    }
-
-    use std::os::unix::process::CommandExt as _;
-    Err(command.exec()).context("opening rsdm journal with journalctl")
 }
 
 fn run_dm(path: &Path) -> Result<()> {
