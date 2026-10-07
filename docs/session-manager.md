@@ -1,5 +1,10 @@
 # Session manager
 
+RSDM coordinates application shutdown with the graphical session. During an
+orderly logout, it asks registered apps to quit and keeps the display available
+while they save and exit. This can reduce unclean-shutdown warnings on the next
+launch. GNOME and Plasma retain their native session manager and shutdown dialogs.
+
 With `session_manager.enabled = true` (the default), DM wraps the selected
 session's original command in `rsdm session start`, supplying the config path
 and desktop metadata. The coordinator runs as the desktop user. Greeter owns
@@ -9,6 +14,35 @@ Coordination requires Linux pidfd support, systemd 250+, logind and a user bus.
 Only one graphical session per UID is supported because the bus, activation
 environment and graphical targets are shared. A second coordinator is rejected
 before shared state changes. Disabling the wrapper preserves PAM/keyring login.
+
+## Quick start
+
+Log in through RSDM with session management enabled. There is no need to run
+`rsdm session start` again inside the desktop. From a terminal in that session:
+
+```sh
+rsdm app -- foot
+rsdm session status
+```
+
+`rsdm app` registers and launches the program, then returns after startup; it
+does not wait for the program to exit. Status should show the session as
+`running` and list the registered app. To register more applications, replace
+their launch commands in WM bindings or autostart with `rsdm app -- <program>`.
+See the [niri](compositors/niri.md) and [Hyprland](compositors/hyprland.md) examples.
+
+Use `rsdm session stop` for logout, and `rsdm power reboot` or
+`rsdm power poweroff` for power actions. For an app that needs more time in a
+managed WM or niri session, launch it with a policy such as:
+
+```sh
+rsdm app --shutdown-timeout 60 --on-timeout cancel -- foot
+```
+
+If that app is still running after 60 seconds, RSDM cancels logout and keeps
+the desktop alive. Choose the app's documented quit command when available;
+SIGTERM alone does not guarantee that it saves. Native DE policy differences
+are described [below](#native-wm-and-de-ownership).
 
 ## Orderly logout
 
@@ -61,17 +95,30 @@ rsdm app --shutdown-method term -- example
 rsdm app --shutdown-method xsmp -- example
 ```
 
-Defaults: 30-second timeout, `--on-timeout force`, `--shutdown-method auto`.
-In a managed WM, auto chooses an explicit quit command, a connected XSMP client,
-then SIGTERM to the main process. Remaining children are tracked through the
-service cgroup. Force timeout gives them up to five seconds of SIGTERM grace,
-then SIGKILL. Deadlines run in parallel, rather than adding one timeout per app.
+| Option | Default | Effect |
+| --- | --- | --- |
+| `--shutdown-timeout <seconds>` | `30` | Positive number of seconds to wait for the app to exit after requesting quit |
+| `--on-timeout force\|cancel` | `force` | Force remaining processes to exit, or cancel preparation while the desktop is alive |
+| `--shutdown-method auto\|term\|xsmp` | `auto` | Select the available quit method, use SIGTERM, or require an admitted XSMP connection at shutdown |
+| `--quit-command '<command>'` | Unset | Run the app's quit command; requires `--shutdown-method auto` |
+
+In a managed WM or native niri session, auto chooses an explicit quit command,
+a connected XSMP client, then SIGTERM to the main process. Remaining children
+are tracked through the service cgroup. Force timeout gives them up to five
+seconds of SIGTERM grace, then SIGKILL. That grace is additional to the app
+timeout. Apps prepare in parallel, so logout does not wait one full timeout per
+app in sequence. Policies apply to that launch; relaunch an app to change them.
 
 Quit commands use argv parsing without a shell or variable expansion. Use the
 application's documented quit method where available. Helper success,
 `SaveYourselfDone`, window disappearance and main PID exit do not prove app exit.
-RSDM waits for the app cgroup. Arguments after `--`, including empty strings and
-`$HOME`, remain literal.
+RSDM waits for the app cgroup. Arguments after `--` are passed through unchanged;
+any shell expansion happens before RSDM receives them. Quote `'$HOME'` in a shell
+to pass those characters literally.
+
+`example` and `examplectl` above are placeholders. Replace them with the app and
+its documented quit command. The quit helper runs with that app's recorded
+environment and working directory.
 
 Each launch creates a transient service in `app-graphical.slice`, named
 `app-rsdm-<application>@<generation-and-instance>.service`. Stable application
@@ -84,6 +131,11 @@ Only `rsdm app` launches enter this registry. Menus, autostart entries and arbit
 UID processes are not automatically wrapped. Without an RSDM token, plain
 `rsdm app -- program` retains the basic graphical-target launch path, but shutdown
 policy options are unavailable.
+
+Launch the first instance through `rsdm app`. A launcher that forwards to an
+already running instance or a separately activated service does not move that
+process into the registered unit. Programs outside that unit are not covered
+by its shutdown policy.
 
 ## Native WM and DE ownership
 
@@ -98,7 +150,8 @@ policy options are unavailable.
 DesktopNames selects a GNOME/Plasma candidate; readiness requires its native
 manager and an active native graphical target. RSDM does not start that target
 on the manager's behalf. It preserves the DE's session-management and XSMP
-server. Ordinary native-DE policies use native shutdown without a preliminary SIGTERM. Explicit
+server. Ordinary native-DE policies use native shutdown without a preliminary
+SIGTERM; the native manager controls their save prompts and timeouts. Explicit
 term/quit-command policies run an RSDM preflight first. Native `auto` with
 `--on-timeout cancel` is rejected because RSDM cannot enforce cancellation inside
 native dialogs.
@@ -222,6 +275,14 @@ Disable coordination with `enabled = false`, or
 `services.rsdm.sessionManager = false` on NixOS. Inspect `rsdm session status`,
 `journalctl --user -b` and the DM journal for readiness/recovery. Enable graphical
 services under `WantedBy=graphical-session.target`.
+
+| Symptom | What to check |
+| --- | --- |
+| `this command requires an RSDM-coordinated session` | Run the command from the current graphical login with session management enabled, as that user |
+| Status stays `starting` | Check the compositor's environment publication and provider readiness; use the finalize hook described above if needed |
+| The app is absent from status | Start it through `rsdm app`; registration does not adopt an existing process outside its unit |
+| `forced shutdown: <unit>` | The app did not exit in time; check its quit support, increase its timeout or choose `--on-timeout cancel` where supported |
+| `delegated` after stop or power | The native DE owns completion; check its dialog for confirmation, cancellation or an app waiting to save |
 
 Adapters follow upstream [GNOME SessionManager](https://github.com/GNOME/gnome-session/blob/master/gnome-session/org.gnome.SessionManager.xml),
 [Plasma LogoutPrompt](https://github.com/KDE/plasma-workspace/blob/master/logout-greeter/org.kde.LogoutPrompt.xml)

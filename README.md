@@ -69,10 +69,27 @@ rsdm app -- waybar           # launch a program into the graphical session
 rsdm validate-config         # check the config
 ```
 
-Session coordination requires Linux with systemd 250+, logind and a user bus.
-It manages applications started through `rsdm app`; it cannot guarantee saving
-for programs without a supported quit method. See the
-[session manager guide](docs/session-manager.md) for WM bindings and policies.
+## Session manager
+
+Enabled by default when you log in through RSDM. Launch applications through
+`rsdm app` and bind your WM's logout action to `rsdm session stop`:
+
+```sh
+rsdm app -- foot
+rsdm app --shutdown-timeout 60 --on-timeout cancel -- foot
+rsdm session status
+rsdm session stop
+```
+
+RSDM gives registered apps time to save and exit while the compositor is still
+running. This can reduce “did not shut down correctly” warnings on the next
+launch. GNOME and Plasma keep their native shutdown dialogs. Use
+`rsdm power reboot` or `rsdm power poweroff` for session-aware power actions.
+
+Requires Linux, systemd 250+, logind and a user bus. Apps launched outside
+`rsdm app` are not automatically registered; clean saves depend on the app's
+quit support. See the [session manager guide](docs/session-manager.md) for WM
+bindings, quit commands and timeout policies.
 
 ## Install
 
@@ -141,7 +158,7 @@ cargo build --release -p rsdm
 ```
 
 Dependencies: Rust (edition 2024, >= 1.88), `pam`, `wayland`, `libxkbcommon`,
-`pkg-config`.
+`pkg-config`, `libSM` and `libICE` (for XSMP, enabled by default).
 
 ## Runtime
 

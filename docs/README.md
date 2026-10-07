@@ -12,9 +12,14 @@ for Wayland sessions. No greetd, GTK, Qt, webview, or Electron. One binary,
 | `rsdm unlock`           | privileged emergency unlock of a live rsdm locker   |
 | `rsdm logs`             | open the system/user journal interactively          |
 | `rsdm status`           | show config and live lock state                     |
-| `rsdm session start`    | run a compositor as a systemd `--user` session      |
+| `rsdm session start`    | start coordination around the original session command |
 | `rsdm session finalize` | export env + activate the session from a compositor |
-| `rsdm app -- <cmd>`     | launch a program into the graphical session         |
+| `rsdm session stop`     | prepare registered apps, then request logout         |
+| `rsdm session cancel`   | cancel preparation before session teardown           |
+| `rsdm session status`   | show the provider, phase and registered apps          |
+| `rsdm power reboot`     | prepare the session and request reboot                |
+| `rsdm power poweroff`   | prepare the session and request shutdown              |
+| `rsdm app -- <cmd>`     | register and launch an app with its shutdown policy   |
 | `rsdm validate-config`  | check `rsdm.toml`                                   |
 
 All commands take a global `--config <path>` (default `/etc/rsdm.toml`,
