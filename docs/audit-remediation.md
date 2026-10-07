@@ -60,7 +60,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 42 | Clarify/update Arch release package versions | pending |
 | 43 | Verify downloadable Arch package artifacts | pending |
 | 44 | Narrow release token write permissions | fixed |
-| 45 | Pin third-party actions to immutable commits | pending |
+| 45 | Pin third-party actions to immutable commits | fixed |
 | 46 | Pass only required reusable-workflow secrets | fixed |
 | 47 | Pin AUR SSH host identity | pending |
 | 48 | Add Clippy to CI | policy exception |
@@ -144,3 +144,8 @@ Record unexecuted runtime checks explicitly for later verification.
 - 46: the AUR workflow receives only its declared SSH key and optional commit
   author fields; secrets:inherit was removed. YAML parsing and caller/callee
   secret-contract checks passed locally, without running or publishing anything.
+- 45: all external workflow actions use full commit SHAs resolved from their
+  original upstream tags/branches (annotated tags use the peeled commit).
+  Rust toolchains remain explicitly stable and 1.88.0. Dependabot proposes
+  weekly action-pin updates. Upstream refs/action inputs and workflow YAML were
+  checked without executing CI; the CI policy remains unchanged.
