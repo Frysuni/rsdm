@@ -9,6 +9,10 @@ use std::{
 use rsdm_infra::session_manager::{SessionStatus, StopOutcome};
 use zbus::zvariant::OwnedObjectPath;
 
+#[path = "support/terminal.rs"]
+mod terminal_output;
+use terminal_output::{assert_only_styles, terminal};
+
 static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 const GENERATION: &str = "0123456789abcdef0123456789abcdef";
 type Calls = Arc<Mutex<Vec<String>>>;
@@ -52,6 +56,10 @@ impl Session {
         "example.service".into()
     }
 
+    fn cancel(&self, generation: &str) {
+        self.calls.lock().unwrap().push(format!("cancel {generation}"));
+    }
+
     fn status(&self) -> SessionStatus {
         SessionStatus { generation: GENERATION.into(), login_session_id: "test".into(), desktop_entry_id: "example".into(),
             provider: "managed".into(), phase: "running".into(), xsmp_available: false,
@@ -93,11 +101,18 @@ impl SessionTools {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_rsdm")).env_clear()
+        self.command(args).output().unwrap()
+    }
+
+    fn command(&self, args: &[&str]) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_rsdm"));
+        command.env_clear()
             .env("PATH", &self.root).env("HOME", &self.root).env("XDG_RUNTIME_DIR", &self.root)
+            .env("TERM", "xterm-256color")
             .env("DBUS_SESSION_BUS_ADDRESS", &self.address).env("DBUS_SYSTEM_BUS_ADDRESS", &self.address)
             .env("XDG_SESSION_ID", "test").env("RSDM_SESSION_GENERATION", GENERATION)
-            .arg("--config").arg(self.root.join("config.toml")).args(args).output().unwrap()
+            .arg("--config").arg(self.root.join("config.toml")).args(args);
+        command
     }
 }
 
@@ -163,4 +178,43 @@ fn session_status_preserves_the_plain_application_list() {
     assert_eq!(String::from_utf8_lossy(&output.stdout), format!(
         "managed: running (login test, desktop example, generation {GENERATION})\nRSDM XSMP: unavailable; auto uses the provider's shutdown method\nexample.service: registered, term, 30s\n"));
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn session_confirmations_and_registered_apps_are_styled_in_a_terminal() {
+    let tools = SessionTools::new(false);
+    for (args, title) in [
+        (&["session", "finalize"][..], "ENVIRONMENT PUBLISHED"),
+        (&["session", "cancel"][..], "CANCELLATION REQUESTED"),
+        (&["app", "--", "example"][..], "APPLICATION LAUNCHED"),
+        (&["session", "status"][..], "SESSION STATUS"),
+    ] {
+        let (status, text) = terminal(tools.command(args), 80);
+        assert!(status.success(), "{text}");
+        assert!(text.contains(title) && text.contains('╭') && text.contains('\x1b'), "{text}");
+        if args.last() == Some(&"status") {
+            assert!(text.contains("APPLICATIONS") && text.contains("example.service") && text.contains("registered"), "{text}");
+        }
+        assert_only_styles(&text);
+    }
+    assert!(tools.run(&["session", "cancel"]).stdout.is_empty());
+    assert!(tools.calls.lock().unwrap().contains(&format!("cancel {GENERATION}")));
+}
+
+#[test]
+fn cancelled_session_and_power_requests_keep_failure_status_in_a_terminal() {
+    let tools = SessionTools::new(false);
+    for (args, action) in [
+        (&["session", "stop"][..], "logout"),
+        (&["power", "reboot"][..], "reboot"),
+        (&["power", "poweroff"][..], "poweroff"),
+    ] {
+        let (status, text) = terminal(tools.command(args), 80);
+        assert_eq!(status.code(), Some(1), "{text}");
+        for expected in ["SESSION REQUEST", "cancelled", "FORCED SHUTDOWN", "earlier.service", "COMMAND FAILED"] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+        assert_only_styles(&text);
+        assert!(tools.calls.lock().unwrap().contains(&format!("stop {GENERATION} {action}")));
+    }
 }
