@@ -47,7 +47,6 @@ impl Canvas {
         self.height
     }
 
-    #[cfg(test)]
     pub fn pixels(&self) -> &[u32] {
         &self.pixels
     }

@@ -75,6 +75,11 @@ applying the new topology. Ordinary process exit waits for bounded cleanup;
 SIGKILL or a locker crash still requires separate output recovery.
 Find niri names with `niri msg outputs`.
 
+Wallpaper scaling is cached separately for each output at its physical buffer
+size. Resizing or changing output scale replaces that output's cache; animation,
+text size, and dim changes reuse the prepared image. If cache allocation fails,
+Lock still renders by resampling the original image.
+
 Sleep and Hibernate shortcuts are offered only when logind's `CanSuspend` or
 `CanHibernate` reports `yes` or `challenge` for the locker user. The snapshot is
 queried in a background worker with a five-second deadline covering connection

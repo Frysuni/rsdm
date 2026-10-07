@@ -75,6 +75,7 @@ fn create_surface(
         width: 0,
         height: 0,
         buffer: None,
+        wallpaper_cache: None,
     };
     connection.flush().unwrap();
     let mut server = bootstrap.join().unwrap();

@@ -39,10 +39,11 @@ pub(crate) fn compose_lock_base(
     font: &Font,
     zoom: u32,
     frame: u64,
+    wallpaper_cache: &mut Option<Canvas>,
 ) -> bool {
     let has_wallpaper = wallpaper.is_some();
     if let Some(wallpaper) = wallpaper {
-        wallpaper.cover_into(canvas);
+        wallpaper.cover_cached(canvas, wallpaper_cache);
         tint(canvas, Rgb::BLACK, design.dim_alpha());
     }
     if design.background.is_animated() {
@@ -93,6 +94,7 @@ pub fn preview_png(
         &font,
         zoom,
         animation_frame,
+        &mut None,
     );
 
     let mut model = LockModel::new(config.lock.design.password_mode);

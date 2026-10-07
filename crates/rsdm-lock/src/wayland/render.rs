@@ -39,6 +39,7 @@ impl App {
                 width: 0,
                 height: 0,
                 buffer: None,
+                wallpaper_cache: None,
             });
         }
     }
@@ -94,6 +95,7 @@ impl App {
         };
 
         let zoom = resolve_zoom(self.menu.lock_settings().and_then(|settings| settings.size));
+        let frame = self.animation_frame();
         let wallpaper_present = !black_secondary
             && crate::compose_lock_base(
                 &mut canvas,
@@ -101,7 +103,8 @@ impl App {
                 self.ctx.wallpaper.as_ref(),
                 &self.ctx.font,
                 zoom,
-                self.animation_frame(),
+                frame,
+                &mut self.surfaces[index].wallpaper_cache,
             );
         if primary {
             self.draw_primary(&mut canvas, zoom, palette, wallpaper_present);

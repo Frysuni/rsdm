@@ -41,6 +41,30 @@ impl Wallpaper {
         })
     }
 
+    /// The caller owns one cache per output for this immutable wallpaper.
+    /// Dim and animated effects are applied after copying the prepared image.
+    pub fn cover_cached(&self, canvas: &mut Canvas, cache: &mut Option<Canvas>) {
+        if self.width == 0 || self.height == 0 { return; }
+        let size = (canvas.width(), canvas.height());
+        if !cache.as_ref().is_some_and(|image| (image.width(), image.height()) == size) {
+            // A resized image has no further use; free it before allocating.
+            *cache = None;
+            let mut image = match Canvas::try_new(size.0, size.1, 0) {
+                Ok(image) => image,
+                Err(error) => {
+                    tracing::debug!(%error, "wallpaper cache unavailable; resampling this frame");
+                    self.cover_into(canvas);
+                    return;
+                }
+            };
+            self.cover_into(&mut image);
+            *cache = Some(image);
+        }
+        if let Some(image) = cache {
+            canvas.pixels_mut().copy_from_slice(image.pixels());
+        }
+    }
+
     /// Scale to fully cover `canvas` (center-cropping the overflow) and blit as
     /// opaque pixels.
     pub fn cover_into(&self, canvas: &mut Canvas) {
@@ -71,3 +95,7 @@ impl Wallpaper {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "wallpaper_tests.rs"]
+mod tests;

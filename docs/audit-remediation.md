@@ -49,7 +49,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 31 | Synchronize generic service and configured VT | pending |
 | 32 | Avoid disabled-DM service restart loops | fixed |
 | 33 | Reuse render buffers and avoid unnecessary frames | pending |
-| 34 | Cache scaled wallpaper | pending |
+| 34 | Cache scaled wallpaper | fixed |
 | 35 | Recover output-power changes after locker crashes | pending |
 | 36 | Harden remembered-state reads | fixed |
 | 37 | Harden privileged log file opens | fixed |
@@ -466,3 +466,23 @@ verification separate from private-peer and unit-test evidence.
   New source files stay below 300 lines and functions below 50. The existing
   302-line Wayland orchestration module shrank by one line; its larger run
   initializer remains necessary to assemble protocol state in one place.
+
+- 34: Each lock surface owns one prepared cover-fit image for the immutable
+  wallpaper loaded at startup. Physical buffer-size changes invalidate it;
+  dim/animation/text zoom changes copy the prepared pixels and apply effects
+  afterward. Resizing frees the obsolete cache before allocation, and allocation
+  failure falls back to the original resampler rather than suppressing a frame.
+  Output removal naturally drops its cache; no global size-keyed map accumulates.
+  Five headless regressions cover exact crop/opaque pixels, dynamic dim without
+  cache corruption, independent output sizes/resizing, empty images, and animated
+  composition with zoom changes. An initially incorrect rectangular fixture
+  expectation was corrected against the existing center-crop calculation;
+  the resampling algorithm remains unchanged.
+  `nix develop --command cargo test -p rsdm-lock --locked --quiet` passed all
+  35 tests. `nix develop --command cargo test --workspace --locked --quiet`
+  passed all 420 tests, plus the existing child-only fixture ignored in the
+  parent run. Workspace/all-targets checking passed on Rust 1.88.0.
+  `git diff --check` passed. New source and functions stay below 300/50 lines.
+  The existing Wayland module is 303 lines: one cache field belongs beside its
+  per-output surface/buffer state. Existing larger rendering and startup
+  orchestration is retained. Persistent frame-buffer reuse remains separate (33).

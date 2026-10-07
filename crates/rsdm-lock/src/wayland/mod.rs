@@ -72,6 +72,7 @@ struct LockSurface {
     width: u32,
     height: u32,
     buffer: Option<Buffer>,
+    wallpaper_cache: Option<crate::render::Canvas>,
 }
 
 impl Drop for LockSurface {
