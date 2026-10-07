@@ -313,7 +313,9 @@ authentication, validation, the coordinator-name lease, app preparation, and
 unit teardown use the same deadline. A saved or active deadline is never
 extended by recovery. A failed coordinator also drains its accepted workers
 within that budget; unconfirmed jobs keep their recovery ownership records.
-Root bounds its helper wait separately. Lock handles
+Root bounds its helper wait separately to 90 seconds, reserving the last second
+for SIGKILL and nonblocking exit checks. An unconfirmed exit remains a cleanup
+failure; root does not wait indefinitely after escalation. Lock handles
 power requests asynchronously and retains opaque surfaces through rejection or
 cancellation; only authentication or privileged emergency unlock releases them.
 

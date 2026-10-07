@@ -372,3 +372,13 @@ verification separate from private-peer and unit-test evidence.
   `nix develop --command cargo test -p rsdm-infra
   session_manager::coordinator_shutdown --locked --quiet`. No timeouts or
   assertions were relaxed; the host bus and session were untouched.
+- 26 (root-helper exit): Recovery-helper escalation no longer calls an unbounded
+  `Child::wait()`. A single local deadline includes a reserved SIGKILL/reaping
+  interval; exit is polled nonblockingly and an unconfirmed exit is reported as
+  failure. The child stays unreaped until signaling, preventing PID reuse.
+  `nix develop --command cargo test -p rsdm-infra unix::session_cleanup --locked`
+  passed all four regressions for normal status, stopped-child escalation,
+  expired polling and an already reaped child. No host session was involved.
+  Root's separate 90-second cap still needs to follow a trusted shutdown budget;
+  root must never read a user-owned recovery record to obtain it. Finding 26
+  stays open. Changed Rust files stay below 300 lines and functions below 50.
