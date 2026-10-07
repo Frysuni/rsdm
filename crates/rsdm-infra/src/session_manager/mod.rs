@@ -49,6 +49,13 @@ pub enum SessionError {
     Io(#[from] std::io::Error),
     #[error("session manager bus error: {0}")]
     Bus(#[from] zbus::Error),
+    #[error("{error}")]
+    StartRejected {
+        #[source]
+        error: Box<SessionError>,
+        // A replacement peer may have restored ownership during the rejected call.
+        reference_retained: bool,
+    },
     #[error("{0}")]
     State(String),
     #[error("no compositor or application command was given")]

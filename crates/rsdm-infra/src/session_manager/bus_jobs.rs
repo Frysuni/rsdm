@@ -10,6 +10,7 @@ enum Operation {
 
 pub(super) async fn start(
     manager: &UserManager, unit: &str, properties: &UnitProperties, timeout: Duration,
+    submitted: &Cell<bool>,
 ) -> Result<(), SessionError> {
     let deadline = Instant::now().checked_add(timeout)
         .ok_or_else(|| SessionError::State("systemd job deadline overflow".into()))?;
@@ -22,15 +23,45 @@ pub(super) async fn start(
             Err(error) => return Err(error.into()),
         };
         let generation = generation(properties)?;
-        if new_unit && properties.iter().any(|(name, value)| *name == "AddRef" && matches!(value, Value::Bool(true))) {
-            if let Some(generation) = &generation { manager.transport.track(unit, generation.clone()); }
-        }
         let proxy = manager.proxy().await?;
         let mut signals = proxy.receive_signal_with_args("JobRemoved", &[(2, unit)]).await?;
         let auxiliary: Vec<(&str, UnitProperties)> = Vec::new();
+        let mut reference = if new_unit && properties.iter().any(|(name, value)| *name == "AddRef" && matches!(value, Value::Bool(true))) {
+            generation.as_ref().map(|generation| manager.transport.stage_reference(unit, generation.clone()))
+        } else { None };
+        if let Some(reference) = &mut reference { reference.submitted(); }
+        submitted.set(true);
         let reply = proxy.call("StartTransientUnit", &(unit, "fail", properties, auxiliary)).await;
+        if let Err(error) = &reply
+            && rejected_start(manager, unit, error).await
+        {
+            let reference_retained = reference.take().is_some_and(|reference| !reference.reject());
+            return Err(SessionError::StartRejected { error: Box::new(error.clone().into()), reference_retained });
+        }
         complete(manager, unit, &mut signals, reply, Operation::Start { new_unit, generation }, deadline).await
     }).await
+}
+
+async fn rejected_start(manager: &UserManager, unit: &str, error: &zbus::Error) -> bool {
+    if matches!(error, zbus::Error::MethodError(name, _, _) if name.as_str() == "org.freedesktop.systemd1.UnitExists") {
+        return true;
+    }
+    let denied = match error {
+        zbus::Error::MethodError(name, _, _) => matches!(name.as_str(),
+            "org.freedesktop.DBus.Error.InvalidArgs" | "org.freedesktop.DBus.Error.AccessDenied"
+            | "org.freedesktop.DBus.Error.UnknownProperty" | "org.freedesktop.DBus.Error.PropertyReadOnly"
+            | "org.freedesktop.DBus.Error.NotSupported"),
+        zbus::Error::FDO(error) => matches!(**error, zbus::fdo::Error::InvalidArgs(_)
+            | zbus::fdo::Error::AccessDenied(_) | zbus::fdo::Error::UnknownProperty(_)
+            | zbus::fdo::Error::PropertyReadOnly(_) | zbus::fdo::Error::NotSupported(_)),
+        _ => false,
+    };
+    if !denied { return false; }
+    // Even a rejected request can create a partial unit and acquire AddRef.
+    // Only an authoritative missing-unit reply proves there is no ownership.
+    matches!(manager.read_async(|| async {
+        manager.proxy().await?.call::<_, _, OwnedObjectPath>("GetUnit", &(unit,)).await
+    }, Duration::from_secs(5)).await, Err(error) if missing_unit(&error))
 }
 
 pub(super) async fn stop(manager: &UserManager, unit: &str, timeout: Duration) -> Result<(), SessionError> {
@@ -180,3 +211,11 @@ async fn drain_job(signals: &mut zbus::proxy::SignalStream<'_>, job: &OwnedObjec
 #[cfg(test)]
 #[path = "bus_jobs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "bus_jobs_fixture.rs"]
+mod fixture;
+
+#[cfg(test)]
+#[path = "bus_start_tests.rs"]
+mod start_tests;

@@ -26,6 +26,42 @@ impl Drop for ConnectionGuard {
 struct Reference {
     generation: String,
     invocation: Option<Vec<u8>>,
+    pending: usize,
+    retained: bool,
+    claim: Arc<()>,
+}
+
+impl Reference {
+    fn new(generation: String) -> Self {
+        Self { generation, invocation: None, pending: 0, retained: false, claim: Arc::new(()) }
+    }
+}
+
+pub(super) struct ReferenceIntent {
+    transport: Transport,
+    unit: String,
+    claim: Arc<()>,
+    epoch: u64,
+    submitted: bool,
+    finished: bool,
+}
+
+impl ReferenceIntent {
+    pub fn submitted(&mut self) { self.submitted = true; }
+
+    pub fn reject(mut self) -> bool {
+        let rejected = self.transport.settle_reference(&self.unit, &self.claim, self.epoch, false);
+        self.finished = true;
+        rejected
+    }
+}
+
+impl Drop for ReferenceIntent {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.transport.settle_reference(&self.unit, &self.claim, self.epoch, self.submitted);
+        }
+    }
 }
 
 impl Transport {
@@ -43,12 +79,36 @@ impl Transport {
         self.0.lock().unwrap_or_else(|error| error.into_inner()).epoch
     }
 
-    pub fn track(&self, unit: &str, generation: String) {
+    #[cfg(test)]
+    pub fn has_reference(&self, unit: &str) -> bool {
+        self.0.lock().unwrap().references.contains_key(unit)
+    }
+
+    pub fn stage_reference(&self, unit: &str, generation: String) -> ReferenceIntent {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
-        state.references.insert(
-            unit.into(), Reference { generation, invocation: None },
-        );
+        let epoch = state.epoch;
+        let reference = state.references.entry(unit.into()).or_insert_with(|| Reference::new(generation));
+        reference.pending += 1;
+        let claim = Arc::clone(&reference.claim);
         state.revision += 1;
+        ReferenceIntent { transport: self.clone(), unit: unit.into(), claim, epoch, submitted: false, finished: false }
+    }
+
+    fn settle_reference(&self, unit: &str, claim: &Arc<()>, epoch: u64, submitted: bool) -> bool {
+        let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        // A published replacement peer may already hold a restored RefUnit.
+        // Preserve its ownership until ordinary cleanup rather than forgetting it.
+        let rejected = !submitted && state.epoch == epoch;
+        let Some(reference) = state.references.get_mut(unit).filter(|reference| Arc::ptr_eq(&reference.claim, claim)) else {
+            return rejected;
+        };
+        reference.pending -= 1;
+        reference.retained |= !rejected;
+        if reference.pending == 0 && !reference.retained && reference.invocation.is_none() {
+            state.references.remove(unit);
+        }
+        state.revision += 1;
+        rejected
     }
 
     pub fn remember(&self, unit: &str, invocation: &[u8]) {

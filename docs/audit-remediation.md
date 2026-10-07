@@ -37,7 +37,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 19 | Release transport mutex during async reconnect | fixed |
 | 20 | Scale reference restoration within bounded work | pending |
 | 21 | Roll back definitely failed app registrations | pending |
-| 22 | Roll back definitely failed start references | pending |
+| 22 | Roll back definitely failed start references | fixed |
 | 23 | Recover generation-owned quit/logout helpers | pending |
 | 24 | Bound shutdown concurrency and polling | pending |
 | 25 | Linear process snapshot/pidfd signaling | fixed |
@@ -541,3 +541,32 @@ verification separate from private-peer and unit-test evidence.
   1.88.0; `git diff --check` passed. Both changed source files remain below
   300 lines and all changed functions below 50. Tests use only private worker
   channels; no host compositor, output, service, or clock was changed.
+
+- 22: Stage AddRef intent only after proxy/signal preparation, immediately before
+  the mutation. Each attempt settles its own claim; overlapping rejected attempts
+  remove an unowned entry only after the last settles, while earlier/accepted
+  ownership and invocation identity remain intact. Claims cannot remove a later
+  replacement entry after forget/re-register. Lost replies, cancelled waits,
+  post-acceptance read errors, and partially created units retain recovery intent.
+  A published replacement bus peer may already hold a restored reference; the
+  rejection reports that obligation instead of silently forgetting it.
+  Start errors distinguish pre-submission failure from direct UnitExists and
+  validated pre-creation rejections. Other explicit validation/authorization
+  errors require an authoritative NoSuchUnit read within the original budget;
+  they are never inferred from inspection errors after an accepted mutation.
+  This follows upstream systemd's ordering of transient properties, AddRef, and
+  job creation in [dbus-manager.c](https://github.com/systemd/systemd/blob/v250/src/core/dbus-manager.c).
+  Twelve private-bus/claim regressions cover rejection, ownership overlaps,
+  replaced entries, real candidate-peer publication, partially created units,
+  accepted read denial, lost replies/timeouts, and preparation failures.
+  Existing job fixtures were separated by responsibility; their standard D-Bus
+  error names remain exact rather than being wrapped as generic zbus errors.
+  `nix develop --command cargo test -p rsdm-infra session_manager::bus --locked
+  --quiet` passed all 40 bus tests. `nix develop --command cargo test --workspace
+  --locked --quiet` passed all 439 tests plus the existing child-only fixture
+  ignored in its parent run. Workspace/all-targets checking passed on Rust
+  1.88.0; `git diff --check` passed. All changed source files remain below 300
+  lines and new functions below 50. No host bus/session/service was touched.
+  Application-record rollback (21) now has typed evidence to consume and remains
+  the next separate implementation step. Partial or unconfirmed ownership is
+  intentionally retained for ordinary cleanup/recovery.

@@ -84,7 +84,7 @@ fn state() -> UnitState {
 #[test]
 fn reconnect_restores_a_reference_to_the_original_owned_invocation() {
     let (connection, _server, state) = fixture(state());
-    let reference = Reference { generation: "ours".into(), invocation: Some(vec![1; 16]) };
+    let reference = Reference { invocation: Some(vec![1; 16]), ..Reference::new("ours".into()) };
     async_io::block_on(restore_reference(&connection, "example.service", &reference)).unwrap();
     assert_eq!(state.refs.load(Ordering::SeqCst), 1);
     assert_eq!(state.unrefs.load(Ordering::SeqCst), 0);
@@ -101,7 +101,7 @@ fn foreign_replaced_unstarted_and_non_transient_units_are_never_referenced() {
             _ => initial.transient = false,
         }
         let (connection, _server, state) = fixture(initial);
-        let reference = Reference { generation: "ours".into(), invocation: Some(vec![1; 16]) };
+        let reference = Reference { invocation: Some(vec![1; 16]), ..Reference::new("ours".into()) };
         async_io::block_on(restore_reference(&connection, "example.service", &reference)).unwrap();
         assert_eq!(state.refs.load(Ordering::SeqCst), 0);
     }
@@ -112,7 +112,7 @@ fn an_invocation_replaced_during_ref_unit_is_immediately_unreferenced() {
     let mut initial = state();
     initial.replaced = true;
     let (connection, _server, state) = fixture(initial);
-    let reference = Reference { generation: "ours".into(), invocation: Some(vec![1; 16]) };
+    let reference = Reference { invocation: Some(vec![1; 16]), ..Reference::new("ours".into()) };
     async_io::block_on(restore_reference(&connection, "example.service", &reference)).unwrap();
     assert_eq!(state.refs.load(Ordering::SeqCst), 1);
     assert_eq!(state.unrefs.load(Ordering::SeqCst), 1);
@@ -123,7 +123,7 @@ fn cloned_workers_keep_the_original_reference_identity_and_share_release() {
     let (connection, _server, _) = fixture(state());
     let owner = Transport::new(connection);
     let worker = owner.clone();
-    owner.track("example.service", "ours".into());
+    owner.stage_reference("example.service", "ours".into()).submitted();
     worker.remember("example.service", &[1; 16]);
     owner.remember("example.service", &[2; 16]);
     assert_eq!(worker.0.lock().unwrap().references["example.service"].invocation, Some(vec![1; 16]));
@@ -141,7 +141,7 @@ fn manager_reexec_does_not_require_replacing_a_live_bus_connection() {
 fn slow_restoration_does_not_lock_state_or_publish_a_forgotten_reference() {
     let (original, _original_server, _) = fixture(state());
     let owner = Transport::new(original);
-    owner.track("example.service", "ours".into());
+    owner.stage_reference("example.service", "ours".into()).submitted();
     owner.remember("example.service", &[1; 16]);
     let (entered, ready) = std::sync::mpsc::channel();
     let (resume, resumed) = async_channel::bounded(1);
@@ -181,3 +181,6 @@ fn maintenance_guard_is_shared_bounded_and_released_on_drop() {
     drop(guard);
     assert!(async_io::block_on(worker.acquire_connection_guard(Instant::now() + Duration::from_secs(1))).is_ok());
 }
+
+#[path = "bus_reference_tests.rs"]
+mod reference_tests;

@@ -1,6 +1,6 @@
 //! Typed user-manager operations and completion of the exact systemd job.
 
-use std::{future::Future, time::{Duration, Instant}};
+use std::{cell::Cell, future::Future, time::{Duration, Instant}};
 
 use futures_lite::future;
 use zbus::{Connection, Proxy, zvariant::{OwnedObjectPath, OwnedValue, Value}};
@@ -69,7 +69,12 @@ impl UserManager {
     }
 
     pub fn start_service(&self, unit: &str, properties: &UnitProperties) -> Result<(), SessionError> {
-        async_io::block_on(self.deadline.bound(jobs::start(self, unit, properties, Duration::from_secs(10))))
+        let submitted = Cell::new(false);
+        let result = async_io::block_on(self.deadline.bound(jobs::start(self, unit, properties, Duration::from_secs(10), &submitted)));
+        match result {
+            Err(error) if !submitted.get() => Err(SessionError::StartRejected { error: Box::new(error), reference_retained: false }),
+            other => other,
+        }
     }
 
     pub fn stop(&self, unit: &str, timeout: Duration) -> Result<(), SessionError> {
