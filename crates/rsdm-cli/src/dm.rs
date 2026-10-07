@@ -69,7 +69,7 @@ fn run_greeter_loop(
         if terminate_requested() {
             return Ok(());
         }
-        vt.reclaim();
+        vt.reclaim()?;
         if let Err(error) = rsdm_infra::console_font::publish(&config.dm.tty.path) {
             tracing::warn!(%error, "could not share the Greeter console font with Lock");
         }

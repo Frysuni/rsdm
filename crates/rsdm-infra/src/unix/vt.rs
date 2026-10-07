@@ -17,7 +17,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum VtError {
-    #[error("could not restore text mode on {path}: {source}")]
+    #[error("could not restore terminal state on {path}: {source}")]
     Restore {
         path: String,
         #[source]
@@ -56,14 +56,18 @@ impl VtGuard {
     /// Re-claim the VT foreground when control returns to the greeter after a
     /// session exits. While the session ran, the compositor became the VT's
     /// foreground; reclaiming makes the freshly redrawn greeter receive
-    /// keystrokes again instead of a now-dead process group. Best-effort.
-    pub fn reclaim(&self) {
-        match open_vt(&self.tty_path) {
-            Ok(file) => claim_foreground(file.as_raw_fd()),
-            Err(error) => {
-                tracing::debug!(path = %self.tty_path, %error, "could not reopen VT to reclaim foreground");
-            }
-        }
+    /// keystrokes again instead of a now-dead process group. Never reset a VT
+    /// while a detached session still owns it.
+    pub fn reclaim(&self) -> Result<(), VtError> {
+        let file = open_vt(&self.tty_path).map_err(|source| VtError::Open {
+            path: self.tty_path.clone(), source,
+        })?;
+        let rdev = file.metadata().map_err(|source| VtError::Open {
+            path: self.tty_path.clone(), source,
+        })?.rdev();
+        wait_until_vt_is_free(file.as_raw_fd(), rdev, &self.tty_path)?;
+        claim_foreground(file.as_raw_fd());
+        restore_terminal(file.as_raw_fd(), &self.tty_path)
     }
 }
 
@@ -99,10 +103,13 @@ pub fn acquire(tty_path: &str) -> Result<VtGuard, VtError> {
         LockOutcome::Unavailable => None,
     };
 
-    let rdev = file.metadata().map(|meta| meta.rdev()).unwrap_or(0);
+    let rdev = file.metadata().map_err(|source| VtError::Open {
+        path: tty_path.to_string(), source,
+    })?.rdev();
     wait_until_vt_is_free(fd, rdev, tty_path)?;
 
     claim_foreground(fd);
+    restore_terminal(fd, tty_path)?;
 
     Ok(VtGuard {
         _lock: lock,
@@ -118,6 +125,15 @@ fn open_vt(tty_path: &str) -> io::Result<File> {
         .write(true)
         .custom_flags(libc::O_NOCTTY)
         .open(tty_path)
+}
+
+fn restore_terminal(fd: i32, tty_path: &str) -> Result<(), VtError> {
+    // SAFETY: isatty only inspects the open descriptor. Skip descriptors with
+    // no line discipline; a terminal needs a known baseline before raw mode.
+    if unsafe { libc::isatty(fd) } != 1 { return Ok(()); }
+    super::terminal::restore_cooked(fd).map_err(|source| VtError::Restore {
+        path: tty_path.to_string(), source,
+    })
 }
 
 /// `KDGKBTYPE` (get keyboard type) - a stable Linux console ioctl that succeeds

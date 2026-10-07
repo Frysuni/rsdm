@@ -11,6 +11,7 @@ mod session_conversation;
 mod session_pipe;
 mod session_report;
 mod shutdown;
+mod terminal;
 mod user;
 mod vt;
 mod vt_owner;

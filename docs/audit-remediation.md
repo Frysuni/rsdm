@@ -44,7 +44,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 26 | One recovery deadline across all teardown phases | in progress; setup and bus teardown bounded |
 | 27 | Establish shutdown backstop before child startup | pending |
 | 28 | Recover console log level after greeter crashes | pending |
-| 29 | Establish sane terminal baseline after crashes | pending |
+| 29 | Establish sane terminal baseline after crashes | fixed |
 | 30 | Generic autovt ownership | pending |
 | 31 | Synchronize generic service and configured VT | pending |
 | 32 | Avoid disabled-DM service restart loops | fixed |
@@ -408,3 +408,20 @@ verification separate from private-peer and unit-test evidence.
   [systemd service documentation](https://github.com/systemd/systemd/blob/main/man/systemd.service.xml).
   Changed Rust files remain below 300 lines; new functions below 50. Existing
   longer Greeter orchestration is retained, without growing its responsibilities.
+- 29: Initial VT acquisition and reclaim restore a known cooked line discipline
+  after checking ownership, before crossterm saves its raw-mode baseline.
+  Reclaim now waits out a detached foreign session and reports failures instead
+  of proceeding with an unknown terminal state. Metadata errors fail closed.
+  The same normalization serves TTY fallback, preserving device speed and
+  pending input; service-wide TTY reset/disallocation remains disabled.
+  `nix develop --command cargo test -p rsdm-infra unix:: --locked` passed 45
+  tests, with the existing child-only fixture ignored in the parent run.
+  The new private PTY regression kills its raw-mode owner with SIGKILL and
+  verifies canonical input, echo, signals, and CR-to-newline recovery. Separate
+  tests check speed preservation and descriptor errors. The live VT was never
+  opened or changed.
+  `nix develop --command cargo test --workspace --locked --quiet` passed all
+  403 tests; workspace/all-targets checking passed on Rust 1.88.0. All changed
+  Rust files stay below 300 lines, and new functions below 50. The existing
+  larger Greeter loop changes only its checked reclaim call. Global console
+  log-level crash recovery (28) and generic VT configuration (30/31) remain open.

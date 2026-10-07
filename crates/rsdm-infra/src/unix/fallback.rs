@@ -96,7 +96,7 @@ fn attach_vt(tty_path: &str) -> Result<(), FallbackError> {
         libc::tcsetpgrp(libc::STDIN_FILENO, libc::getpgrp());
     }
 
-    reset_terminal();
+    super::terminal::restore_cooked(libc::STDIN_FILENO).map_err(FallbackError::AttachTty)?;
     Ok(())
 }
 
@@ -114,40 +114,6 @@ fn claim_controlling_terminal(fd: i32) -> io::Result<()> {
         }
     }
     Ok(())
-}
-
-/// Restore a sane cooked line discipline on stdin. The greeter ran in raw mode;
-/// if it died without restoring, a bare login shell would be unusable (no echo,
-/// no line editing, no Ctrl-C). `agetty`/`login` reset the VT themselves, but the
-/// last-resort candidates may not, so do it here too. Best-effort.
-fn reset_terminal() {
-    // SAFETY: termios is zeroed then populated by tcgetattr for a valid fd.
-    let mut termios: libc::termios = unsafe { std::mem::zeroed() };
-    // SAFETY: tcgetattr fills termios for stdin; on failure we leave it as-is.
-    if unsafe { libc::tcgetattr(libc::STDIN_FILENO, &mut termios) } != 0 {
-        return;
-    }
-
-    termios.c_iflag |= libc::ICRNL | libc::IXON | libc::BRKINT;
-    termios.c_iflag &= !(libc::IGNBRK | libc::INLCR | libc::IGNCR | libc::ISTRIP | libc::IXOFF);
-    termios.c_oflag |= libc::OPOST | libc::ONLCR;
-    termios.c_lflag |=
-        libc::ISIG | libc::ICANON | libc::ECHO | libc::ECHOE | libc::ECHOK | libc::IEXTEN;
-    termios.c_cflag |= libc::CREAD | libc::CS8;
-
-    termios.c_cc[libc::VINTR] = 3; // Ctrl-C
-    termios.c_cc[libc::VQUIT] = 28; // Ctrl-\
-    termios.c_cc[libc::VERASE] = 127; // DEL
-    termios.c_cc[libc::VKILL] = 21; // Ctrl-U
-    termios.c_cc[libc::VEOF] = 4; // Ctrl-D
-    termios.c_cc[libc::VSUSP] = 26; // Ctrl-Z
-    termios.c_cc[libc::VMIN] = 1;
-    termios.c_cc[libc::VTIME] = 0;
-
-    // SAFETY: tcsetattr applies a valid termios to stdin.
-    unsafe {
-        libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &termios);
-    }
 }
 
 /// Build the ordered, de-duplicated list of fallback commands to try.

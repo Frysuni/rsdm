@@ -51,7 +51,8 @@ Greeter (`dm`) runtime path:
 3. Acquire the configured VT: refuse a second rsdm outright; when a live
    session still owns the VT (a compositor in graphics mode, a console login -
    the restart-during-a-session case), wait for it to end rather than drawing
-   over it, so the fallback is never stacked onto a busy VT either
+   over it, so the fallback is never stacked onto a busy VT either. Only after
+   ownership is confirmed, restore a cooked line discipline before raw mode
 4. Render the TUI on the configured TTY
 5. On submit, fork the session-leader child and show "Authenticating..."
    while it runs PAM in the background; a failure comes back inline (the
@@ -71,8 +72,9 @@ Greeter (`dm`) runtime path:
    recorded units as the desktop UID, and closing/ending PAM. Stopping
    `rsdm.service` cannot reach this child, so a
    restart never logs the live session out
-9. The greeter waits for the child's final report, reclaims the VT foreground
-   and redraws; on a fatal error it hands the TTY to the fallback login (the
+9. The greeter waits for the child's final report, confirms the VT is free,
+   reclaims its foreground and cooked baseline, and redraws; on a fatal error
+   it hands the TTY to the fallback login (the
    configured command first, then a built-in `agetty`/`login` chain) instead
    of dying
 
