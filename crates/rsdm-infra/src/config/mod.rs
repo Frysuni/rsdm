@@ -126,4 +126,19 @@ mod tests {
         assert_eq!(config.idle.on_lock, ["notify-send locked"]);
         assert_eq!(config.idle.on_unlock, ["notify-send unlocked"]);
     }
+
+    #[test]
+    fn rejects_unrepresentable_readiness_timeout_during_config_loading() {
+        let error = parse_config(
+            "[session_manager]\nready_timeout_secs = 9223372036854775807\n",
+            None,
+        )
+        .expect_err("timeout cannot fit a monotonic deadline");
+        let ConfigLoadError::Validate { source, .. } = error else {
+            panic!("expected config validation to reject the timeout");
+        };
+        assert!(
+            source.issues.iter().any(|issue| issue.field == "session_manager.ready_timeout_secs")
+        );
+    }
 }

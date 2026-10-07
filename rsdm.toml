@@ -18,7 +18,7 @@
 enabled = true # optional | bool | default: true | values: true, false
 # Extra environment variable names exported after the Wayland socket appears.
 extra_env = [] # optional | array<string> | default: [] | values: environment variable names
-ready_timeout_secs = 10 # optional | integer | default: 10 | values: >= 0, seconds; timeout leaves graphical targets inactive until finalize
+ready_timeout_secs = 10 # optional | integer | default: 10 | values: >= 0, seconds fitting a monotonic deadline on this platform; timeout leaves graphical targets inactive until finalize
 
 [logging]
 level = "info" # optional | string | default: "info" | values: error, warn, info, debug, trace

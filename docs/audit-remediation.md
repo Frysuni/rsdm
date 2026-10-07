@@ -68,7 +68,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 50 | Follow Desktop Entry Exec parsing semantics | pending |
 | 51 | Reject ambiguous fixed-session display names | pending |
 | 52 | Use logind power capabilities for lock UI | pending |
-| 53 | Validate ready timeout representability | pending |
+| 53 | Validate ready timeout representability | implemented; runtime checks pending |
 | 54 | Document pidfd emergency unlock protection | implemented with 12; runtime checks pending |
 | 55 | Match bounded recovery-record documentation | fixed with 5 |
 | 56 | Match bounded-worker architecture claims | pending |
@@ -149,3 +149,8 @@ Record unexecuted runtime checks explicitly for later verification.
   Rust toolchains remain explicitly stable and 1.88.0. Dependabot proposes
   weekly action-pin updates. Upstream refs/action inputs and workflow YAML were
   checked without executing CI; the CI policy remains unchanged.
+- 53: configuration validation rejects readiness timeouts that cannot fit an
+  Instant deadline, including when coordination is disabled; zero remains valid.
+  The launch-time guard remains. Existing config tests moved beside validation
+  to keep the production file small; boundary and TOML-loading regressions were
+  added. Rust syntax and sample TOML checks passed; runtime tests are pending.

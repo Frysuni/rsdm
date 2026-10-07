@@ -14,6 +14,7 @@ pub struct SessionManagerConfig {
     /// Wayland/XDG set.
     pub extra_env: Vec<String>,
     /// How long to wait for the compositor to publish its Wayland environment.
+    /// Must fit a monotonic deadline on this platform; zero is allowed.
     /// On timeout, targets remain inactive until an explicit finalize.
     pub ready_timeout_secs: u64,
 }

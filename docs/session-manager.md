@@ -288,6 +288,10 @@ extra_env = []
 ready_timeout_secs = 10
 ```
 
+`ready_timeout_secs` accepts zero or a positive number of seconds that fits a
+monotonic deadline on the host platform. Configuration validation rejects
+unrepresentable values before the session starts.
+
 Disable coordination with `enabled = false`, or
 `services.rsdm.sessionManager = false` on NixOS. Inspect `rsdm session status`,
 `journalctl --user -b` and the DM journal for readiness/recovery. Enable graphical
