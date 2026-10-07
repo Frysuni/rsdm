@@ -38,7 +38,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 20 | Scale reference restoration within bounded work | fixed |
 | 21 | Roll back definitely failed app registrations | fixed |
 | 22 | Roll back definitely failed start references | fixed |
-| 23 | Recover generation-owned quit/logout helpers | pending |
+| 23 | Recover generation-owned quit/logout helpers | fixed |
 | 24 | Bound shutdown concurrency and polling | pending |
 | 25 | Linear process snapshot/pidfd signaling | fixed |
 | 26 | One recovery deadline across all teardown phases | in progress; setup and bus teardown bounded |
@@ -616,6 +616,16 @@ verification separate from private-peer and unit-test evidence.
   after application records are finished. Private runtime tests cover records
   that still exist, stale lock removal, and a contended lock retained until its
   holder exits. No host runtime directory is accessed.
+
+- 23: Transient quit and logout helpers now carry both `PartOf` and `Requisite`
+  references to the generation anchor. They cannot start after the anchor has
+  gone, and systemd stops them when the anchor is stopped. Recovery already
+  stops the recorded anchor before closing the generation, so a coordinator
+  crash cannot leave a helper independent of the session lifetime. Rejected
+  starts still avoid StopUnit/UnrefUnit on a conflicting name (covered by the
+  helper-start tests above). Private D-Bus regressions inspect both lifetime
+  properties for quit and logout helpers and exercise rejected and
+  post-acceptance failures. No live manager or session is contacted.
 
 - 15: LoginAttemptLimiter now receives the directory resolver's canonical
   username before admission, so aliases that map to one account share a failure

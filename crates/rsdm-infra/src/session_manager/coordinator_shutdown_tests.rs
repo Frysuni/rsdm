@@ -213,6 +213,7 @@ fn a_rejected_logout_helper_never_stops_or_unrefs_a_conflicting_unit() {
         assert!(matches!(run_logout_command(&fixture.manager, &record, &provider, Path::new("/")),
             Err(SessionError::StartRejected { .. })));
         assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
+        assert!(fixture.state.lifetime_bound.load(Ordering::SeqCst));
         assert_eq!(fixture.state.stops.load(Ordering::SeqCst), 0);
         assert_eq!(fixture.state.unrefs.load(Ordering::SeqCst), 0);
     }
@@ -226,5 +227,6 @@ fn an_accepted_logout_helper_with_an_inspection_error_still_attempts_cleanup() {
     let fixture = helper_start_fixture::Fixture::new(format!("rsdm-logout-{GENERATION}.service"), Mode::InspectionDenied);
     assert!(run_logout_command(&fixture.manager, &record, &provider, Path::new("/")).is_err());
     assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
+    assert!(fixture.state.lifetime_bound.load(Ordering::SeqCst));
     assert_eq!(fixture.state.unrefs.load(Ordering::SeqCst), 1);
 }

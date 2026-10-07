@@ -204,6 +204,8 @@ fn run_logout_command(manager: &UserManager, record: &SessionRecord, provider: &
     properties.extend([
         ("ExitType", zbus::zvariant::Value::from("cgroup")),
         ("TimeoutStopUSec", zbus::zvariant::Value::from(1_000_000_u64)),
+        ("PartOf", zbus::zvariant::Value::new(vec![record.anchor_unit.clone()])),
+        ("Requisite", zbus::zvariant::Value::new(vec![record.anchor_unit.clone()])),
     ]);
     let result = (|| {
         manager.start_service(&unit, &properties)?;

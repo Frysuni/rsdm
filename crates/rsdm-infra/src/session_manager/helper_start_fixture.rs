@@ -32,6 +32,7 @@ pub(super) struct State {
     pub(super) starts: AtomicUsize,
     pub(super) stops: AtomicUsize,
     pub(super) unrefs: AtomicUsize,
+    pub(super) lifetime_bound: AtomicBool,
 }
 
 struct Manager(Arc<State>);
@@ -53,10 +54,12 @@ impl Manager {
     }
 
     fn start_transient_unit(
-        &self, _unit: &str, _mode: &str, _properties: Vec<(String, OwnedValue)>,
+        &self, _unit: &str, _mode: &str, properties: Vec<(String, OwnedValue)>,
         _auxiliary: Vec<(String, Vec<(String, OwnedValue)>)>,
     ) -> Result<OwnedObjectPath, ManagerError> {
         self.0.starts.fetch_add(1, Ordering::SeqCst);
+        self.0.lifetime_bound.store(properties.iter().any(|(name, _)| *name == "PartOf")
+            && properties.iter().any(|(name, _)| *name == "Requisite"), Ordering::SeqCst);
         self.0.exists.store(self.0.mode != Mode::Denied, Ordering::SeqCst);
         match self.0.mode {
             Mode::Collision => Err(ManagerError::UnitExists("another unit owns this name".into())),
@@ -106,7 +109,8 @@ pub(super) struct Fixture {
 impl Fixture {
     pub(super) fn new(unit: String, mode: Mode) -> Self {
         let state = Arc::new(State { mode, unit, exists: AtomicBool::new(false),
-            starts: AtomicUsize::new(0), stops: AtomicUsize::new(0), unrefs: AtomicUsize::new(0) });
+            starts: AtomicUsize::new(0), stops: AtomicUsize::new(0), unrefs: AtomicUsize::new(0),
+            lifetime_bound: AtomicBool::new(false) });
         let shared = Arc::clone(&state);
         let (server_socket, client_socket) = UnixStream::pair().unwrap();
         let server = thread::spawn(move || async_io::block_on(async {

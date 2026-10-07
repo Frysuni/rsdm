@@ -143,7 +143,7 @@ fn reset_preparation(runtime: &Runtime, prepared: &AppRecord, deadline: &Deadlin
 
 fn request_quit(manager: &UserManager, runtime: &Runtime, app: &AppRecord, control: &ShutdownControl) -> Result<Option<String>, SessionError> {
     if !app.policy.quit_command.is_empty() {
-        return launch_quit(manager, app).map(Some);
+        return launch_quit(manager, app, &runtime.generation).map(Some);
     }
     if app.policy.method != ShutdownMethod::Term {
         let selected = match control.xsmp_units.get() {
@@ -243,7 +243,7 @@ fn force_exit(manager: &UserManager, app: &AppRecord, control: &ShutdownControl)
     Ok(AppOutcome::Forced)
 }
 
-fn launch_quit(manager: &UserManager, app: &AppRecord) -> Result<String, SessionError> {
+fn launch_quit(manager: &UserManager, app: &AppRecord, generation: &str) -> Result<String, SessionError> {
     let unit = app.unit.replacen("app-rsdm-", "rsdm-quit-", 1);
     let environment: Vec<String> = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Service", "Environment")?;
     let environment: Vec<_> = environment.iter().filter_map(|entry| entry.split_once('=')
@@ -253,6 +253,8 @@ fn launch_quit(manager: &UserManager, app: &AppRecord) -> Result<String, Session
     properties.extend([
         ("Slice", Value::from(super::units::APP_SLICE)),
         ("TimeoutStopUSec", Value::from(1_000_000_u64)),
+        ("PartOf", Value::new(vec![format!("rsdm-session-{generation}.service")])),
+        ("Requisite", Value::new(vec![format!("rsdm-session-{generation}.service")])),
     ]);
     if let Err(error) = manager.start_service(&unit, &properties) {
         if !matches!(error, SessionError::StartRejected { .. }) {
