@@ -81,6 +81,7 @@ fn lock_renders_username_and_caption() {
         message_is_error: true,
         pending: None,
         hibernate_available: true,
+        suspend_available: true,
     };
     let mut s = VecSurface::new(100, 32);
     let d = design();
@@ -107,6 +108,7 @@ fn lock_too_small_keeps_a_usable_prompt() {
         message_is_error: false,
         pending: None,
         hibernate_available: false,
+        suspend_available: false,
     };
     let mut s = VecSurface::new(20, 6);
     render_lock(&mut s, &design(), &scene, &Menu::new(), 0);
@@ -150,5 +152,25 @@ fn session_picker_keeps_the_selected_session_visible() {
                 "selected session must be visible at {width}x{height}:\n{dump}");
             assert_eq!(dump.matches("> Session ").count(), 1);
         }
+    }
+}
+
+#[test]
+fn lock_sleep_hints_follow_each_logind_capability() {
+    for (hibernate_available, suspend_available) in [(false, false), (false, true), (true, false), (true, true)] {
+        let scene = LockScene {
+            title: vec!["RSDM".into()], hostname: None, clock: None, username: "alice",
+            password_preview: String::new(), authentication_active: false,
+            message: None, message_is_error: false, pending: None,
+            hibernate_available, suspend_available,
+        };
+        let mut surface = VecSurface::new(100, 32);
+        render_lock(&mut surface, &design(), &scene, &Menu::new(), 0);
+        let dump = surface.dump();
+        assert_eq!(dump.contains("F9"), hibernate_available);
+        assert_eq!(dump.contains("Hibernate"), hibernate_available);
+        assert_eq!(dump.contains("F10"), suspend_available);
+        assert_eq!(dump.contains("Sleep"), suspend_available);
+        assert!(dump.contains("F11") && dump.contains("F12"));
     }
 }

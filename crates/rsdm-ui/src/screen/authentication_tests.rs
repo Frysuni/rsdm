@@ -35,6 +35,7 @@ fn lock(message: &str) -> LockScene<'_> {
         message_is_error: false,
         pending: None,
         hibernate_available: false,
+        suspend_available: false,
     }
 }
 

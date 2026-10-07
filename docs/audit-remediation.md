@@ -67,7 +67,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 49 | Choose one deterministic automatic keyring | implemented; module checks pending |
 | 50 | Follow Desktop Entry Exec parsing semantics | pending |
 | 51 | Reject ambiguous fixed-session display names | implemented; runtime checks pending |
-| 52 | Use logind power capabilities for lock UI | pending |
+| 52 | Use logind power capabilities for lock UI | implemented; runtime checks pending |
 | 53 | Validate ready timeout representability | implemented; runtime checks pending |
 | 54 | Document pidfd emergency unlock protection | implemented with 12; runtime checks pending |
 | 55 | Match bounded recovery-record documentation | fixed with 5 |
@@ -217,3 +217,10 @@ Record unexecuted runtime checks explicitly for later verification.
   above a private parent. Tests cover append, creation, links, directory replacement,
   unsafe modes/ancestors, FIFO/type checks, and root-only foreign ownership.
   Rust syntax, sample TOML, and diff checks passed; runtime tests are pending.
+- 52: Lock uses bounded background CanHibernate/CanSuspend queries to logind
+  rather than advertising kernel sleep states. Both footer hints and keyboard
+  activation follow the result; yes/challenge are available and errors remain
+  unavailable. Connection setup and calls share a five-second deadline. Tests
+  cover private peer replies, denied/unknown capabilities, hung connections or
+  methods, and independent footer visibility. Syntax/diff checks passed;
+  runtime tests and a real logind/polkit check are pending.

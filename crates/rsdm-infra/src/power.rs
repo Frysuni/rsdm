@@ -1,6 +1,6 @@
 //! Logind power authorization and delay inhibitors, without privilege escalation.
 
-use std::{os::fd::OwnedFd, sync::mpsc::Sender, thread, time::Duration};
+use std::{future::Future, os::fd::OwnedFd, sync::mpsc::Sender, thread, time::Duration};
 
 use futures_lite::{StreamExt, future};
 use zbus::{Connection, Proxy};
@@ -24,6 +24,44 @@ fn method(action: &str) -> Result<&'static str, SessionError> {
         "reboot" => Ok("Reboot"), "poweroff" => Ok("PowerOff"),
         "suspend" => Ok("Suspend"), "hibernate" => Ok("Hibernate"),
         _ => Err(SessionError::State("unsupported power action".into())),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PowerCapabilities {
+    pub hibernate: bool,
+    pub suspend: bool,
+}
+
+/// Query the same logind authority used for executing sleep requests.
+pub fn capabilities() -> Result<PowerCapabilities, SessionError> {
+    let timeout = Duration::from_secs(5);
+    async_io::block_on(query_capabilities(connection(timeout), timeout))
+}
+
+async fn query_capabilities(
+    connect: impl Future<Output = Result<Connection, SessionError>>, timeout: Duration,
+) -> Result<PowerCapabilities, SessionError> {
+    future::or(async {
+        let connection = connect.await?;
+        let proxy = proxy(&connection).await?;
+        let (hibernate, suspend) = future::zip(
+            available(&proxy, "CanHibernate"), available(&proxy, "CanSuspend"),
+        ).await;
+        Ok(PowerCapabilities { hibernate, suspend })
+    }, async {
+        async_io::Timer::after(timeout).await;
+        Err(SessionError::State("logind power capability query timed out".into()))
+    }).await
+}
+
+async fn available(proxy: &Proxy<'_>, method: &str) -> bool {
+    match proxy.call::<_, _, String>(method, &()).await {
+        Ok(result) => matches!(result.as_str(), "yes" | "challenge"),
+        Err(error) => {
+            tracing::warn!(%method, %error, "logind power capability unavailable");
+            false
+        }
     }
 }
 
@@ -136,3 +174,7 @@ impl Drop for ShutdownMonitor {
 #[cfg(test)]
 #[path = "power_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "power_capability_tests.rs"]
+mod capability_tests;

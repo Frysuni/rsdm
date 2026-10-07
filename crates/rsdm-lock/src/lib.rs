@@ -114,6 +114,7 @@ pub fn preview_png(
         message_is_error: model.message_is_error(),
         pending: None,
         hibernate_available: false,
+        suspend_available: true,
     };
     {
         let mut surface = FbSurface::new(&mut canvas, &font, zoom);

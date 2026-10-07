@@ -69,6 +69,14 @@ Restoration keeps track of connector names even if switching an output off
 removes its Wayland output object. On other compositors it falls back to black.
 Find niri names with `niri msg outputs`.
 
+Sleep and Hibernate shortcuts are offered only when logind's `CanSuspend` or
+`CanHibernate` reports `yes` or `challenge` for the locker user. The snapshot is
+queried in a background worker with a five-second deadline covering connection
+setup and both calls; until it succeeds, these shortcuts are hidden. The actual
+request still goes through logind with interactive authorization enabled, so a
+policy change or unavailable authorization agent can reject the action without
+unlocking the screen.
+
 The locker renders a separate physical-pixel buffer for every output. On
 fractionally scaled outputs (for example niri `scale 1.5`) it follows
 `fractional-scale-v1` and `viewporter`, preserving the TTY-like density and crisp

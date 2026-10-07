@@ -141,6 +141,7 @@ impl App {
             message_is_error: self.model.message_is_error(),
             pending: self.pending,
             hibernate_available: self.ctx.hibernate_available,
+            suspend_available: self.ctx.suspend_available,
         };
         let mut surface = FbSurface::new(canvas, &self.ctx.font, zoom);
         let area = surface.area();

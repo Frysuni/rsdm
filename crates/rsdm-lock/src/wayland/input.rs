@@ -85,7 +85,7 @@ impl App {
             Keysym::F9 if self.ctx.hibernate_available => {
                 self.pending = Some(LockPending::Hibernate);
             }
-            Keysym::F10 => self.pending = Some(LockPending::Sleep),
+            Keysym::F10 if self.ctx.suspend_available => self.pending = Some(LockPending::Sleep),
             _ => {
                 if let Some(text) = event.utf8 {
                     for character in text.chars() {
@@ -172,12 +172,6 @@ impl KeyboardHandler for App {
         _: u32,
     ) {
     }
-}
-
-pub(super) fn hibernate_available() -> bool {
-    std::fs::read_to_string("/sys/power/state")
-        .map(|states| states.split_whitespace().any(|state| state == "disk"))
-        .unwrap_or(false)
 }
 
 fn menu_key(keysym: Keysym) -> Option<MenuKey> {

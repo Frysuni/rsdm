@@ -85,9 +85,11 @@ pub(super) fn draw_footer_lock(
         power.push(key("F9"));
         power.push(hint(" Hibernate"));
     }
-    power.push(sep());
-    power.push(key("F10"));
-    power.push(hint(" Sleep"));
+    if scene.suspend_available {
+        power.push(sep());
+        power.push(key("F10"));
+        power.push(hint(" Sleep"));
+    }
     draw_bottom_hud(surface, area, &[primary, power], p, clear_background);
 }
 

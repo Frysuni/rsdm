@@ -96,8 +96,10 @@ pub struct LockScene<'a> {
     pub message: Option<&'a str>,
     pub message_is_error: bool,
     pub pending: Option<LockPending>,
-    /// Whether the host can hibernate (so the footer offers it).
+    /// Whether logind permits hibernate (including an authorization challenge).
     pub hibernate_available: bool,
+    /// Whether logind permits suspend (including an authorization challenge).
+    pub suspend_available: bool,
 }
 
 /// A line of the box body.

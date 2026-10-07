@@ -51,6 +51,7 @@ struct LockContext {
     wallpaper: Option<Wallpaper>,
     username: String,
     hibernate_available: bool,
+    suspend_available: bool,
     pam_service: String,
     primary_output: Option<String>,
     secondary_output: SecondaryOutput,
@@ -106,6 +107,7 @@ struct App {
     model: LockModel,
     authentication: Option<crate::auth::AuthenticationJob>,
     power_action: Option<power::PowerJob>,
+    power_capabilities: Option<std::sync::mpsc::Receiver<rsdm_infra::power::PowerCapabilities>>,
     ctx: LockContext,
     menu: Menu,
     menu_enabled: bool,
@@ -157,6 +159,7 @@ pub fn run(config: &AppConfig, config_path: &Path) -> Result<()> {
         model: LockModel::new(config.lock.design.password_mode),
         authentication: None,
         power_action: None,
+        power_capabilities: power::start_capability_query(),
         ctx: context,
         menu,
         menu_enabled: config.lock.design.menu,
@@ -199,6 +202,7 @@ fn run_event_loop(
             .context("Wayland dispatch failed")?;
         app.process_authentication();
         app.process_power_action();
+        app.process_power_capabilities();
         if rsdm_infra::unix::emergency_unlock_requested() && app.lock_state.is_some() {
             app.unlock();
         }
@@ -274,7 +278,8 @@ fn build_context(config: &AppConfig, config_path: &Path) -> Result<LockContext> 
         design,
         wallpaper,
         username,
-        hibernate_available: input::hibernate_available(),
+        hibernate_available: false,
+        suspend_available: false,
         pam_service: config.lock.pam_service.clone(),
         primary_output: config.lock.primary_output.clone(),
         secondary_output: config.lock.secondary_output,

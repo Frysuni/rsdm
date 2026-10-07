@@ -11,6 +11,20 @@ pub(super) struct PowerJob {
     result: Receiver<Result<StopOutcome, SessionError>>,
 }
 
+pub(super) fn start_capability_query() -> Option<Receiver<rsdm_infra::power::PowerCapabilities>> {
+    let (sender, result) = mpsc::channel();
+    if let Err(error) = thread::Builder::new().name("rsdm-lock-power-capabilities".into()).spawn(move || {
+        match rsdm_infra::power::capabilities() {
+            Ok(capabilities) => { let _ = sender.send(capabilities); }
+            Err(error) => tracing::warn!(%error, "cannot determine logind sleep capabilities"),
+        }
+    }) {
+        tracing::warn!(%error, "cannot start logind capability query");
+        return None;
+    }
+    Some(result)
+}
+
 impl PowerJob {
     fn start(action: LockPending) -> Self {
         let verb = match action {
@@ -24,6 +38,20 @@ impl PowerJob {
 }
 
 impl App {
+    pub(super) fn process_power_capabilities(&mut self) {
+        let Some(result) = &self.power_capabilities else { return; };
+        match result.try_recv() {
+            Ok(capabilities) => {
+                self.ctx.hibernate_available = capabilities.hibernate;
+                self.ctx.suspend_available = capabilities.suspend;
+                self.needs_redraw = true;
+            }
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => {},
+        }
+        self.power_capabilities = None;
+    }
+
     pub(super) fn start_power_action(&mut self, action: LockPending) {
         if self.power_action.is_some() { return; }
         self.power_action = Some(PowerJob::start(action));
