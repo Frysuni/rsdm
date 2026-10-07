@@ -10,6 +10,13 @@ use crate::{power::{ShutdownMonitor, ShutdownNotice}, session_manager::{
 const GENERATION: &str = "0123456789abcdef0123456789abcdef";
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
 
+struct FixtureReady;
+
+#[zbus_macros::interface(name = "org.rsdm.TestReady")]
+impl FixtureReady {
+    fn ready(&self) {}
+}
+
 struct Fixture {
     coordinator: Coordinator,
     notices: std::sync::mpsc::Sender<ShutdownNotice>,
@@ -29,7 +36,10 @@ impl Fixture {
         let (server_socket, client_socket) = UnixStream::pair().unwrap();
         let server = thread::spawn(move || async_io::block_on(async {
             zbus::connection::Builder::unix_stream(server_socket).p2p()
-                .server(zbus::Guid::generate()).unwrap().build().await.unwrap()
+                .server(zbus::Guid::generate()).unwrap()
+                // Builder waits for the dispatcher's match stream to be ready;
+                // dynamically adding interfaces alone leaves the first call racing it.
+                .serve_at("/fixture", FixtureReady).unwrap().build().await.unwrap()
         }));
         let connection = async_io::block_on(async {
             zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()

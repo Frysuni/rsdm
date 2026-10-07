@@ -344,3 +344,11 @@ verification separate from private-peer and unit-test evidence.
   with `nix develop --command cargo test -p rsdm-infra repeated_finalize --locked`;
   it verifies both publications and the absence of unit queries/new workers.
   Changed Rust files remain below 300 lines and new functions below 50.
+- Regression fixture readiness: The coordinator's private peer now starts its
+  method dispatcher through `Builder::serve_at` before the connection is
+  returned. Dynamically registering interfaces did not wait for the match
+  stream and could lose the first call, producing intermittent test timeouts.
+  The parallel coordinator suite passed five consecutive runs with
+  `nix develop --command cargo test -p rsdm-infra
+  session_manager::coordinator_shutdown --locked --quiet`. No timeouts or
+  assertions were relaxed; the host bus and session were untouched.
