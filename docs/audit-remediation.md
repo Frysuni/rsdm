@@ -31,7 +31,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 13 | Validate lock state through one open descriptor | pending |
 | 14 | Honor PAM-requested authentication delay | pending |
 | 15 | Account throttling after PAM identity mapping | pending |
-| 16 | Audit successful starts after launch confirmation | pending |
+| 16 | Audit successful starts after launch confirmation | fixed |
 | 17 | Audit termination separately from cleanup failure | pending |
 | 18 | Move control-bus maintenance off the actor | pending |
 | 19 | Release transport mutex during async reconnect | pending |
@@ -93,3 +93,6 @@ order. Mark a row fixed only after its behavior has been checked.
   New generation directories also synchronize their directory entries. Record
   tests cover replacement and cleanup after publication failure. File-system
   durability barriers do not preserve `/run` across reboot or power loss.
+- 16: emit session-started only after the launcher returns a handle. Login tests
+  verify its ordering and its absence when launch fails, while preserving PAM
+  closure and shutdown-inhibitor lifetime on all existing error paths.

@@ -72,7 +72,9 @@ impl LoginAttemptLimiter for Services {
 impl AuditLogger for Services {
     fn auth_success(&self, _: &str) {}
     fn auth_failure(&self, _: &str, _: &str) {}
-    fn session_started(&self, _: &ResolvedUser, _: &Session) {}
+    fn session_started(&self, _: &ResolvedUser, _: &Session) {
+        self.events.borrow_mut().push("session-started");
+    }
     fn session_finished(&self, _: &ResolvedUser, _: &Session, _: SessionExit) {}
 }
 
@@ -92,21 +94,21 @@ fn execute(services: &Services) -> Result<LoginResult, LoginError> {
 fn cleanup_and_pam_end_precede_the_shutdown_inhibitor_release() {
     let services = Services { events: Events::default(), start_fails: false, wait_fails: false, close_fails: false };
     assert_eq!(execute(&services).unwrap().exit, SessionExit::Success);
-    assert_eq!(*services.events.borrow(), ["launch", "cleanup", "pam-close", "pam-drop", "inhibitor-release"]);
+    assert_eq!(*services.events.borrow(), ["launch", "session-started", "cleanup", "pam-close", "pam-drop", "inhibitor-release"]);
 }
 
 #[test]
 fn cleanup_failure_still_closes_pam_before_releasing_the_inhibitor() {
     let services = Services { events: Events::default(), start_fails: false, wait_fails: true, close_fails: false };
     assert!(matches!(execute(&services), Err(LoginError::Session(_))));
-    assert_eq!(*services.events.borrow(), ["launch", "cleanup", "pam-close", "pam-drop", "inhibitor-release"]);
+    assert_eq!(*services.events.borrow(), ["launch", "session-started", "cleanup", "pam-close", "pam-drop", "inhibitor-release"]);
 }
 
 #[test]
 fn pam_failure_still_keeps_the_inhibitor_until_pam_is_dropped() {
     let services = Services { events: Events::default(), start_fails: false, wait_fails: false, close_fails: true };
     assert!(matches!(execute(&services), Err(LoginError::Auth(_))));
-    assert_eq!(*services.events.borrow(), ["launch", "cleanup", "pam-close", "pam-drop", "inhibitor-release"]);
+    assert_eq!(*services.events.borrow(), ["launch", "session-started", "cleanup", "pam-close", "pam-drop", "inhibitor-release"]);
 }
 
 #[test]

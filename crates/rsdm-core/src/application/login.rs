@@ -109,7 +109,6 @@ impl StartUserSession<'_> {
         if let Some(gate) = self.gate {
             gate.session_authorized()?;
         }
-        self.audit.session_started(&user, request.session);
         let running = self.launcher.start(SessionLaunchRequest {
             session: request.session,
             user: &user,
@@ -118,6 +117,7 @@ impl StartUserSession<'_> {
             seat: request.seat,
             wrapper: request.wrapper,
         })?;
+        self.audit.session_started(&user, request.session);
         Ok((running, user))
     }
 }
