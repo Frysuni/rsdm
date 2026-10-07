@@ -6,6 +6,14 @@ use super::*;
 
 type Calls = Arc<Mutex<Vec<(String, String)>>>;
 
+#[derive(Debug, zbus_macros::DBusError)]
+#[zbus(prefix = "org.freedesktop.systemd1")]
+enum ManagerError {
+    NoSuchUnit(String),
+    #[zbus(error)]
+    Bus(zbus::Error),
+}
+
 struct FakeManager {
     version: &'static str,
     result: &'static str,
@@ -20,6 +28,10 @@ impl FakeManager {
     }
 
     fn subscribe(&self) {}
+
+    fn get_unit(&self, _unit: &str) -> Result<OwnedObjectPath, ManagerError> {
+        Err(ManagerError::NoSuchUnit("not started".into()))
+    }
 
     async fn start_transient_unit(
         &self,
@@ -87,8 +99,7 @@ fn job_wait_has_a_deadline_even_if_no_matching_signal_arrives() {
         let proxy = manager.proxy().await.unwrap();
         let mut signals = proxy.receive_signal("JobRemoved").await.unwrap();
         let job = OwnedObjectPath::try_from("/org/freedesktop/systemd1/job/999").unwrap();
-        let error = wait_job(&mut signals, &job, Duration::from_millis(20)).await.unwrap_err();
-        assert!(error.to_string().contains("timed out"));
+        assert!(!wait_job(&mut signals, &job, Duration::from_millis(20)).await.unwrap());
     });
 }
 
