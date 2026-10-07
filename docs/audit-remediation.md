@@ -525,3 +525,19 @@ verification separate from private-peer and unit-test evidence.
   The existing Wayland module is 310 lines; its clock snapshot belongs beside
   other frontend state. Its pre-existing larger run initializer/event loop
   remain. The new clock operation is eight lines.
+
+- Output-worker follow-up: final cleanup now supersedes an in-flight restoration
+  pass between commands, so it waits for at most the current bounded command
+  before its own shared restoration budget. The former pass could otherwise
+  finish its whole budget before cleanup began. A retained worker-local restore
+  request preserves remaining obligations when topology updates coalesce during
+  interruption; no stale Off work resumes before restoration completes.
+  Two deterministic paused-command regressions check that Shutdown is consumed
+  before the next On, and that an interrupted restore finishes before newly
+  queued outputs are powered off. `nix develop --command cargo test -p rsdm-lock
+  --locked` passed all 42 tests. `nix develop --command cargo test --workspace
+  --locked --quiet` passed all 427 tests, plus the existing child-only fixture
+  ignored in its parent run. Workspace/all-targets checking passed on Rust
+  1.88.0; `git diff --check` passed. Both changed source files remain below
+  300 lines and all changed functions below 50. Tests use only private worker
+  channels; no host compositor, output, service, or clock was changed.

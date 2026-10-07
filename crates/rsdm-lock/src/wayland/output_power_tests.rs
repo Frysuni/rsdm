@@ -91,10 +91,10 @@ fn restoration_commands_share_one_deadline() {
     let mut owned = BTreeSet::from(["DP-1".into(), "DP-2".into(), "DP-3".into()]);
     let started = Instant::now();
     let mut deadlines = Vec::new();
-    restore_outputs(&mut owned, &mut |_, _, deadline| {
+    assert!(restore_outputs(&mut owned, &mut |_, _, deadline| {
         deadlines.push(deadline);
         Err(io::ErrorKind::TimedOut.into())
-    });
+    }, &Requests::default()));
     assert_eq!(owned.len(), 3);
     assert_eq!(deadlines.len(), 3);
     for deadline in deadlines {
@@ -136,4 +136,60 @@ fn a_stopped_helper_times_out_before_the_queued_restore_runs() {
     worker.restore();
     assert_eq!(receive(&receiver), ("DP-1".into(), "on".into()));
     drop(worker);
+}
+
+#[test]
+fn final_cleanup_supersedes_an_inflight_restoration_pass() {
+    let (events, receiver) = mpsc::channel();
+    let (release, wait) = mpsc::sync_channel(1);
+    let worker = OutputPower::with_command(move |output, action, _| {
+        events.send((output.into(), action.into())).unwrap();
+        if action == "on" { wait.recv_timeout(Duration::from_secs(5)).unwrap(); }
+        Ok(())
+    }).unwrap();
+    worker.power_off(vec!["DP-1".into(), "DP-2".into(), "DP-3".into()]);
+    for output in ["DP-1", "DP-2", "DP-3"] {
+        assert_eq!(receive(&receiver), (output.into(), "off".into()));
+    }
+    worker.restore();
+    assert_eq!(receive(&receiver), ("DP-1".into(), "on".into()));
+    let requests = Arc::clone(&worker.requests);
+    let cleanup = thread::spawn(move || drop(worker));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !requests.pending.lock().unwrap().shutdown {
+        assert!(Instant::now() < deadline, "final cleanup must enqueue its request");
+        thread::sleep(Duration::from_millis(1));
+    }
+    release.send(()).unwrap();
+    assert_eq!(receive(&receiver), ("DP-2".into(), "on".into()));
+    // The old pass must stop and consume Shutdown before issuing the next On.
+    assert!(!requests.pending.lock().unwrap().shutdown);
+    release.send(()).unwrap();
+    assert_eq!(receive(&receiver), ("DP-3".into(), "on".into()));
+    release.send(()).unwrap();
+    cleanup.join().unwrap();
+}
+
+#[test]
+fn coalescing_new_outputs_does_not_lose_an_interrupted_restore() {
+    let (events, receiver) = mpsc::channel();
+    let (release, wait) = mpsc::sync_channel(1);
+    let worker = OutputPower::with_command(move |output, action, _| {
+        events.send((output.into(), action.into())).unwrap();
+        if (output, action) == ("DP-1", "on") {
+            wait.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+        Ok(())
+    }).unwrap();
+    worker.power_off(vec!["DP-1".into(), "DP-2".into()]);
+    assert_eq!(receive(&receiver), ("DP-1".into(), "off".into()));
+    assert_eq!(receive(&receiver), ("DP-2".into(), "off".into()));
+    worker.restore();
+    assert_eq!(receive(&receiver), ("DP-1".into(), "on".into()));
+    worker.power_off(vec!["DP-3".into()]);
+    release.send(()).unwrap();
+    assert_eq!(receive(&receiver), ("DP-2".into(), "on".into()));
+    assert_eq!(receive(&receiver), ("DP-3".into(), "off".into()));
+    drop(worker);
+    assert_eq!(receive(&receiver), ("DP-3".into(), "on".into()));
 }

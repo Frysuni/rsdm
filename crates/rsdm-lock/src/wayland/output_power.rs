@@ -107,10 +107,13 @@ fn run_worker(
 ) {
     let mut owned = BTreeSet::new();
     let mut fallback_warned = false;
+    let mut restore_pending = false;
     loop {
         let pending = next_request(requests);
-        if pending.restore {
-            restore_outputs(&mut owned, &mut command);
+        restore_pending |= pending.restore;
+        if restore_pending {
+            if !restore_outputs(&mut owned, &mut command, requests) { continue; }
+            restore_pending = false;
         }
         if pending.shutdown { break; }
         for output in pending.outputs {
@@ -133,9 +136,15 @@ fn run_worker(
 fn restore_outputs(
     owned: &mut BTreeSet<String>,
     command: &mut impl FnMut(&str, &str, Instant) -> io::Result<()>,
-) {
+    requests: &Requests,
+) -> bool {
     let deadline = Instant::now() + RESTORE_TIMEOUT;
+    let mut interrupted = false;
     owned.retain(|output| {
+        if superseded(requests) {
+            interrupted = true;
+            return true;
+        }
         let until = deadline.min(Instant::now() + COMMAND_TIMEOUT);
         match command(output, "on", until) {
             Ok(()) => false,
@@ -145,6 +154,7 @@ fn restore_outputs(
             }
         }
     });
+    !interrupted
 }
 
 fn niri_output_command(output: &str, action: &str, deadline: Instant) -> io::Result<()> {
