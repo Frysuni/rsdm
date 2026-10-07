@@ -139,7 +139,7 @@ impl App {
                 banner::title_lines(&self.ctx.design, None)
             },
             hostname: self.ctx.design.show_hostname.then(banner::hostname),
-            clock: self.ctx.design.show_clock.then(banner::clock_text),
+            clock: self.clock_text.clone(),
             username: &self.ctx.username,
             password_preview: self.model.password_preview(),
             authentication_active: self.authentication.is_some(),
@@ -160,6 +160,14 @@ impl App {
             area,
             wallpaper_present,
         );
+    }
+
+    pub(super) fn process_clock(&mut self) {
+        let clock = self.ctx.design.show_clock.then(banner::clock_text);
+        if clock != self.clock_text {
+            self.clock_text = clock;
+            self.needs_redraw = true;
+        }
     }
 
     pub(super) fn animation_frame(&self) -> u64 {

@@ -119,6 +119,7 @@ struct App {
     needs_redraw: bool,
     animation_started: Instant,
     last_animation_frame: u64,
+    clock_text: Option<String>,
     exit: bool,
     unlocked: bool,
     lock_state: Option<rsdm_infra::lock_control::LockStateGuard>,
@@ -170,6 +171,7 @@ pub fn run(config: &AppConfig, config_path: &Path) -> Result<()> {
         needs_redraw: false,
         animation_started: Instant::now(),
         last_animation_frame: 0,
+        clock_text: None,
         exit: false,
         unlocked: false,
         lock_state: None,
@@ -206,6 +208,7 @@ fn run_event_loop(
         app.process_authentication();
         app.process_power_action();
         app.process_power_capabilities();
+        app.process_clock();
         if rsdm_infra::unix::emergency_unlock_requested() && app.lock_state.is_some() {
             app.unlock();
         }

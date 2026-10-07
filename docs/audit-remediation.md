@@ -510,3 +510,18 @@ verification separate from private-peer and unit-test evidence.
   repeated static-black submissions are removed. No performance benchmark or
   real multi-output compositor run is claimed. Static-background clock refresh
   was observed as a separate existing issue and still needs its own fix.
+
+- Rendering follow-up: the clock previously updated only on another dirty
+  event when the background was static. The Wayland loop now compares the
+  displayed clock snapshot during its normal poll cycle and marks the frame
+  dirty only when that text changes. Primary rendering uses the same snapshot;
+  animation and buffer-release retries retain their existing behavior.
+  This small UI scheduling fix uses the existing regression suite rather than
+  adding a test that duplicates a string comparison. `nix develop --command
+  cargo test --workspace --locked --quiet` passed all 425 tests, plus the existing
+  child-only fixture ignored in its parent run. Workspace/all-targets checking
+  passed on Rust 1.88.0; `git diff --check` passed. No host clock/display was
+  changed; a live static-lock minute transition was not exercised.
+  The existing Wayland module is 310 lines; its clock snapshot belongs beside
+  other frontend state. Its pre-existing larger run initializer/event loop
+  remain. The new clock operation is eight lines.

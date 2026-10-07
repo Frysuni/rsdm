@@ -85,6 +85,8 @@ by the compositor remain read-only until `wl_buffer.release`, including during
 resize; when both are busy, the latest redraw stays pending. Unchanged black
 secondary frames are skipped. Rendering still copies each submitted software
 frame into SHM; it does not introduce borrowed pixel storage or GPU rendering.
+With a static background, the visible clock requests a redraw when its displayed
+minute/date changes, without waiting for keyboard or compositor events.
 
 Sleep and Hibernate shortcuts are offered only when logind's `CanSuspend` or
 `CanHibernate` reports `yes` or `challenge` for the locker user. The snapshot is
