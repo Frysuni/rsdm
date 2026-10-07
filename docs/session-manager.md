@@ -298,7 +298,10 @@ saving through hung applications, storage or an unresponsive bus.
 
 DM's detached root owner keeps its delay FD through user cleanup, PAM close and
 PAM end. Restarting DM does not terminate that leader's graphical session.
-Recovery has a short app budget and root bounds its helper wait. Lock handles
+Recovery installs its short shared budget before connecting to the user bus;
+authentication, validation, the coordinator-name lease, app preparation, and
+unit teardown use the same deadline. A saved or active deadline is never
+extended by recovery. Root bounds its helper wait separately. Lock handles
 power requests asynchronously and retains opaque surfaces through rejection or
 cancellation; only authentication or privileged emergency unlock releases them.
 

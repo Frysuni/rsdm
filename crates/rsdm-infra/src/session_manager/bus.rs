@@ -27,19 +27,35 @@ pub(super) struct UserManager {
 
 impl UserManager {
     pub fn connect() -> Result<Self, SessionError> {
-        async_io::block_on(async {
-            let connection = zbus::connection::Builder::session()?
-                .method_timeout(Duration::from_secs(5))
-                .build().await?;
-            Self::from_connection(connection).await
-        })
+        Self::connect_until(Deadline::default())
     }
 
+    pub fn connect_until(deadline: Deadline) -> Result<Self, SessionError> {
+        async_io::block_on(Self::connect_with(async {
+            zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await
+        }, deadline))
+    }
+
+    async fn connect_with(
+        connection: impl Future<Output = zbus::Result<Connection>>, deadline: Deadline,
+    ) -> Result<Self, SessionError> {
+        let setup = async {
+            let connection = connection.await?;
+            validate_connection(&connection).await?;
+            Ok(Self { transport: transport::Transport::new(connection), deadline: deadline.clone() })
+        };
+        deadline.bound(future::or(setup, async {
+            async_io::Timer::after(Duration::from_secs(5)).await;
+            Err(zbus::Error::from(zbus::fdo::Error::TimedOut("connecting to the user manager timed out".into())).into())
+        })).await
+    }
+
+    #[cfg(test)]
     async fn from_connection(connection: Connection) -> Result<Self, SessionError> {
-        validate_connection(&connection).await?;
-        Ok(Self::with_connection(connection))
+        Self::connect_with(async { Ok(connection) }, Deadline::default()).await
     }
 
+    #[cfg(test)]
     pub(super) fn with_connection(connection: Connection) -> Self {
         Self { transport: transport::Transport::new(connection), deadline: Deadline::default() }
     }
@@ -232,3 +248,7 @@ pub(super) fn missing_unit(error: &zbus::Error) -> bool {
 #[cfg(test)]
 #[path = "bus_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "bus_setup_tests.rs"]
+mod setup_tests;

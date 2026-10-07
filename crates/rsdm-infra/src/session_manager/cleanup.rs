@@ -1,12 +1,12 @@
 //! Recovery is restricted to recorded invocations of one login generation.
 
-use std::{thread, time::{Duration, Instant}};
+use std::time::Duration;
 
 use zbus::fdo::RequestNameFlags;
 
 use super::{
     SessionError, app_stop::{self, ShutdownControl}, apps, bus::UserManager,
-    control::BUS_NAME, env, identity::GENERATION_ENV,
+    control::BUS_NAME, deadline::Deadline, env, identity::GENERATION_ENV,
     runtime::Runtime, units,
 };
 
@@ -19,7 +19,9 @@ pub fn cleanup(generation: &str) -> Result<(), SessionError> {
         return Ok(());
     }
     let _lease = super::session_lease::SessionLease::acquire()?;
-    let manager = UserManager::connect()?;
+    let deadline = Deadline::default();
+    deadline.set(recovery_deadline(runtime.session()?.shutdown_deadline_usec, 0)?);
+    let manager = UserManager::connect_until(deadline)?;
     acquire_lease(&manager)?;
     recover(&manager, &runtime)
 }
@@ -29,8 +31,7 @@ pub(super) fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), Se
     let control = std::sync::Arc::new(ShutdownControl::for_manager(manager));
     control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
     control.recovery.store(true, std::sync::atomic::Ordering::SeqCst);
-    let recovery_deadline = super::processes::monotonic_usec()?.saturating_add(5_000_000);
-    let deadline = record.shutdown_deadline_usec.map_or(recovery_deadline, |saved| saved.min(recovery_deadline));
+    let deadline = recovery_deadline(record.shutdown_deadline_usec, manager.deadline.get())?;
     control.force(deadline);
     record.shutdown_deadline_usec = Some(deadline);
     let mut failure = None;
@@ -69,16 +70,31 @@ pub(super) fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), Se
     runtime.save_session(&record)
 }
 
-fn acquire_lease(manager: &UserManager) -> Result<(), SessionError> {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        let result = async_io::block_on(manager.deadline.bound(
-            manager.connection().request_name_with_flags(BUS_NAME, RequestNameFlags::DoNotQueue.into())
-        ));
-        match result {
-            Ok(_) => return Ok(()),
-            Err(zbus::Error::NameTaken) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),
-            Err(error) => return Err(error.into()),
-        }
-    }
+pub(super) fn recovery_deadline(saved: Option<u64>, current: u64) -> Result<u64, SessionError> {
+    let mut deadline = super::processes::monotonic_usec()?.saturating_add(5_000_000);
+    if let Some(saved) = saved { deadline = deadline.min(saved); }
+    if current != 0 { deadline = deadline.min(current); }
+    Ok(deadline)
 }
+
+fn acquire_lease(manager: &UserManager) -> Result<(), SessionError> {
+    async_io::block_on(manager.deadline.bound(async {
+        let lease = async {
+            loop {
+                match manager.connection().request_name_with_flags(BUS_NAME, RequestNameFlags::DoNotQueue.into()).await {
+                    Ok(_) => return Ok(()),
+                    Err(zbus::Error::NameTaken) => { async_io::Timer::after(Duration::from_millis(50)).await; }
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        };
+        futures_lite::future::or(lease, async {
+            async_io::Timer::after(Duration::from_secs(2)).await;
+            Err(zbus::Error::from(zbus::fdo::Error::TimedOut("acquiring the recovery bus name timed out".into())).into())
+        }).await
+    }))
+}
+
+#[cfg(test)]
+#[path = "cleanup_tests.rs"]
+mod tests;

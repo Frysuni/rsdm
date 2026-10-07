@@ -41,7 +41,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 23 | Recover generation-owned quit/logout helpers | pending |
 | 24 | Bound shutdown concurrency and polling | pending |
 | 25 | Linear process snapshot/pidfd signaling | fixed |
-| 26 | One recovery deadline across all teardown phases | pending |
+| 26 | One recovery deadline across all teardown phases | in progress; setup and bus teardown bounded |
 | 27 | Establish shutdown backstop before child startup | pending |
 | 28 | Recover console log level after greeter crashes | pending |
 | 29 | Establish sane terminal baseline after crashes | pending |
@@ -275,3 +275,14 @@ verification separate from private-peer and unit-test evidence.
   when expected. A separately evaluated both-detected auto stack contains only
   GNOME Keyring, before sufficient pam_unix authentication and during session
   setup. No system configuration was activated.
+- 26 (setup layer): Recovery installs its five-second deadline before opening
+  the user bus. Authentication, systemd validation/subscription, bus-name lease,
+  and teardown use that same source; recovery cannot extend a saved or active
+  deadline. The name lease also has one two-second local cap that includes its
+  method replies and retry sleeps. Normal manager setup has a five-second cap.
+  `nix develop --command cargo test -p rsdm-infra session_manager:: --locked`
+  passed all 120 tests, including hung bus authentication, Version/Subscribe,
+  RequestName, shared setup identity, and recovery deadline regressions.
+  `nix develop --command cargo check -p rsdm-infra --all-targets --locked` passed.
+  Coordinator worker draining, root-helper waits, and lifecycle VM checks are
+  still separate outstanding work. Changed Rust files stay below 300 lines.
