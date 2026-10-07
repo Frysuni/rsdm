@@ -34,7 +34,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 16 | Audit successful starts after launch confirmation | fixed |
 | 17 | Audit termination separately from cleanup failure | pending |
 | 18 | Move control-bus maintenance off the actor | pending |
-| 19 | Release transport mutex during async reconnect | pending |
+| 19 | Release transport mutex during async reconnect | implemented; runtime checks pending |
 | 20 | Scale reference restoration within bounded work | pending |
 | 21 | Roll back definitely failed app registrations | pending |
 | 22 | Roll back definitely failed start references | pending |
@@ -126,3 +126,9 @@ Record unexecuted runtime checks explicitly for later verification.
 - 57: the architecture now describes every advertised/hotplugged seat and the
   all-connected-seats-idle gate, matching `idle::seats` and the idle guide.
   Documentation diff checks passed; no runtime behavior changed.
+- 19: reconnect snapshots ownership under the state mutex, restores without it,
+  and publishes only if epoch/revision still match. Stale or failed candidates
+  are closed. An asynchronous maintenance guard serializes reconnect and
+  activation-environment writes while ordinary state access remains available.
+  Private peer tests cover a suspended RefUnit call, concurrent release, stale
+  publication rejection, and guard timeout/drop; only syntax checks have run.

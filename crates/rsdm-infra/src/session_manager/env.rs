@@ -89,20 +89,7 @@ pub(super) fn publish(
         return Err(super::SessionError::State("invalid session environment".into()));
     }
     manager.set_environment(&pairs.iter().map(|(name, value)| format!("{name}={value}")).collect::<Vec<_>>())?;
-    update_activation(manager, pairs)
-}
-
-fn update_activation(
-    manager: &super::bus::UserManager, pairs: &[(String, String)],
-) -> Result<(), super::SessionError> {
-    manager.remember_activation(pairs);
-    async_io::block_on(async {
-        let connection = manager.connection();
-        let bus = zbus::Proxy::new(&connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").await?;
-        let values: std::collections::HashMap<&str, &str> = pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
-        bus.call::<_, _, ()>("UpdateActivationEnvironment", &(values,)).await?;
-        Ok(())
-    })
+    manager.update_activation(pairs)
 }
 
 pub(super) fn clear_owned(
@@ -122,7 +109,7 @@ pub(super) fn clear_names(
     // display endpoints; clear them before removing the manager ownership data
     // so a failed update can still be retried by generation recovery.
     let empty = names.iter().map(|name| (name.clone(), String::new())).collect::<Vec<_>>();
-    update_activation(manager, &empty)?;
+    manager.update_activation(&empty)?;
     manager.unset_environment(names)
 }
 

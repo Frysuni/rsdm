@@ -126,8 +126,8 @@ impl UserManager {
         self.read(|| async { self.proxy().await?.get_property("Environment").await })
     }
 
-    pub(super) fn remember_activation(&self, pairs: &[(String, String)]) {
-        self.transport.remember_activation(pairs);
+    pub(super) fn update_activation(&self, pairs: &[(String, String)]) -> Result<(), SessionError> {
+        async_io::block_on(self.transport.update_activation(pairs)).map_err(Into::into)
     }
 
     pub(super) fn read<T, F, Fut>(&self, query: F) -> Result<T, SessionError>

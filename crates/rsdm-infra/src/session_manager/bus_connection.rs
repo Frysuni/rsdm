@@ -1,17 +1,25 @@
 //! Clones share reconnections and the references owned by this bus peer.
 
-use std::{collections::BTreeMap, sync::{Arc, Mutex}};
+use std::{collections::BTreeMap, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}};
 
 use super::*;
 
 #[derive(Clone)]
-pub(super) struct Transport(Arc<Mutex<State>>);
+pub(super) struct Transport(Arc<Mutex<State>>, Arc<AtomicBool>);
 
+#[derive(Clone)]
 struct State {
     connection: Connection,
     epoch: u64,
+    revision: u64,
     references: BTreeMap<String, Reference>,
     activation_environment: BTreeMap<String, String>,
+}
+
+struct ConnectionGuard(Arc<AtomicBool>);
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) { self.0.store(false, Ordering::Release); }
 }
 
 #[derive(Clone)]
@@ -23,8 +31,8 @@ struct Reference {
 impl Transport {
     pub fn new(connection: Connection) -> Self {
         Self(Arc::new(Mutex::new(State {
-            connection, epoch: 0, references: BTreeMap::new(), activation_environment: BTreeMap::new(),
-        })))
+            connection, epoch: 0, revision: 0, references: BTreeMap::new(), activation_environment: BTreeMap::new(),
+        })), Arc::new(AtomicBool::new(false)))
     }
 
     pub fn connection(&self) -> Connection {
@@ -36,56 +44,100 @@ impl Transport {
     }
 
     pub fn track(&self, unit: &str, generation: String) {
-        self.0.lock().unwrap_or_else(|error| error.into_inner()).references.insert(
+        let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        state.references.insert(
             unit.into(), Reference { generation, invocation: None },
         );
+        state.revision += 1;
     }
 
     pub fn remember(&self, unit: &str, invocation: &[u8]) {
-        if let Some(reference) = self.0.lock().unwrap_or_else(|error| error.into_inner()).references.get_mut(unit) {
-            if reference.invocation.is_none() { reference.invocation = Some(invocation.to_vec()); }
+        let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(reference) = state.references.get_mut(unit) {
+            if reference.invocation.is_none() {
+                reference.invocation = Some(invocation.to_vec());
+                state.revision += 1;
+            }
         }
     }
 
     pub fn forget(&self, unit: &str) {
-        self.0.lock().unwrap_or_else(|error| error.into_inner()).references.remove(unit);
+        let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        if state.references.remove(unit).is_some() { state.revision += 1; }
     }
 
-    pub fn remember_activation(&self, pairs: &[(String, String)]) {
-        self.0.lock().unwrap_or_else(|error| error.into_inner()).activation_environment.extend(pairs.iter().cloned());
+    pub async fn update_activation(&self, pairs: &[(String, String)]) -> zbus::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let _guard = self.acquire_connection_guard(deadline).await?;
+        {
+            let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+            state.activation_environment.extend(pairs.iter().cloned());
+            state.revision += 1;
+        }
+        let connection = self.connection();
+        let values: BTreeMap<&str, &str> = pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
+        future::or(async {
+            let bus = Proxy::new(&connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").await?;
+            bus.call::<_, _, ()>("UpdateActivationEnvironment", &(values,)).await
+        }, async {
+            async_io::Timer::at(deadline).await;
+            Err(zbus::fdo::Error::TimedOut("activation environment update timed out".into()).into())
+        }).await
     }
 
     pub async fn reconnect(&self, observed_epoch: u64) -> zbus::Result<()> {
-        let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
-        if state.epoch != observed_epoch { return Ok(()); }
-        let references = state.references.clone();
-        let activation_environment = state.activation_environment.clone();
-        let connection = future::or(async {
-            let connection = zbus::connection::Builder::session()?
-                .method_timeout(Duration::from_secs(5)).build().await?;
-            let result = async {
-                validate_connection(&connection).await?;
-                for (unit, reference) in references {
-                    restore_reference(&connection, &unit, &reference).await?;
-                }
-                restore_activation(&connection, activation_environment).await?;
-                Ok::<(), zbus::Error>(())
-            }.await;
-            if let Err(error) = result {
-                // RefUnit is counted per peer. Closing a failed candidate
-                // prevents a later attempt from accumulating references.
-                let _ = connection.close().await;
-                return Err(error);
+        if self.epoch() != observed_epoch { return Ok(()); }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let _guard = self.acquire_connection_guard(deadline).await?;
+        while self.epoch() == observed_epoch {
+            let connection = future::or(async {
+                zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await
+            }, async {
+                async_io::Timer::at(deadline).await;
+                Err(zbus::fdo::Error::TimedOut("connecting the user bus timed out".into()).into())
+            }).await?;
+            let restored = future::or(self.restore_candidate(&connection, observed_epoch), async {
+                async_io::Timer::at(deadline).await;
+                Err(zbus::fdo::Error::TimedOut("restoring the user bus timed out".into()).into())
+            }).await;
+            if matches!(restored, Ok(true)) {
+                tracing::info!("restored user manager connection");
+                return Ok(());
             }
-            Ok(connection)
-        }, async {
-            async_io::Timer::after(Duration::from_secs(5)).await;
-            Err(zbus::fdo::Error::TimedOut("reconnecting the user bus timed out".into()).into())
-        }).await?;
-        state.connection = connection;
-        state.epoch += 1;
-        tracing::info!("restored user manager connection");
+            // A failed or outdated candidate may hold per-peer RefUnit counts.
+            // Close it before retrying instead of publishing stale ownership.
+            let _ = connection.close().await;
+            restored?;
+        }
         Ok(())
+    }
+
+    async fn acquire_connection_guard(&self, deadline: Instant) -> zbus::Result<ConnectionGuard> {
+        loop {
+            if Instant::now() >= deadline {
+                return Err(zbus::fdo::Error::TimedOut("waiting for user bus maintenance timed out".into()).into());
+            }
+            if self.1.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+                return Ok(ConnectionGuard(self.1.clone()));
+            }
+            async_io::Timer::at((Instant::now() + Duration::from_millis(10)).min(deadline)).await;
+        }
+    }
+
+    async fn restore_candidate(&self, connection: &Connection, observed_epoch: u64) -> zbus::Result<bool> {
+        let snapshot = self.0.lock().unwrap_or_else(|error| error.into_inner()).clone();
+        if snapshot.epoch != observed_epoch { return Ok(false); }
+        validate_connection(connection).await?;
+        for (unit, reference) in &snapshot.references {
+            restore_reference(connection, unit, reference).await?;
+        }
+        restore_activation(connection, snapshot.activation_environment).await?;
+
+        let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        if state.epoch != observed_epoch || state.revision != snapshot.revision { return Ok(false); }
+        state.connection = connection.clone();
+        state.epoch += 1;
+        Ok(true)
     }
 }
 

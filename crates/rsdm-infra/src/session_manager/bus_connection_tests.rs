@@ -11,14 +11,29 @@ struct UnitState {
     invocation: Vec<u8>,
     transient: bool,
     replaced: bool,
+    pause: Option<Pause>,
+}
+
+struct Pause {
+    entered: std::sync::mpsc::Sender<()>,
+    resume: async_channel::Receiver<()>,
 }
 
 struct Manager(Arc<UnitState>);
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Manager")]
 impl Manager {
+    #[zbus(property)]
+    fn version(&self) -> &str { "260" }
+    fn subscribe(&self) {}
     fn get_unit(&self, _name: &str) -> OwnedObjectPath { OwnedObjectPath::try_from("/unit").unwrap() }
-    fn ref_unit(&self, _name: &str) { self.0.refs.fetch_add(1, Ordering::SeqCst); }
+    async fn ref_unit(&self, _name: &str) {
+        self.0.refs.fetch_add(1, Ordering::SeqCst);
+        if let Some(pause) = &self.0.pause {
+            let _ = pause.entered.send(());
+            let _ = pause.resume.recv().await;
+        }
+    }
     fn unref_unit(&self, _name: &str) { self.0.unrefs.fetch_add(1, Ordering::SeqCst); }
 }
 
@@ -63,7 +78,7 @@ fn fixture(state: UnitState) -> (Connection, Connection, Arc<UnitState>) {
 
 fn state() -> UnitState {
     UnitState { refs: AtomicUsize::new(0), unrefs: AtomicUsize::new(0), generation: "ours",
-        invocation: vec![1; 16], transient: true, replaced: false }
+        invocation: vec![1; 16], transient: true, replaced: false, pause: None }
 }
 
 #[test]
@@ -120,4 +135,49 @@ fn cloned_workers_keep_the_original_reference_identity_and_share_release() {
 fn manager_reexec_does_not_require_replacing_a_live_bus_connection() {
     assert!(!disconnected(&zbus::fdo::Error::NoReply("manager reexec".into()).into()));
     assert!(disconnected(&zbus::Error::from(std::io::Error::from(std::io::ErrorKind::BrokenPipe))));
+}
+
+#[test]
+fn slow_restoration_does_not_lock_state_or_publish_a_forgotten_reference() {
+    let (original, _original_server, _) = fixture(state());
+    let owner = Transport::new(original);
+    owner.track("example.service", "ours".into());
+    owner.remember("example.service", &[1; 16]);
+    let (entered, ready) = std::sync::mpsc::channel();
+    let (resume, resumed) = async_channel::bounded(1);
+    let mut initial = state();
+    initial.pause = Some(Pause { entered, resume: resumed });
+    let (candidate, _server, _) = fixture(initial);
+    let restorer = owner.clone();
+    let worker = thread::spawn(move || async_io::block_on(restorer.restore_candidate(&candidate, 0)));
+    ready.recv_timeout(Duration::from_secs(2)).unwrap();
+
+    let reader = owner.clone();
+    let (accessed, access) = std::sync::mpsc::channel();
+    let reader = thread::spawn(move || {
+        let _ = reader.connection();
+        reader.forget("example.service");
+        let _ = accessed.send(reader.epoch());
+    });
+    let responsive = access.recv_timeout(Duration::from_secs(1));
+    resume.try_send(()).unwrap();
+    let published = worker.join().unwrap().unwrap();
+    reader.join().unwrap();
+    assert_eq!(responsive.unwrap(), 0);
+    assert!(!published);
+    assert_eq!(owner.epoch(), 0);
+    assert!(owner.0.lock().unwrap().references.is_empty());
+}
+
+#[test]
+fn maintenance_guard_is_shared_bounded_and_released_on_drop() {
+    let (connection, _server, _) = fixture(state());
+    let owner = Transport::new(connection);
+    let worker = owner.clone();
+    let guard = async_io::block_on(owner.acquire_connection_guard(Instant::now() + Duration::from_secs(1))).unwrap();
+    let blocked = async_io::block_on(worker.acquire_connection_guard(Instant::now() + Duration::from_millis(20)));
+    assert!(matches!(blocked, Err(error) if retryable_error(&error)));
+    assert_eq!(worker.epoch(), 0);
+    drop(guard);
+    assert!(async_io::block_on(worker.acquire_connection_guard(Instant::now() + Duration::from_secs(1))).is_ok());
 }
