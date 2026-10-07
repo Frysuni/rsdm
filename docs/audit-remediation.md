@@ -72,7 +72,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 54 | Document pidfd emergency unlock protection | implemented with 12; runtime checks pending |
 | 55 | Match bounded recovery-record documentation | fixed with 5 |
 | 56 | Match bounded-worker architecture claims | pending |
-| 57 | Correct obsolete first-seat documentation | pending |
+| 57 | Correct obsolete first-seat documentation | fixed |
 
 Finding 48 conflicts with the explicit policy in
 [CONTRIBUTING.md](../.github/CONTRIBUTING.md). The policy remains in force;
@@ -123,3 +123,6 @@ Record unexecuted runtime checks explicitly for later verification.
   InvocationID after pinning, and check each pinned process's systemd cgroup in
   procfs. This avoids repeated full process lists and unbounded descriptor use.
   Query-count and hierarchy/boundary regression tests were syntax-checked only.
+- 57: the architecture now describes every advertised/hotplugged seat and the
+  all-connected-seats-idle gate, matching `idle::seats` and the idle guide.
+  Documentation diff checks passed; no runtime behavior changed.

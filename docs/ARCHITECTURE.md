@@ -117,10 +117,11 @@ servicing opaque surfaces. Cancellation and request failure never invoke unlock.
 
 Idle (`idle`) runtime path:
 
-1. Bind the compositor's idle notifier to the first seat with the configured
-   timeout and inhibitor policy
-2. On `idled`, refuse duplicate cycles or an already-active rsdm lock, then
-   spawn the current executable as `rsdm lock`
+1. Bind the compositor's idle notifier to every advertised seat with the
+   configured timeout and inhibitor policy, following seat additions/removals
+2. Track `idled`/`resumed` per seat. When all connected seats are idle, refuse
+   duplicate cycles or an already-active rsdm lock, then spawn the current
+   executable as `rsdm lock`
 3. Observe the verified runtime state written only after compositor lock
    confirmation, then run `on_lock`
 4. Wait for authentication or emergency unlock, run `on_unlock`, and re-arm for
