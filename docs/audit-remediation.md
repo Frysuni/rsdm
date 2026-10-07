@@ -286,3 +286,13 @@ verification separate from private-peer and unit-test evidence.
   `nix develop --command cargo check -p rsdm-infra --all-targets --locked` passed.
   Coordinator worker draining, root-helper waits, and lifecycle VM checks are
   still separate outstanding work. Changed Rust files stay below 300 lines.
+- 1, 26 (coordinator recovery): Failure recovery clamps the existing manager
+  and saved deadlines, publishes that budget before draining workers, and bounds
+  request rejection/channel waits by the remaining time. It no longer starts a
+  separate 90-second drain or replaces logind's shorter deadline with five new
+  seconds. Unconfirmed accepted jobs retain their recorded ownership intent.
+  `nix develop --command cargo test -p rsdm-infra session_manager::coordinator_shutdown --locked`
+  passed 14 tests, including four private recovery regressions for active/saved/
+  expired budgets and completed-work/request handling. Files stay below 300
+  lines and new functions below 50. Root-helper waits, app escalation, reply
+  acknowledgements, actor reads, and whole-session VM timing remain open.

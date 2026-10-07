@@ -161,3 +161,6 @@ fn notices_during_infrastructure_stop_record_the_budget_without_reopening_prepar
 
 #[path = "coordinator_completion_tests.rs"]
 mod completion;
+
+#[path = "coordinator_recovery_tests.rs"]
+mod recovery;

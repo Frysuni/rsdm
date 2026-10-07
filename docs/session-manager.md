@@ -301,7 +301,9 @@ PAM end. Restarting DM does not terminate that leader's graphical session.
 Recovery installs its short shared budget before connecting to the user bus;
 authentication, validation, the coordinator-name lease, app preparation, and
 unit teardown use the same deadline. A saved or active deadline is never
-extended by recovery. Root bounds its helper wait separately. Lock handles
+extended by recovery. A failed coordinator also drains its accepted workers
+within that budget; unconfirmed jobs keep their recovery ownership records.
+Root bounds its helper wait separately. Lock handles
 power requests asynchronously and retains opaque surfaces through rejection or
 cancellation; only authentication or privileged emergency unlock releases them.
 
