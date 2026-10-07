@@ -17,7 +17,16 @@ The production tree is intentionally narrow:
 - `rsdm-idle`: an `ext-idle-notify-v1` client that supervises one lock process,
   waits for its compositor-confirmed runtime state, and runs configured hooks
 - `rsdm-cli`: binary wiring for `dm`, `lock`, `idle`, emergency `unlock`, logs,
-  status, session commands, apps, and config validation
+  status, session commands, apps, and config validation; static terminal reports
+  live in its `output` module
+
+CLI reports use ratatui widgets to lay out an in-memory buffer, then write rows
+and SGR styles to the current terminal. They never enter an alternate screen,
+change input mode or run an event loop. Each destination checks its own terminal
+width and selects plain output for redirects, `NO_COLOR`, `TERM=dumb` or very
+narrow terminals. The Greeter's ratatui backend and Lock's Wayland rendering are
+separate. CLI diagnostic events remain in file/journal logs; their terminal
+reports replace duplicate tracing lines while styling is active.
 
 Core does not depend on PAM, libc, ratatui, systemd, Wayland, or other OS APIs.
 There is no "skin" concept: a single composition in `rsdm-ui` renders on both

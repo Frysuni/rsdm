@@ -25,6 +25,33 @@ for Wayland sessions. No greetd, GTK, Qt, webview, or Electron. One binary,
 All commands take a global `--config <path>` (default `/etc/rsdm.toml`,
 also `RSDM_CONFIG`).
 
+## CLI output
+
+Help, system/session status, command results and diagnostics use colored panels
+in the terminal. Reports stay in scrollback and the command returns normally.
+Long values wrap to the available width, including application unit names and
+configuration paths.
+
+```sh
+rsdm --help
+rsdm status
+rsdm session status
+rsdm validate-config
+env NO_COLOR=1 rsdm status
+rsdm session status > session-status.txt
+```
+
+Colors distinguish successful states, pending/cancelled requests, warnings and
+errors. Redirected streams keep the plain text format. A nonempty `NO_COLOR`,
+`TERM=dumb` or a terminal narrower than 28 columns selects plain output too.
+Errors and warnings remain on stderr, and command exit codes retain their
+meaning.
+
+Successful app launches, finalize and cancel requests show a confirmation when
+terminal styling is active; they stay quiet in scripts and autostart. The
+Greeter and Lock keep their existing interfaces. `rsdm logs` opens journalctl
+with its normal pager/follow behavior and formatting.
+
 ## Guides
 
 - [Installation: Arch](installation/arch.md)
