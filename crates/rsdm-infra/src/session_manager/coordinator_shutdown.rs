@@ -19,11 +19,11 @@ impl Coordinator {
         if self.shutdown.is_none() {
             self.forced_units.clear();
             self.action = action.to_string();
-            self.shutdown = Some(Arc::new(ShutdownControl::default()));
+            self.shutdown = Some(Arc::new(ShutdownControl::for_manager(&self.manager)));
         }
         if let Some(proposed) = hard_deadline {
             let control = self.shutdown.as_ref().expect("shutdown control");
-            let old = control.hard_deadline.load(Ordering::SeqCst);
+            let old = control.hard_deadline.get();
             control.force(if old == 0 { proposed } else { old.min(proposed) });
             self.action = action.to_string();
         }
@@ -142,6 +142,7 @@ impl Coordinator {
         // anchor stop once the manager is available again.
         self.lifecycle.phase = if self.ready_once { SessionPhase::Running } else { SessionPhase::Starting };
         self.shutdown = None;
+        self.manager.deadline.set(0);
         self.record.shutdown_deadline_usec = None;
         self.action.clear();
         self.preparing = false;

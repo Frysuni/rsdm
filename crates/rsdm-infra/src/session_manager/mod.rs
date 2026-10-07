@@ -15,6 +15,7 @@ mod coordinator_requests;
 mod coordinator_recovery;
 mod coordinator_shutdown;
 mod coordinator_startup;
+mod deadline;
 mod env;
 mod identity;
 mod lifecycle;

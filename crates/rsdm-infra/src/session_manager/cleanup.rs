@@ -26,7 +26,7 @@ pub fn cleanup(generation: &str) -> Result<(), SessionError> {
 
 pub(super) fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), SessionError> {
     let mut record = runtime.session()?;
-    let control = std::sync::Arc::new(ShutdownControl::default());
+    let control = std::sync::Arc::new(ShutdownControl::for_manager(manager));
     control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
     control.recovery.store(true, std::sync::atomic::Ordering::SeqCst);
     let recovery_deadline = super::processes::monotonic_usec()?.saturating_add(5_000_000);
@@ -72,7 +72,9 @@ pub(super) fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), Se
 fn acquire_lease(manager: &UserManager) -> Result<(), SessionError> {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        let result = async_io::block_on(manager.connection().request_name_with_flags(BUS_NAME, RequestNameFlags::DoNotQueue.into()));
+        let result = async_io::block_on(manager.deadline.bound(
+            manager.connection().request_name_with_flags(BUS_NAME, RequestNameFlags::DoNotQueue.into())
+        ));
         match result {
             Ok(_) => return Ok(()),
             Err(zbus::Error::NameTaken) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),

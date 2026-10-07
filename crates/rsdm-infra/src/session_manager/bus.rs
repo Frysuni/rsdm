@@ -5,7 +5,7 @@ use std::{future::Future, time::{Duration, Instant}};
 use futures_lite::future;
 use zbus::{Connection, Proxy, zvariant::{OwnedObjectPath, OwnedValue, Value}};
 
-use super::SessionError;
+use super::{SessionError, deadline::Deadline};
 
 #[path = "bus_jobs.rs"]
 mod jobs;
@@ -22,6 +22,7 @@ pub(super) type UnitProperties = Vec<(&'static str, Value<'static>)>;
 #[derive(Clone)]
 pub(super) struct UserManager {
     transport: transport::Transport,
+    pub(super) deadline: Deadline,
 }
 
 impl UserManager {
@@ -40,7 +41,7 @@ impl UserManager {
     }
 
     pub(super) fn with_connection(connection: Connection) -> Self {
-        Self { transport: transport::Transport::new(connection) }
+        Self { transport: transport::Transport::new(connection), deadline: Deadline::default() }
     }
 
     pub(super) fn connection(&self) -> Connection {
@@ -52,22 +53,22 @@ impl UserManager {
     }
 
     pub fn start_service(&self, unit: &str, properties: &UnitProperties) -> Result<(), SessionError> {
-        async_io::block_on(jobs::start(self, unit, properties, Duration::from_secs(10)))
+        async_io::block_on(self.deadline.bound(jobs::start(self, unit, properties, Duration::from_secs(10))))
     }
 
     pub fn stop(&self, unit: &str, timeout: Duration) -> Result<(), SessionError> {
-        async_io::block_on(jobs::stop(self, unit, timeout))
+        async_io::block_on(self.deadline.bound(jobs::stop(self, unit, timeout)))
     }
 
     pub fn unref(&self, unit: &str) -> Result<(), SessionError> {
-        self.transport.forget(unit);
-        async_io::block_on(async {
+        async_io::block_on(self.deadline.bound(async {
+            self.transport.forget(unit);
             match self.proxy().await?.call::<_, _, ()>("UnrefUnit", &(unit,)).await {
                 Ok(()) => Ok(()),
                 Err(error) if missing_unit(&error) => Ok(()),
                 Err(error) => Err(error.into()),
             }
-        })
+        }))
     }
 
     pub fn active(&self, unit: &str) -> Result<bool, SessionError> {
@@ -124,7 +125,7 @@ impl UserManager {
     }
 
     pub(super) fn update_activation(&self, pairs: &[(String, String)]) -> Result<(), SessionError> {
-        async_io::block_on(self.transport.update_activation(pairs)).map_err(Into::into)
+        async_io::block_on(self.deadline.bound(self.transport.update_activation(pairs))).map_err(Into::into)
     }
 
     pub(super) fn read<T, F, Fut>(&self, query: F) -> Result<T, SessionError>
@@ -140,28 +141,28 @@ impl UserManager {
         F: Fn() -> Fut,
         Fut: Future<Output = zbus::Result<T>>,
     {
-        retry_read(|| async {
+        self.deadline.bound(retry_read(|| async {
             let epoch = self.transport.epoch();
             let result = query().await;
             if result.as_ref().is_err_and(transport::disconnected) {
                 self.transport.reconnect(epoch).await?;
             }
             result
-        }, timeout).await
+        }, timeout)).await
     }
 
     pub fn set_environment(&self, values: &[String]) -> Result<(), SessionError> {
-        async_io::block_on(async {
+        async_io::block_on(self.deadline.bound(async {
             self.proxy().await?.call::<_, _, ()>("SetEnvironment", &(values,)).await?;
             Ok(())
-        })
+        }))
     }
 
     pub fn unset_environment(&self, names: &[String]) -> Result<(), SessionError> {
-        async_io::block_on(async {
+        async_io::block_on(self.deadline.bound(async {
             self.proxy().await?.call::<_, _, ()>("UnsetEnvironment", &(names,)).await?;
             Ok(())
-        })
+        }))
     }
 }
 

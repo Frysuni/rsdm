@@ -117,12 +117,12 @@ pub(super) fn reset_preparation(runtime: &Runtime) -> Result<(), SessionError> {
 pub fn stop_hook(generation: &str, unit: &str) -> Result<(), SessionError> {
     let runtime = Runtime::open(generation)?.ok_or_else(|| SessionError::State("session recovery record is missing".into()))?;
     let manager = UserManager::connect()?;
-    pin_pending(&manager, &runtime, unit)?;
-    let control = super::app_stop::ShutdownControl::default();
+    let control = super::app_stop::ShutdownControl::for_manager(&manager);
     control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
     if let Some(deadline) = runtime.session()?.shutdown_deadline_usec {
         control.force(deadline);
     }
+    pin_pending(&manager, &runtime, unit)?;
     super::app_stop::prepare_app(&manager, &runtime, unit, &control)?;
     Ok(())
 }

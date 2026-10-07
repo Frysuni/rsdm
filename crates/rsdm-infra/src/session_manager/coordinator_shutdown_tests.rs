@@ -75,7 +75,7 @@ impl Fixture {
     }
 
     fn deadline(&self) -> u64 {
-        self.coordinator.shutdown.as_ref().unwrap().hard_deadline.load(Ordering::SeqCst)
+        self.coordinator.shutdown.as_ref().unwrap().hard_deadline.get()
     }
 }
 

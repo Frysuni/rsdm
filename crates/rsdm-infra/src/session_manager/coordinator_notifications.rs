@@ -26,7 +26,7 @@ impl Coordinator {
                 let proposed = monotonic_usec()?.saturating_add(notice.budget_usec);
                 self.begin_stop("external-shutdown", Some(proposed))?;
                 let control = self.shutdown.as_ref().expect("shutdown control");
-                let old = control.hard_deadline.load(Ordering::SeqCst);
+                let old = control.hard_deadline.get();
                 let deadline = if old == 0 { proposed } else { old.min(proposed) };
                 control.force(deadline);
                 self.record.shutdown_deadline_usec = Some(deadline);
@@ -47,7 +47,7 @@ impl Coordinator {
         // it while application preparation still precedes infrastructure stop.
         control.noncancelable.store(false, Ordering::SeqCst);
         control.cancelled.store(true, Ordering::SeqCst);
-        control.hard_deadline.store(0, Ordering::SeqCst);
+        control.hard_deadline.set(0);
         self.record.shutdown_deadline_usec = None;
         self.xsmp.cancel();
         self.save()

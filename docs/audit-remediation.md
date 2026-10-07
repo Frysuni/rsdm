@@ -16,7 +16,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 
 | Finding | Work | Status |
 | --- | --- | --- |
-| 1 | One shutdown deadline across all teardown phases | in progress; unit job budgets implemented |
+| 1 | One shutdown deadline across all teardown phases | in progress; shared bus deadline implemented |
 | 2 | Bound application lease acquisition | implemented; runtime checks pending |
 | 3 | Release application leases before slow shutdown work | fixed |
 | 4 | Durable recovery record publication | fixed |
@@ -232,3 +232,12 @@ Record unexecuted runtime checks explicitly for later verification.
   zero budgets, and preserving accepted mutations on timeout. Syntax/diff checks
   passed; runtime tests are pending. Sharing a shutdown deadline across all
   calls, worker draining, leases, and child waits is still outstanding.
+- 1 (shared bus deadline): All clones of UserManager share a revisable monotonic
+  deadline with broadcast wakeup, bounding reads/reconnect, start/stop, unref,
+  manager/activation environment updates, XSMP requests, and native delegation.
+  ShutdownControl shares that source during coordinator, recovery, and stop-hook
+  work; revocation clears it without cancelling unrelated operations. Tests
+  cover all-waiter wakeup, shortening/revocation, no polling after expiry,
+  watcher lifetime, shared manager clones, and interruption of an existing read.
+  Syntax/diff checks passed; runtime execution is pending. Leases, child waits,
+  recovery setup/draining, and end-to-end shutdown checks remain outstanding.

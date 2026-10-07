@@ -2,7 +2,7 @@
 
 use std::{
     path::Path,
-    sync::{Arc, OnceLock, atomic::{AtomicBool, AtomicU64, Ordering}},
+    sync::{Arc, OnceLock, atomic::{AtomicBool, Ordering}},
     thread,
     time::Duration,
 };
@@ -11,7 +11,7 @@ use rsdm_core::domain::{ShutdownMethod, TimeoutAction};
 use zbus::zvariant::Value;
 
 use super::{
-    SessionError, bus::UserManager,
+    SessionError, bus::UserManager, deadline::Deadline,
     processes::{app_processes, monotonic_usec, signal_app, terminate_main},
     runtime::{AppRecord, Runtime}, units::command_properties,
 };
@@ -20,16 +20,20 @@ use super::{
 pub(super) struct ShutdownControl {
     pub cancelled: AtomicBool,
     pub noncancelable: AtomicBool,
-    pub hard_deadline: AtomicU64,
+    pub hard_deadline: Deadline,
     pub recovery: AtomicBool,
     xsmp_units: OnceLock<Vec<String>>,
 }
 
 impl ShutdownControl {
+    pub fn for_manager(manager: &UserManager) -> Self {
+        Self { hard_deadline: manager.deadline.clone(), ..Self::default() }
+    }
+
     pub fn force(&self, deadline: u64) {
         self.noncancelable.store(true, Ordering::SeqCst);
         self.cancelled.store(false, Ordering::SeqCst);
-        self.hard_deadline.store(deadline, Ordering::SeqCst);
+        self.hard_deadline.set(deadline);
     }
 
     fn cancelled(&self) -> bool {
@@ -116,7 +120,7 @@ fn claim_preparation(runtime: &Runtime, unit: &str, control: &ShutdownControl) -
         monotonic_usec()?.checked_add(app.policy.timeout_secs * 1_000_000)
             .ok_or_else(|| SessionError::State("shutdown deadline overflow".into()))?
     );
-    let hard = control.hard_deadline.load(Ordering::SeqCst);
+    let hard = control.hard_deadline.get();
     if hard != 0 {
         *deadline = (*deadline).min(hard);
     }
@@ -165,13 +169,13 @@ fn prepare_xsmp(
     if !cfg!(feature = "xsmp") || units.is_empty() || control.recovery.load(Ordering::SeqCst) {
         return Ok(Vec::new());
     }
-    let result = async_io::block_on(async {
+    let result = async_io::block_on(manager.deadline.bound(async {
         let connection = manager.connection();
         let proxy = zbus::Proxy::new(&connection, super::control::BUS_NAME,
             super::control::OBJECT_PATH, super::control::BUS_NAME).await?;
         let selected = proxy.call("XsmpPrepare", &(&runtime.generation, units, !control.noncancelable.load(Ordering::SeqCst))).await?;
         Ok::<Vec<String>, SessionError>(selected)
-    });
+    }));
     match result {
         Err(error) if control.noncancelable.load(Ordering::SeqCst) => {
             tracing::warn!(%error, "XSMP is unavailable during noncancellable cleanup; using application signals");
@@ -191,7 +195,7 @@ fn await_exit(
         if control.cancelled() {
             return Ok(AppOutcome::Cancelled);
         }
-        let hard = control.hard_deadline.load(Ordering::SeqCst);
+        let hard = control.hard_deadline.get();
         let effective_deadline = if hard == 0 { deadline } else { deadline.min(hard) };
         if monotonic_usec()? >= effective_deadline {
             break;
@@ -213,7 +217,7 @@ fn force_exit(manager: &UserManager, app: &AppRecord, control: &ShutdownControl)
         return Ok(AppOutcome::Closed);
     }
     signal_app(manager, app, libc::SIGTERM)?;
-    let hard = control.hard_deadline.load(Ordering::SeqCst);
+    let hard = control.hard_deadline.get();
     let grace = monotonic_usec()?.saturating_add(5_000_000);
     let deadline = if hard == 0 { grace } else { grace.min(hard) };
     while monotonic_usec()? < deadline {

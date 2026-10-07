@@ -240,3 +240,34 @@ fn a_missing_job_signal_and_unfinished_unit_cannot_extend_the_stop_budget() {
     assert!(before.elapsed() < Duration::from_secs(1));
     assert_eq!(state.calls.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn manager_clones_share_the_shutdown_deadline_and_its_revocation() {
+    let initial = state(false, false, 0);
+    initial.exists.store(true, Ordering::SeqCst);
+    let (manager, _server, state) = fixture(initial);
+    let clone = manager.clone();
+    clone.deadline.set(1);
+    assert!(manager.stop("example.service", Duration::from_secs(15)).is_err());
+    assert!(manager.start_service("example.service", &Vec::new()).is_err());
+    assert_eq!(state.calls.load(Ordering::SeqCst), 0);
+    clone.deadline.set(0);
+    manager.stop("example.service", Duration::from_secs(1)).unwrap();
+    assert_eq!(state.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn a_new_shutdown_deadline_interrupts_a_read_already_waiting_for_dbus() {
+    let (manager, _server, _state) = fixture(state(false, false, 0));
+    let deadline = manager.deadline.clone();
+    let (started, received) = std::sync::mpsc::channel();
+    let worker = thread::spawn(move || manager.read(|| async {
+        started.send(()).unwrap();
+        std::future::pending::<zbus::Result<()>>().await
+    }));
+    received.recv_timeout(Duration::from_secs(1)).unwrap();
+    let before = Instant::now();
+    deadline.set(1);
+    assert!(worker.join().unwrap().is_err());
+    assert!(before.elapsed() < Duration::from_secs(1));
+}

@@ -75,7 +75,7 @@ impl Provider {
     }
 
     pub fn delegate(&self, manager: &UserManager, action: &str) -> Result<(), SessionError> {
-        async_io::block_on(async {
+        async_io::block_on(manager.deadline.bound(async {
             let connection = manager.connection();
             match self.kind {
                 ProviderKind::Gnome => {
@@ -100,7 +100,7 @@ impl Provider {
                 _ => return Err(SessionError::State("this provider does not delegate desktop shutdown".into())),
             }
             Ok(())
-        })
+        }))
     }
 }
 

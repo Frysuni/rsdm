@@ -258,6 +258,13 @@ the mutation or adding another verification timeout. An expired start budget
 does not imply that an accepted service start was rolled back; recovery retains
 its ownership record.
 
+Shutdown D-Bus work shares the coordinator's monotonic hard deadline across
+manager clones, including reads/reconnect and cleanup mutations. A revised
+logind budget wakes pending calls to recompute their remaining time; revocation
+removes the shared limit while preparation is still cancellable. After expiry,
+new calls fail without sending a mutation. Already accepted systemd operations
+can continue and remain represented by recovery records.
+
 Installing an updated package does not replace a running coordinator. When
 upgrading from an affected version, end the old session before applying a live
 configuration switch, then start the updated DM and a new session. A reboot into
