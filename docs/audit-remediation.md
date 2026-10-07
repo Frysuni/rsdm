@@ -58,7 +58,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 40 | Bound coordinator request backlog | fixed |
 | 41 | Bound launch request payloads | fixed |
 | 42 | Clarify/update Arch release package versions | fixed |
-| 43 | Verify downloadable Arch package artifacts | pending |
+| 43 | Verify downloadable Arch package artifacts | fixed |
 | 44 | Narrow release token write permissions | fixed |
 | 45 | Pin third-party actions to immutable commits | fixed |
 | 46 | Pass only required reusable-workflow secrets | fixed |
@@ -626,6 +626,17 @@ verification separate from private-peer and unit-test evidence.
   helper-start tests above). Private D-Bus regressions inspect both lifetime
   properties for quit and logout helpers and exercise rejected and
   post-acceptance failures. No live manager or session is contacted.
+
+- 42/43: Both Arch recipes now track the latest published upstream release
+  `v1.1.0`, rather than the obsolete `1.0.0` template. The source recipe uses
+  the downloaded tag archive's SHA-256, and `rsdm-bin` uses the SHA-256 digests
+  published for both x86_64 and aarch64 release archives. No `SKIP` checksum
+  remains. The release metadata was checked against the
+  [upstream v1.1.0 release](https://github.com/Frysuni/rsdm/releases/tag/v1.1.0);
+  local `bash -n` checks pass for both PKGBUILDs and the install script. The
+  current workspace version is a development state beyond that published
+  release, so these recipes intentionally remain tied to an existing download
+  until a matching release is published.
 
 - 15: LoginAttemptLimiter now receives the directory resolver's canonical
   username before admission, so aliases that map to one account share a failure

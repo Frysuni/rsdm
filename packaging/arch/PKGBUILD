@@ -16,8 +16,7 @@ backup=('etc/rsdm.toml'
         'etc/logrotate.d/rsdm')
 install='rsdm.install'
 source=("$pkgname-$pkgver.tar.gz::https://github.com/Frysuni/rsdm/archive/refs/tags/v$pkgver.tar.gz")
-# Replace SKIP with the release tarball's sha256 (updatepkgsums / sha256sum).
-sha256sums=('SKIP')
+sha256sums=('5f1f983cada940a23da5d76306f3df202d1f331f432df0688cab2cfa85474947')
 
 prepare() {
   cd "$srcdir/$pkgname-$pkgver"
