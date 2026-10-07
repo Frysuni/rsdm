@@ -105,7 +105,7 @@ fn main() -> ExitCode {
     logging::init(&cli.config);
 
     match run(cli) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(error) => {
             error!(target: "rsdm::cli", error = %format!("{error:#}"), "command failed");
             let _ = output::notice("COMMAND FAILED", format!("error: {error:#}\n"), output::ERROR).stderr();
@@ -114,9 +114,9 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: Cli) -> Result<()> {
-    match cli.command {
-        Command::Dm => run_dm(&cli.config),
+fn run(cli: Cli) -> Result<ExitCode> {
+    let result = match cli.command {
+        Command::Dm => return run_dm(&cli.config),
         Command::Lock => run_lock(&cli.config),
         Command::Idle => run_idle(&cli.config),
         Command::Unlock { user, uid } => unlock::run(user.as_deref(), uid),
@@ -130,7 +130,8 @@ fn run(cli: Cli) -> Result<()> {
         Command::App(options) => session::run_app(options),
         Command::Power { action } => session::power(action),
         Command::ValidateConfig => validate_config(&cli.config),
-    }
+    };
+    result.map(|()| ExitCode::SUCCESS)
 }
 
 fn run_lock(path: &Path) -> Result<()> {
@@ -150,7 +151,7 @@ fn validate_config(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn run_dm(path: &Path) -> Result<()> {
+fn run_dm(path: &Path) -> Result<ExitCode> {
     let config = load_config(path).context("loading DM configuration")?;
 
     info!(tty = %config.dm.tty.path, "starting dm runtime");
@@ -158,8 +159,11 @@ fn run_dm(path: &Path) -> Result<()> {
     let fallback = config.dm.fallback.clone();
     let security = config.security.clone();
     match dm::run_dm(config, path) {
-        Ok(()) => Ok(()),
-        Err(error) => fallback_or_error(&fallback, &security, &tty_path, error),
+        // The unit accepts this exit and excludes it from automatic restarts.
+        Ok(dm::DmExit::Disabled) => Ok(ExitCode::from(78)),
+        Ok(dm::DmExit::Stopped) => Ok(ExitCode::SUCCESS),
+        Err(error) => fallback_or_error(&fallback, &security, &tty_path, error)
+            .map(|()| ExitCode::SUCCESS),
     }
 }
 

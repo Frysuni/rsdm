@@ -130,6 +130,8 @@ lib.mkIf cfg.enable {
     serviceConfig = {
       ExecStart = "${cfg.package}/bin/rsdm dm --config /etc/rsdm.toml";
       Restart = "always";
+      SuccessExitStatus = "78";
+      RestartPreventExitStatus = "78";
       RestartSec = 1;
       TTYPath = ttyPath;
       StandardInput = "tty";

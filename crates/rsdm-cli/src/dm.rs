@@ -22,10 +22,15 @@ mod sessions;
 
 use sessions::resolve_sessions;
 
-pub fn run_dm(config: AppConfig, config_path: &Path) -> Result<()> {
+pub(crate) enum DmExit {
+    Disabled,
+    Stopped,
+}
+
+pub fn run_dm(config: AppConfig, config_path: &Path) -> Result<DmExit> {
     if !config.dm.enable {
         tracing::info!("display manager is disabled by configuration");
-        return Ok(());
+        return Ok(DmExit::Disabled);
     }
 
     ensure_stdio_not_active_tty(&config)?;
@@ -46,7 +51,7 @@ pub fn run_dm(config: AppConfig, config_path: &Path) -> Result<()> {
         session_manager = config.session_manager.enabled,
         "display manager initialized"
     );
-    run_greeter_loop(config, vt, wrapper, sessions, store, limiter)
+    run_greeter_loop(config, vt, wrapper, sessions, store, limiter).map(|()| DmExit::Stopped)
 }
 
 fn run_greeter_loop(
@@ -216,7 +221,7 @@ mod tests {
         config.dm.enable = false;
         config.dm.tty.path = "/path/that/must/not/be/opened".to_string();
 
-        assert!(run_dm(config, Path::new("unused.toml")).is_ok());
+        assert!(matches!(run_dm(config, Path::new("unused.toml")), Ok(DmExit::Disabled)));
     }
 
     #[test]

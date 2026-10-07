@@ -127,6 +127,8 @@ assert builtins.all (cfg:
   && cfg.nix.settings.extra-trusted-public-keys == [ "example-key" ]
 ) [ stable unstable idleOnly ];
 assert stable.systemd.services ? rsdm;
+assert stable.systemd.services.rsdm.serviceConfig.SuccessExitStatus == "78";
+assert stable.systemd.services.rsdm.serviceConfig.RestartPreventExitStatus == "78";
 assert stable.systemd.defaultUnit == "graphical.target";
 assert !(idleOnly.systemd.services ? rsdm);
 assert idleOnly.systemd.defaultUnit == "multi-user.target";

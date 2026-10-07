@@ -47,7 +47,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 29 | Establish sane terminal baseline after crashes | pending |
 | 30 | Generic autovt ownership | pending |
 | 31 | Synchronize generic service and configured VT | pending |
-| 32 | Avoid disabled-DM service restart loops | pending |
+| 32 | Avoid disabled-DM service restart loops | fixed |
 | 33 | Reuse render buffers and avoid unnecessary frames | pending |
 | 34 | Cache scaled wallpaper | pending |
 | 35 | Recover output-power changes after locker crashes | pending |
@@ -393,3 +393,18 @@ verification separate from private-peer and unit-test evidence.
   private logind tests verify the original budget and both signal values.
   The existing actor-read delays and root-helper budget remain open. Changed
   files stay below 300 lines and new functions below 50.
+- 32: Disabled DM configuration now has its own normal runtime outcome and CLI
+  exit status 78. Generic and NixOS units accept it with `SuccessExitStatus` and
+  suppress its automatic restart with `RestartPreventExitStatus`; other exits
+  keep their existing restart policy, including returning from TTY fallback.
+  The root example documents the exit contract. All existing CLI tests passed
+  with `nix develop --command cargo test -p rsdm --locked --quiet`; the new real
+  binary/unit contract test passed with `cargo test -p rsdm --test dm_service
+  --locked` inside `nix develop`. It also checks ordinary config validation
+  still exits successfully. No host TTY or service was opened/restarted.
+  `nix eval .#checks.x86_64-linux.module.drvPath` passed with assertions for both
+  generated unit directives. The workspace/all-targets check passed on Rust
+  1.88.0 inside `nix develop`. Directive behavior follows the upstream
+  [systemd service documentation](https://github.com/systemd/systemd/blob/main/man/systemd.service.xml).
+  Changed Rust files remain below 300 lines; new functions below 50. Existing
+  longer Greeter orchestration is retained, without growing its responsibilities.

@@ -7,6 +7,9 @@ After=systemd-user-sessions.service getty@tty1.service
 [Service]
 ExecStart=/usr/bin/rsdm dm --config /etc/rsdm.toml
 Restart=always
+# Disabled configuration exits cleanly without entering a restart loop.
+SuccessExitStatus=78
+RestartPreventExitStatus=78
 RestartSec=1
 TTYPath=/dev/tty1
 StandardInput=tty

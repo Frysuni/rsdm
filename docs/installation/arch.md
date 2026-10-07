@@ -88,6 +88,9 @@ other keyring, edit those lines. See [keyrings.md](../keyrings.md).
 
 ## Notes
 
+- Setting `[dm] enable = false` makes `rsdm dm` exit with status 78. The
+  packaged unit accepts that status and stops without automatically restarting.
+  Its regular restart policy still returns to the Greeter after TTY fallback.
 - The systemd unit must keep `StandardOutput=journal` / `StandardError=journal`
   so logs never land on the active TTY. `rsdm dm` refuses to start if stdout or
   stderr points at the live terminal.
