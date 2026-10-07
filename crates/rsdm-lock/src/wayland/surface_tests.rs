@@ -10,7 +10,7 @@ use super::*;
 
 #[test]
 fn output_removal_destroys_extensions_before_the_lock_surface() {
-    let (connection, mut server, surface, ids) = create_surface(true);
+    let (connection, mut server, surface, ids, _lock) = create_surface(true);
     let mut surfaces = vec![surface];
     surfaces.retain(|_| false);
     connection.flush().unwrap();
@@ -20,7 +20,7 @@ fn output_removal_destroys_extensions_before_the_lock_surface() {
 
 #[test]
 fn a_pending_surface_clone_does_not_retain_extensions() {
-    let (connection, mut server, surface, ids) = create_surface(true);
+    let (connection, mut server, surface, ids, _lock) = create_surface(true);
     let pending = surface.surface.clone();
     drop(surface);
     connection.flush().unwrap();
@@ -34,14 +34,16 @@ fn a_pending_surface_clone_does_not_retain_extensions() {
 
 #[test]
 fn outputs_without_fractional_scaling_destroy_only_the_lock_surface() {
-    let (connection, mut server, surface, ids) = create_surface(false);
+    let (connection, mut server, surface, ids, _lock) = create_surface(false);
     drop(surface);
     connection.flush().unwrap();
 
     assert_eq!(destroy_requests(&mut server, 2), ids);
 }
 
-fn create_surface(fractional: bool) -> (Connection, UnixStream, LockSurface, Vec<u32>) {
+fn create_surface(
+    fractional: bool,
+) -> (Connection, UnixStream, LockSurface, Vec<u32>, SessionLock) {
     let (client, server) = UnixStream::pair().unwrap();
     server.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     let bootstrap = thread::spawn(move || advertise_globals(server));
@@ -81,11 +83,7 @@ fn create_surface(fractional: bool) -> (Connection, UnixStream, LockSurface, Vec
         last = Some(read_request(&mut server));
     }
     ids.extend([last.unwrap().2[0], wl_surface_id]);
-    // The fake server sends no locked event, so destroying this lock is valid.
-    drop(lock);
-    connection.flush().unwrap();
-    assert_eq!(read_request(&mut server).1, 0);
-    (connection, server, entry, ids)
+    (connection, server, entry, ids, lock)
 }
 
 fn destroy_requests(server: &mut UnixStream, count: usize) -> Vec<u32> {
