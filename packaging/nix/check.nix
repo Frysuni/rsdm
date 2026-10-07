@@ -82,6 +82,10 @@ let
     lock.design.borderStyle = "none";
   };
   idleOnly = evaluate { dm.enable = false; };
+  overriddenTty = evaluate {
+    config.dm.tty.path = "/dev/tty3";
+    extraConfig.dm.tty.path = "/dev/tty2";
+  };
   override = evaluate {
     channel = "unstable";
     package = pkgs.hello;
@@ -112,6 +116,12 @@ assert !(idleOnly.systemd.services ? rsdm);
 assert idleOnly.systemd.defaultUnit == "multi-user.target";
 assert idleOnly.systemd.services."getty@tty1".enable;
 assert idleOnly.systemd.user.services ? rsdm-idle;
+assert overriddenTty.systemd.services.rsdm.serviceConfig.TTYPath == "/dev/tty2";
+assert overriddenTty.systemd.services.rsdm.conflicts == [ "getty@tty2.service" ];
+assert overriddenTty.systemd.services.rsdm.aliases == [ ];
+assert !(overriddenTty.systemd.services."getty@tty2".enable);
+assert !(overriddenTty.systemd.services."autovt@tty2".enable);
+assert overriddenTty.systemd.services."getty@tty1".enable or true;
 pkgs.runCommand "rsdm-module-configuration" { } ''
   ${stable.services.rsdm.package}/bin/rsdm \
     --config ${stable.environment.etc."rsdm.toml".source} validate-config

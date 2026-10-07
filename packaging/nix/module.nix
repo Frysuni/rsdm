@@ -11,8 +11,6 @@ let
   defaultPackage = self.packages.${pkgs.stdenv.hostPlatform.system}."rsdm-${cfg.channel}";
   ttyName = lib.removePrefix "/dev/" cfg.dm.tty;
   ttyPath = if lib.hasPrefix "/dev/" cfg.dm.tty then cfg.dm.tty else "/dev/${cfg.dm.tty}";
-  displayManagerAlias =
-    if cfg.displayManagerAlias == null then ttyName == "tty1" else cfg.displayManagerAlias;
 
   # Decide which keyring rsdm's greeter PAM stack should drive, without any
   # rsdm-specific or desktop-specific assumptions. "auto" mirrors the whole
@@ -114,12 +112,9 @@ in
       baseConfig
       cfg
       config
-      displayManagerAlias
       lib
       pkgs
       toml
-      ttyName
-      ttyPath
       useGnomeKeyring
       useKwallet
       ;

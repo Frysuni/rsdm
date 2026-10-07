@@ -2,17 +2,18 @@
   baseConfig,
   cfg,
   config,
-  displayManagerAlias,
   lib,
   pkgs,
   toml,
-  ttyName,
-  ttyPath,
   useGnomeKeyring,
   useKwallet,
 }:
 let
   runtimeConfig = lib.recursiveUpdate (lib.recursiveUpdate baseConfig cfg.config) cfg.extraConfig;
+  ttyPath = runtimeConfig.dm.tty.path;
+  ttyName = lib.removePrefix "/dev/" ttyPath;
+  displayManagerAlias =
+    if cfg.displayManagerAlias == null then ttyName == "tty1" else cfg.displayManagerAlias;
 in
 lib.mkIf cfg.enable {
   assertions = [

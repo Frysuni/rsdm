@@ -147,6 +147,10 @@ The module:
   boot when `dm.enable = true`. A lock/idle-only configuration leaves the
   system's getty, default boot target, and display-manager role untouched.
 
+TTY overrides in `config` or `extraConfig` also apply to the service's
+`TTYPath`, getty/autovt masking and automatic display-manager alias. The service
+and `/etc/rsdm.toml` therefore use the same VT.
+
 ## Common options
 
 The options mirror the config shape: greeter under `dm.*`, locker under `lock.*`,
