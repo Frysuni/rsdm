@@ -160,6 +160,9 @@ fn a_lost_stop_reply_requires_an_empty_stopped_unit() {
         let (manager, _server, state) = fixture(initial);
         let result = async_io::block_on(stop(&manager, "example.service", Duration::from_millis(50)));
         assert_eq!(result.is_ok(), !active);
+        if active {
+            assert!(matches!(&result, Err(SessionError::Bus(error)) if retryable_error(error)));
+        }
         assert_eq!(state.calls.load(Ordering::SeqCst), 1);
     }
 }

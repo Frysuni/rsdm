@@ -12,6 +12,7 @@ struct ManagerState {
     active: AtomicBool,
     reads: AtomicUsize,
     starts: AtomicUsize,
+    pending: AtomicBool,
 }
 
 struct FakeManager(Arc<ManagerState>);
@@ -47,6 +48,11 @@ impl FakeUnit {
 
     #[zbus(property, name = "InvocationID")]
     fn invocation_id(&self) -> Vec<u8> { vec![1; 16] }
+
+    #[zbus(property)]
+    fn job(&self) -> (u32, OwnedObjectPath) {
+        (u32::from(self.0.pending.load(Ordering::SeqCst)), OwnedObjectPath::try_from("/").unwrap())
+    }
 }
 
 struct FakeService;
@@ -90,12 +96,25 @@ fn a_lost_invocation_read_after_start_does_not_stop_or_restart_the_compositor() 
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Starting);
 
     state.unavailable.store(false, Ordering::SeqCst);
+    state.pending.store(true, Ordering::SeqCst);
+    fixture.coordinator.verify_boot().unwrap();
+    assert!(fixture.coordinator.pending_boot);
+    assert!(fixture.coordinator.booting());
+    state.pending.store(false, Ordering::SeqCst);
     fixture.coordinator.verify_boot().unwrap();
     assert!(!fixture.coordinator.pending_boot);
     assert!(!fixture.coordinator.booting());
     assert_eq!(fixture.coordinator.record.compositor_invocation, vec![1; 16]);
     assert_eq!(state.starts.load(Ordering::SeqCst), 0);
     assert_eq!(fixture.coordinator.workers, 0);
+
+    fixture.coordinator.pending_boot = true;
+    fixture.coordinator.process.as_mut().unwrap().booting = true;
+    state.reads.store(0, Ordering::SeqCst);
+    fixture.coordinator.begin_stop("logout", None).unwrap();
+    fixture.coordinator.verify_boot().unwrap();
+    assert!(!fixture.coordinator.booting());
+    assert_eq!(state.reads.load(Ordering::SeqCst), 0);
 }
 
 #[test]

@@ -83,10 +83,10 @@ async fn complete(
             if job.is_some() { break; }
             async_io::Timer::after(Duration::from_millis(50)).await;
         }
-        Err(SessionError::State(format!("{unit} job completion could not be confirmed")))
+        Err(zbus::Error::from(zbus::fdo::Error::TimedOut(format!("{unit} job completion could not be confirmed"))).into())
     }, async {
         async_io::Timer::at(deadline).await;
-        Err(SessionError::State(format!("timed out confirming systemd job for {unit}")))
+        Err(zbus::Error::from(zbus::fdo::Error::TimedOut(format!("timed out confirming systemd job for {unit}"))).into())
     }).await
 }
 

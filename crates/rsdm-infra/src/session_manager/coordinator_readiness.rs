@@ -112,6 +112,15 @@ impl Coordinator {
         }
         let unit = self.process.as_ref().and_then(|process| process.unit.as_deref())
             .ok_or_else(|| SessionError::State("pending compositor start has no unit".into()))?;
+        let job = self.manager.unit_property::<(u32, zbus::zvariant::OwnedObjectPath)>(
+            unit, "org.freedesktop.systemd1.Unit", "Job",
+        );
+        match job {
+            Ok((pending, _)) if pending != 0 => return Ok(()),
+            Err(SessionError::Bus(error)) if super::bus::retryable_error(&error) => return Ok(()),
+            Err(error) => return self.boot_completed(Err(error)),
+            _ => {},
+        }
         let result = match super::processes::generation_invocation(&self.manager, unit, &self.runtime.generation) {
             Err(SessionError::Bus(error)) if super::bus::retryable_error(&error) => return Ok(()),
             Ok(Some(id)) if id.iter().any(|byte| *byte != 0) => Ok(id),
