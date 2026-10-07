@@ -164,7 +164,8 @@ fn run_lock_cycle(config: IdleConfig, config_path: PathBuf, active: Arc<AtomicBo
         }
         Err(error) => {
             tracing::error!(%error, "idle locker did not confirm the session lock");
-            false
+            readiness::terminate_after_timeout(child, scope.as_deref());
+            return;
         }
         Ok(None) => {
             tracing::info!(pid = child.id(), "idle locker is active");

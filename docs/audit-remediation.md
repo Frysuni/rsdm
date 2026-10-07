@@ -21,7 +21,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 3 | Release application leases before slow shutdown work | fixed |
 | 4 | Durable recovery record publication | fixed |
 | 5 | Symmetric record read/write size limits | fixed |
-| 6 | Reap lockers that never confirm readiness | pending |
+| 6 | Reap lockers that never confirm readiness | fixed |
 | 7 | Bound idle hooks | fixed |
 | 8 | Retain restoration state for removed niri outputs | implemented; compositor checks pending |
 | 9 | Move bounded niri IPC off the Wayland loop | fixed |
@@ -466,6 +466,16 @@ verification separate from private-peer and unit-test evidence.
   New source files stay below 300 lines and functions below 50. The existing
   302-line Wayland orchestration module shrank by one line; its larger run
   initializer remains necessary to assemble protocol state in one place.
+
+- 6: A locker that misses the ten-second readiness handshake is terminated
+  before the idle worker returns. Service-managed lockers first receive a
+  bounded `systemctl --user stop` for their private scope, then the launcher
+  process is killed and reaped within a one-second cleanup budget; a background
+  reaper handles an unusual uninterruptible child without holding the idle
+  cycle active. The regression test uses a real sleeping child and verifies the
+  timeout path completes promptly. `nix develop --command cargo test -p
+  rsdm-idle --locked` passed the readiness and hook tests. No host service or
+  compositor was contacted.
 
 - 34: Each lock surface owns one prepared cover-fit image for the immutable
   wallpaper loaded at startup. Physical buffer-size changes invalidate it;

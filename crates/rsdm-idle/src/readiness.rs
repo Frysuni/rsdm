@@ -1,5 +1,5 @@
 use std::{
-    process::{Child, ExitStatus},
+    process::{Child, Command, ExitStatus},
     thread,
     time::{Duration, Instant},
 };
@@ -27,6 +27,37 @@ pub(super) fn wait_until_ready(
         thread::sleep(Duration::from_millis(50));
     }
     anyhow::bail!("no compositor lock confirmation within 10 seconds")
+}
+
+/// Abort a locker that did not establish the lock protocol in time.
+pub(super) fn terminate_after_timeout(mut child: Child, scope: Option<&str>) {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    if let Some(scope) = scope {
+        let systemctl = std::env::var_os("RSDM_SYSTEMCTL")
+            .unwrap_or_else(|| "systemctl".into());
+        let mut command = Command::new(systemctl);
+        command.args(["--user", "stop", scope]);
+        if let Err(error) = rsdm_infra::unix::run_command_until(&mut command, deadline) {
+            tracing::warn!(%error, %scope, "failed to stop idle locker scope after readiness timeout");
+        }
+    }
+    let _ = child.kill();
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) => thread::sleep(Duration::from_millis(10)),
+            Err(error) => {
+                tracing::warn!(%error, "failed to reap idle locker after readiness timeout");
+                return;
+            }
+        }
+    }
+    tracing::error!(pid = child.id(), "idle locker did not exit after forced termination");
+    thread::spawn(move || {
+        if let Err(error) = child.wait() {
+            tracing::warn!(%error, "failed to reap idle locker in background");
+        }
+    });
 }
 
 fn owns_lock(pid: u32, child_pid: u32, scope: Option<&str>) -> bool {
@@ -79,5 +110,13 @@ mod tests {
         ] {
             assert!(!belongs_to_scope(cgroups, scope), "{cgroups}");
         }
+    }
+
+    #[test]
+    fn readiness_timeout_terminates_a_locker() {
+        let child = Command::new("sh").args(["-c", "sleep 30"]).spawn().unwrap();
+        let before = Instant::now();
+        terminate_after_timeout(child, None);
+        assert!(before.elapsed() < Duration::from_secs(2));
     }
 }
