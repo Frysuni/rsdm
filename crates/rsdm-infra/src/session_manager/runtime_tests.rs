@@ -93,3 +93,43 @@ fn an_atomically_replaced_record_does_not_leave_partial_state() {
     assert!(loaded.quit_started);
     assert_eq!(fs::read_dir(runtime.path.join("apps")).unwrap().count(), 1);
 }
+
+#[test]
+fn maximum_sized_records_round_trip_and_oversized_updates_preserve_old_state() {
+    let directory = Directory::new();
+    let runtime = Runtime::create_at(&directory.0, GENERATION).unwrap();
+    let mut record = app();
+    record.policy.quit_command = vec!["quit".into(), String::new()];
+    let overhead = toml::to_string(&record).unwrap().len();
+    record.policy.quit_command[1] = "x".repeat(MAX_RECORD_BYTES - overhead);
+    assert_eq!(toml::to_string(&record).unwrap().len(), MAX_RECORD_BYTES);
+    runtime.save_app(&record).unwrap();
+    assert_eq!(runtime.app(&record.unit).unwrap().policy, record.policy);
+
+    record.policy.quit_command[1].push('x');
+    assert!(matches!(runtime.save_app(&record), Err(SessionError::State(message))
+        if message == "session recovery record is too large"));
+    record.policy.quit_command[1].pop();
+    assert_eq!(runtime.app(&record.unit).unwrap().policy, record.policy);
+    assert_eq!(fs::read_dir(runtime.path.join("apps")).unwrap().count(), 1);
+}
+
+#[test]
+fn serialized_size_limit_applies_to_session_records_too() {
+    let directory = Directory::new();
+    let path = directory.0.join("session.toml");
+    let record = SessionRecord {
+        identity: SessionIdentity {
+            generation: GENERATION.into(), login_session_id: "1".into(),
+            desktop_entry_id: None, uid: unsafe { libc::geteuid() },
+        },
+        anchor_unit: format!("rsdm-session-{GENERATION}.service"),
+        compositor_unit: None, compositor_invocation: Vec::new(),
+        provider: "managed".into(), owns_targets: true, phase: SessionPhase::Starting,
+        exported_environment: vec![("VALUE".into(), "x".repeat(MAX_RECORD_BYTES))],
+        shutdown_deadline_usec: None,
+    };
+    assert!(write_record(&path, &record).is_err());
+    assert!(!path.exists());
+    assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
+}

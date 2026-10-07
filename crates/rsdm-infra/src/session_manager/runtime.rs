@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{SessionError, identity::{SessionIdentity, valid_generation}};
 
+const MAX_RECORD_BYTES: usize = 1_048_576;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SessionRecord {
@@ -182,6 +184,9 @@ fn valid_app_unit(unit: &str, generation: &str) -> bool {
 
 fn write_record(path: &Path, record: &impl Serialize) -> Result<(), SessionError> {
     let encoded = toml::to_string(record).map_err(|error| SessionError::State(error.to_string()))?;
+    if encoded.len() > MAX_RECORD_BYTES {
+        return Err(SessionError::State("session recovery record is too large".into()));
+    }
     let temporary = path.with_extension(format!("{}.tmp", super::identity::new_generation()?));
     let result = (|| {
         let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600)
@@ -202,8 +207,8 @@ fn read_record<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Session
         return Err(SessionError::State("unsafe session recovery record".into()));
     }
     let mut text = String::new();
-    file.take(1_048_577).read_to_string(&mut text)?;
-    if text.len() > 1_048_576 { return Err(SessionError::State("session recovery record is too large".into())); }
+    file.take((MAX_RECORD_BYTES + 1) as u64).read_to_string(&mut text)?;
+    if text.len() > MAX_RECORD_BYTES { return Err(SessionError::State("session recovery record is too large".into())); }
     toml::from_str(&text).map_err(|error| SessionError::State(error.to_string()))
 }
 

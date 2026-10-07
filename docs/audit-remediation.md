@@ -20,7 +20,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 2 | Bound application lease acquisition | pending |
 | 3 | Release application leases before slow shutdown work | pending |
 | 4 | Durable recovery record publication | pending |
-| 5 | Symmetric record read/write size limits | pending |
+| 5 | Symmetric record read/write size limits | fixed |
 | 6 | Reap lockers that never confirm readiness | pending |
 | 7 | Bound idle hooks | pending |
 | 8 | Retain restoration state for removed niri outputs | pending |
@@ -70,7 +70,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 52 | Use logind power capabilities for lock UI | pending |
 | 53 | Validate ready timeout representability | pending |
 | 54 | Document pidfd emergency unlock protection | pending |
-| 55 | Match bounded recovery-record documentation | pending |
+| 55 | Match bounded recovery-record documentation | fixed with 5 |
 | 56 | Match bounded-worker architecture claims | pending |
 | 57 | Correct obsolete first-seat documentation | pending |
 
@@ -83,3 +83,9 @@ and output lifecycle; authentication and process identity; actor responsiveness;
 TTY and packaging; rendering, API bounds, release configuration, and remaining
 compatibility/documentation findings. Dependencies may require changing this
 order. Mark a row fixed only after its behavior has been checked.
+
+## Completed checks
+
+- 5, 55: recovery writes reject serialized TOML over the same 1 MiB read limit
+  before creating temporary files. Tests round-trip the exact boundary, preserve
+  previous state after an oversized update, and reject oversized session state.
