@@ -135,7 +135,7 @@ fn cancellation_does_not_reset_a_replacement_invocation() {
     let mut replacement = prepared.clone();
     replacement.invocation_id = vec![2; 16];
     fixture.runtime.save_app(&replacement).unwrap();
-    reset_preparation(&fixture.runtime, &prepared).unwrap();
+    reset_preparation(&fixture.runtime, &prepared, &Deadline::default()).unwrap();
     let saved = fixture.runtime.app(&fixture.app.unit).unwrap();
     assert_eq!(saved.invocation_id, replacement.invocation_id);
     assert_eq!(saved.deadline_usec, replacement.deadline_usec);

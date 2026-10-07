@@ -108,13 +108,13 @@ pub(super) fn prepare_app(
         release_quit(manager, &unit);
     }
     if matches!(result, Ok(AppOutcome::Cancelled)) {
-        reset_preparation(runtime, &app)?;
+        reset_preparation(runtime, &app, &control.hard_deadline)?;
     }
     result
 }
 
 fn claim_preparation(runtime: &Runtime, unit: &str, control: &ShutdownControl) -> Result<(AppRecord, bool), SessionError> {
-    let _lease = runtime.app_lease(unit)?;
+    let _lease = runtime.app_lease_until(unit, &control.hard_deadline)?;
     let mut app = runtime.app(unit)?;
     let deadline = app.deadline_usec.get_or_insert(
         monotonic_usec()?.checked_add(app.policy.timeout_secs * 1_000_000)
@@ -130,8 +130,8 @@ fn claim_preparation(runtime: &Runtime, unit: &str, control: &ShutdownControl) -
     Ok((app, claimed))
 }
 
-fn reset_preparation(runtime: &Runtime, prepared: &AppRecord) -> Result<(), SessionError> {
-    let _lease = runtime.app_lease(&prepared.unit)?;
+fn reset_preparation(runtime: &Runtime, prepared: &AppRecord, deadline: &Deadline) -> Result<(), SessionError> {
+    let _lease = runtime.app_lease_until(&prepared.unit, deadline)?;
     let mut app = runtime.app(&prepared.unit)?;
     if app.invocation_id == prepared.invocation_id && app.deadline_usec == prepared.deadline_usec {
         app.deadline_usec = None;

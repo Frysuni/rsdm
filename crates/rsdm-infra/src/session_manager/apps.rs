@@ -67,7 +67,7 @@ pub(super) fn launch(
     let started = manager.start_service(&app.unit, &properties);
     match manager.invocation_id(&app.unit) {
         Ok(id) => {
-            let _lease = runtime.app_lease(&app.unit)?;
+            let _lease = runtime.app_lease_until(&app.unit, &manager.deadline)?;
             app = runtime.app(&app.unit)?;
             app.invocation_id = id;
             runtime.save_app(&app)?;
@@ -134,7 +134,7 @@ pub(super) fn pin_pending(manager: &UserManager, runtime: &Runtime, unit: &str) 
     let Some(id) = super::processes::generation_invocation(manager, unit, &runtime.generation)? else {
         return Ok(false);
     };
-    let _lease = runtime.app_lease(unit)?;
+    let _lease = runtime.app_lease_until(unit, &manager.deadline)?;
     let mut app = runtime.app(unit)?;
     if app.invocation_id.is_empty() {
         app.invocation_id = id;

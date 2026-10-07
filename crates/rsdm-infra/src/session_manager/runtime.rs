@@ -2,15 +2,14 @@
 
 use std::{
     fs::{self, File, OpenOptions}, io::{Read, Write},
-    os::{fd::AsRawFd, unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt}},
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
-    thread, time::{Duration, Instant},
 };
 
 use rsdm_core::domain::{SessionPhase, ShutdownPolicy};
 use serde::{Deserialize, Serialize};
 
-use super::{SessionError, identity::{SessionIdentity, valid_generation}};
+use super::{SessionError, deadline::Deadline, identity::{SessionIdentity, valid_generation}};
 
 const MAX_RECORD_BYTES: usize = 1_048_576;
 
@@ -131,18 +130,12 @@ impl Runtime {
     }
 
     pub fn app_lease(&self, unit: &str) -> Result<File, SessionError> {
+        self.app_lease_until(unit, &Deadline::default())
+    }
+
+    pub fn app_lease_until(&self, unit: &str, deadline: &Deadline) -> Result<File, SessionError> {
         let path = self.app_path(unit)?.with_extension("lock");
-        let file = OpenOptions::new().read(true).write(true).create(true).truncate(false)
-            .mode(0o600).custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK).open(path)?;
-        let metadata = file.metadata()?;
-        // SAFETY: geteuid has no preconditions; flock operates on our open file.
-        if !metadata.is_file() || metadata.uid() != unsafe { libc::geteuid() }
-            || metadata.permissions().mode() & 0o077 != 0
-        {
-            return Err(SessionError::State("unsafe application shutdown lease".into()));
-        }
-        lock_record(&file)?;
-        Ok(file)
+        super::app_record_lease::acquire(&path, deadline)
     }
 
     fn app_path(&self, unit: &str) -> Result<PathBuf, SessionError> {
@@ -150,23 +143,6 @@ impl Runtime {
             return Err(SessionError::State("invalid managed application unit".into()));
         }
         Ok(self.path.join("apps").join(format!("{unit}.toml")))
-    }
-}
-
-fn lock_record(file: &File) -> std::io::Result<()> {
-    let deadline = Instant::now() + Duration::from_millis(250);
-    loop {
-        // SAFETY: the descriptor is owned and LOCK_NB forbids a blocking wait.
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-            return Ok(());
-        }
-        let error = std::io::Error::last_os_error();
-        if !matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted)
-            || Instant::now() >= deadline
-        {
-            return Err(error);
-        }
-        thread::sleep(Duration::from_millis(5).min(deadline.saturating_duration_since(Instant::now())));
     }
 }
 

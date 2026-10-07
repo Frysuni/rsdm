@@ -241,3 +241,11 @@ Record unexecuted runtime checks explicitly for later verification.
   watcher lifetime, shared manager clones, and interruption of an existing read.
   Syntax/diff checks passed; runtime execution is pending. Leases, child waits,
   recovery setup/draining, and end-to-end shutdown checks remain outstanding.
+- 1 (record lease layer): App record acquisition uses the shared deadline for
+  launch/invocation pinning, preparation claims, and cancellation reset. Both
+  flock retries and their sleeps observe budget revisions/revocation; normal
+  metadata updates retain the independent 250 ms contention cap. An expired
+  shutdown cannot create a new lease file. Tests cover contention, expiry,
+  revision, revocation, and subsequent reuse. Syntax/diff checks passed; runtime
+  execution, child waits, recovery setup/draining, and full lifecycle checks
+  remain pending.

@@ -1,4 +1,4 @@
-use std::{os::unix::fs::symlink, sync::atomic::{AtomicUsize, Ordering}};
+use std::{os::unix::fs::symlink, sync::atomic::{AtomicUsize, Ordering}, thread, time::{Duration, Instant}};
 
 use super::*;
 
@@ -179,4 +179,69 @@ fn app_lease_waits_for_short_record_updates() {
     let acquired = runtime.app_lease(&app().unit);
     owner.join().unwrap();
     assert!(acquired.is_ok());
+}
+
+#[test]
+fn app_lease_contention_cannot_start_an_independent_shutdown_wait() {
+    let directory = Directory::new();
+    let runtime = Runtime::create_at(&directory.0, GENERATION).unwrap();
+    let held = runtime.app_lease(&app().unit).unwrap();
+    let deadline = Deadline::default();
+    deadline.set(crate::session_manager::processes::monotonic_usec().unwrap() + 25_000);
+    let before = Instant::now();
+    let result = runtime.app_lease_until(&app().unit, &deadline);
+    assert!(matches!(result, Err(SessionError::Bus(error))
+        if crate::session_manager::bus::retryable_error(&error)));
+    assert!(before.elapsed() < Duration::from_secs(1));
+    drop(held);
+    deadline.set(0);
+    assert!(runtime.app_lease_until(&app().unit, &deadline).is_ok());
+}
+
+#[test]
+fn an_expired_shutdown_deadline_does_not_create_a_lease_file() {
+    let directory = Directory::new();
+    let runtime = Runtime::create_at(&directory.0, GENERATION).unwrap();
+    let deadline = Deadline::default();
+    deadline.set(1);
+    assert!(runtime.app_lease_until(&app().unit, &deadline).is_err());
+    assert!(!runtime.app_path(&app().unit).unwrap().with_extension("lock").exists());
+}
+
+#[test]
+fn lease_contention_observes_a_revised_shutdown_deadline() {
+    let directory = Directory::new();
+    let runtime = Runtime::create_at(&directory.0, GENERATION).unwrap();
+    let _held = runtime.app_lease(&app().unit).unwrap();
+    let deadline = Deadline::default();
+    deadline.set(crate::session_manager::processes::monotonic_usec().unwrap() + 10_000_000);
+    let updated = deadline.clone();
+    let worker = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        updated.set(1);
+    });
+    let result = runtime.app_lease_until(&app().unit, &deadline);
+    worker.join().unwrap();
+    assert!(matches!(result, Err(SessionError::Bus(error))
+        if crate::session_manager::bus::retryable_error(&error)));
+}
+
+#[test]
+fn revoking_a_shutdown_deadline_allows_a_short_record_update_to_finish() {
+    let directory = Directory::new();
+    let runtime = Runtime::create_at(&directory.0, GENERATION).unwrap();
+    let held = runtime.app_lease(&app().unit).unwrap();
+    let deadline = Deadline::default();
+    deadline.set(crate::session_manager::processes::monotonic_usec().unwrap() + 50_000);
+    let updated = deadline.clone();
+    let owner = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        updated.set(0);
+        thread::sleep(Duration::from_millis(60));
+        drop(held);
+    });
+    let result = runtime.app_lease_until(&app().unit, &deadline);
+    owner.join().unwrap();
+    assert!(result.is_ok());
+    assert_eq!(deadline.get(), 0);
 }

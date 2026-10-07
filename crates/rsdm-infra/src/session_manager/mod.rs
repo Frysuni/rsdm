@@ -1,6 +1,7 @@
 //! Coordinated graphical session lifecycle, with native desktop ownership.
 
 mod activation;
+mod app_record_lease;
 mod app_stop;
 mod apps;
 mod bus;

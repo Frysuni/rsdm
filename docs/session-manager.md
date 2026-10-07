@@ -265,6 +265,11 @@ removes the shared limit while preparation is still cancellable. After expiry,
 new calls fail without sending a mutation. Already accepted systemd operations
 can continue and remain represented by recovery records.
 
+Per-app metadata leases normally wait at most 250 ms for contention. During
+shutdown/recovery their retries and sleeps also obey the shared deadline;
+revisions or revocation affect an already waiting lease. The lease is released
+before application exit waits or systemd jobs.
+
 Installing an updated package does not replace a running coordinator. When
 upgrading from an affected version, end the old session before applying a live
 configuration switch, then start the updated DM and a new session. A reboot into
