@@ -17,7 +17,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | Finding | Work | Status |
 | --- | --- | --- |
 | 1 | One shutdown deadline across all teardown phases | in progress; shared bus deadline implemented |
-| 2 | Bound application lease acquisition | implemented; runtime checks pending |
+| 2 | Bound application lease acquisition | fixed |
 | 3 | Release application leases before slow shutdown work | fixed |
 | 4 | Durable recovery record publication | fixed |
 | 5 | Symmetric record read/write size limits | fixed |
@@ -27,20 +27,20 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 9 | Move bounded niri IPC off the Wayland loop | pending |
 | 10 | Cancellable, bounded PAM helper processes | pending |
 | 11 | Remove complex post-PAM fork child work | pending |
-| 12 | Pin emergency unlock targets with pidfds | implemented; runtime checks pending |
-| 13 | Validate lock state through one open descriptor | implemented; runtime checks pending |
+| 12 | Pin emergency unlock targets with pidfds | fixed |
+| 13 | Validate lock state through one open descriptor | fixed |
 | 14 | Honor PAM-requested authentication delay | pending |
 | 15 | Account throttling after PAM identity mapping | pending |
 | 16 | Audit successful starts after launch confirmation | fixed |
-| 17 | Audit termination separately from cleanup failure | implemented; runtime checks pending |
-| 18 | Move control-bus maintenance off the actor | implemented; runtime checks pending |
-| 19 | Release transport mutex during async reconnect | implemented; runtime checks pending |
+| 17 | Audit termination separately from cleanup failure | fixed |
+| 18 | Move control-bus maintenance off the actor | fixed |
+| 19 | Release transport mutex during async reconnect | fixed |
 | 20 | Scale reference restoration within bounded work | pending |
 | 21 | Roll back definitely failed app registrations | pending |
 | 22 | Roll back definitely failed start references | pending |
 | 23 | Recover generation-owned quit/logout helpers | pending |
 | 24 | Bound shutdown concurrency and polling | pending |
-| 25 | Linear process snapshot/pidfd signaling | implemented; runtime checks pending |
+| 25 | Linear process snapshot/pidfd signaling | fixed |
 | 26 | One recovery deadline across all teardown phases | pending |
 | 27 | Establish shutdown backstop before child startup | pending |
 | 28 | Recover console log level after greeter crashes | pending |
@@ -51,12 +51,12 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 33 | Reuse render buffers and avoid unnecessary frames | pending |
 | 34 | Cache scaled wallpaper | pending |
 | 35 | Recover output-power changes after locker crashes | pending |
-| 36 | Harden remembered-state reads | implemented; runtime checks pending |
-| 37 | Harden privileged log file opens | implemented; runtime checks pending |
-| 38 | Avoid console font temporary-file collisions | implemented; runtime checks pending |
+| 36 | Harden remembered-state reads | fixed |
+| 37 | Harden privileged log file opens | fixed |
+| 38 | Avoid console font temporary-file collisions | fixed |
 | 39 | Reap closed generation lease files safely | pending |
-| 40 | Bound coordinator request backlog | implemented; runtime checks pending |
-| 41 | Bound launch request payloads | implemented; runtime checks pending |
+| 40 | Bound coordinator request backlog | fixed |
+| 41 | Bound launch request payloads | fixed |
 | 42 | Clarify/update Arch release package versions | pending |
 | 43 | Verify downloadable Arch package artifacts | pending |
 | 44 | Narrow release token write permissions | fixed |
@@ -66,10 +66,10 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 48 | Add Clippy to CI | policy exception |
 | 49 | Choose one deterministic automatic keyring | implemented; module checks pending |
 | 50 | Follow Desktop Entry Exec parsing semantics | pending |
-| 51 | Reject ambiguous fixed-session display names | implemented; runtime checks pending |
-| 52 | Use logind power capabilities for lock UI | implemented; runtime checks pending |
-| 53 | Validate ready timeout representability | implemented; runtime checks pending |
-| 54 | Document pidfd emergency unlock protection | implemented with 12; runtime checks pending |
+| 51 | Reject ambiguous fixed-session display names | fixed |
+| 52 | Use logind power capabilities for lock UI | fixed |
+| 53 | Validate ready timeout representability | fixed |
+| 54 | Document pidfd emergency unlock protection | fixed with 12 |
 | 55 | Match bounded recovery-record documentation | fixed with 5 |
 | 56 | Match bounded-worker architecture claims | pending |
 | 57 | Correct obsolete first-seat documentation | fixed |
@@ -102,10 +102,21 @@ order. Mark a row fixed only after its behavior has been checked.
   ownership, and cancellation identity checks. The Nix lifecycle build was
   interrupted when battery restrictions resumed; its VM test did not run.
 
-Battery restriction: do not build or run compilation-based test suites. Use
-Rust's syntax-only parse (`rustc -Z unpretty=normal --edition=2024`, output
-discarded) and `git diff --check` for changes made under this restriction.
-Record unexecuted runtime checks explicitly for later verification.
+The battery restriction was lifted on 2026-10-07. Earlier syntax-only evidence
+below records the checks available when each change was committed; the runtime
+verification below supersedes those pending Rust checks. Keep compositor and VM
+verification separate from private-peer and unit-test evidence.
+
+- 2026-10-07: `nix develop --command cargo test --workspace --locked` passed
+  all 360 tests (one additional isolated subprocess fixture remains ignored by
+  default). `nix develop --command cargo check --workspace --all-targets --locked`
+  passed without Rust warnings. This executes the new lease, pidfd, record,
+  transport, control-bus, audit, logging, font, session-selection, configuration,
+  and logind-capability regressions for findings 2, 12, 13, 17, 18, 19, 25, 36,
+  37, 38, 40, 41, 51, 52, 53, and 54. The deadline foundation tests also pass;
+  findings 1 and 26 remain open for the other teardown phases and VM evidence.
+  Finding 8 still needs compositor evidence; finding 49 needs generated-PAM
+  checks. No host services were restarted or power operations requested.
 
 - 2: application leases use nonblocking flock with a 250 ms retry budget for
   short record updates. Contention and successful short-wait regression tests
