@@ -76,12 +76,22 @@ jobs:
           install -dm700 /root/.ssh
           printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /root/.ssh/aur
           chmod 600 /root/.ssh/aur
-          ssh-keyscan -t ed25519,rsa aur.archlinux.org >> /root/.ssh/known_hosts 2>/dev/null
+          # https://archlinux.org/news/aur-migration-new-ssh-hostkeys/
+          # Ed25519 SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4
+          cat > /root/.ssh/aur_known_hosts <<'EOF'
+          aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN
+          EOF
+          chmod 600 /root/.ssh/aur_known_hosts
           cat > /root/.ssh/config <<'EOF'
           Host aur.archlinux.org
             User aur
             IdentityFile /root/.ssh/aur
             IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile /root/.ssh/aur_known_hosts
+            GlobalKnownHostsFile /dev/null
+            HostKeyAlgorithms ssh-ed25519
+            BatchMode yes
           EOF
 
       - name: Build PKGBUILD + .SRCINFO

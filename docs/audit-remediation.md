@@ -62,7 +62,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 44 | Narrow release token write permissions | fixed |
 | 45 | Pin third-party actions to immutable commits | fixed |
 | 46 | Pass only required reusable-workflow secrets | fixed |
-| 47 | Pin AUR SSH host identity | pending |
+| 47 | Pin AUR SSH host identity | fixed |
 | 48 | Add Clippy to CI | policy exception |
 | 49 | Choose one deterministic automatic keyring | implemented; module checks pending |
 | 50 | Follow Desktop Entry Exec parsing semantics | pending |
@@ -166,3 +166,9 @@ Record unexecuted runtime checks explicitly for later verification.
   Module regressions cover neither, each, both, standalone GNOME, explicit
   overrides, and a Lock PAM override. Nix syntax/TOML/diff checks passed;
   full module evaluation and generated-PAM validation remain pending.
+- 47: AUR publishing installs the verified Ed25519 public host key instead of
+  trusting a fresh ssh-keyscan result. Strict checking uses only that host file
+  and algorithm. Its SHA256 matches the
+  [official Arch announcement](https://archlinux.org/news/aur-migration-new-ssh-hostkeys/).
+  YAML/shell/SSH configuration parsing and fingerprint checks passed locally;
+  no authenticated AUR connection, workflow execution, or publication occurred.
