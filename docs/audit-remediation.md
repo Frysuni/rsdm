@@ -59,7 +59,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 41 | Bound launch request payloads | pending |
 | 42 | Clarify/update Arch release package versions | pending |
 | 43 | Verify downloadable Arch package artifacts | pending |
-| 44 | Narrow release token write permissions | pending |
+| 44 | Narrow release token write permissions | fixed |
 | 45 | Pin third-party actions to immutable commits | pending |
 | 46 | Pass only required reusable-workflow secrets | pending |
 | 47 | Pin AUR SSH host identity | pending |
@@ -137,3 +137,7 @@ Record unexecuted runtime checks explicitly for later verification.
   the health reply and check caller responsiveness and cancellation on closure.
   Only syntax checks have run. Finding 56 still needs the remaining synchronous
   manager reads in observation/readiness/finalize to leave the actor loop.
+- 44: release workflow defaults to contents:read. Only GitHub release publishing
+  and stable-channel metadata commits request contents:write; build and reusable
+  AUR jobs retain read access. YAML parsing and permission checks passed locally;
+  no workflow was dispatched.

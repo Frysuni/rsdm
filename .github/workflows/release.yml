@@ -10,7 +10,7 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -83,6 +83,8 @@ jobs:
 
   release:
     name: publish github release
+    permissions:
+      contents: write
     needs: build
     runs-on: ubuntu-26.04
     steps:
@@ -106,6 +108,8 @@ jobs:
 
   update-stable:
     name: update stable Nix channel
+    permissions:
+      contents: write
     needs: release
     if: ${{ !contains(github.event.inputs.tag || github.ref_name, '-') }}
     runs-on: ubuntu-26.04
