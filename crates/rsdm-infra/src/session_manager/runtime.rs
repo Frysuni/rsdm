@@ -4,6 +4,7 @@ use std::{
     fs::{self, File, OpenOptions}, io::{Read, Write},
     os::{fd::AsRawFd, unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt}},
     path::{Path, PathBuf},
+    thread, time::{Duration, Instant},
 };
 
 use rsdm_core::domain::{SessionPhase, ShutdownPolicy};
@@ -140,9 +141,7 @@ impl Runtime {
         {
             return Err(SessionError::State("unsafe application shutdown lease".into()));
         }
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-            return Err(std::io::Error::last_os_error().into());
-        }
+        lock_record(&file)?;
         Ok(file)
     }
 
@@ -151,6 +150,23 @@ impl Runtime {
             return Err(SessionError::State("invalid managed application unit".into()));
         }
         Ok(self.path.join("apps").join(format!("{unit}.toml")))
+    }
+}
+
+fn lock_record(file: &File) -> std::io::Result<()> {
+    let deadline = Instant::now() + Duration::from_millis(250);
+    loop {
+        // SAFETY: the descriptor is owned and LOCK_NB forbids a blocking wait.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if !matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted)
+            || Instant::now() >= deadline
+        {
+            return Err(error);
+        }
+        thread::sleep(Duration::from_millis(5).min(deadline.saturating_duration_since(Instant::now())));
     }
 }
 

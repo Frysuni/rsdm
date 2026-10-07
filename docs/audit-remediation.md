@@ -17,7 +17,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | Finding | Work | Status |
 | --- | --- | --- |
 | 1 | One shutdown deadline across all teardown phases | pending |
-| 2 | Bound application lease acquisition | pending |
+| 2 | Bound application lease acquisition | implemented; runtime checks pending |
 | 3 | Release application leases before slow shutdown work | fixed |
 | 4 | Durable recovery record publication | fixed |
 | 5 | Symmetric record read/write size limits | fixed |
@@ -106,3 +106,7 @@ Battery restriction: do not build or run compilation-based test suites. Use
 Rust's syntax-only parse (`rustc -Z unpretty=normal --edition=2024`, output
 discarded) and `git diff --check` for changes made under this restriction.
 Record unexecuted runtime checks explicitly for later verification.
+
+- 2: application leases use nonblocking flock with a 250 ms retry budget for
+  short record updates. Contention and successful short-wait regression tests
+  were added and syntax-checked; execute them when build restrictions are lifted.

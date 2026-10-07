@@ -145,3 +145,38 @@ fn failed_publication_removes_its_temporary_file() {
     assert!(path.is_dir());
     assert_eq!(fs::read_dir(runtime.path.join("apps")).unwrap().count(), 1);
 }
+
+#[test]
+fn app_lease_contention_has_a_deadline_and_keeps_the_inode_reusable() {
+    let directory = Directory::new();
+    let runtime = Runtime::create_at(&directory.0, GENERATION).unwrap();
+    let held = runtime.app_lease(&app().unit).unwrap();
+    let (release, requested) = std::sync::mpsc::channel();
+    let owner = thread::spawn(move || {
+        let _ = requested.recv_timeout(Duration::from_secs(2));
+        drop(held);
+    });
+    let before = Instant::now();
+    let acquired = runtime.app_lease(&app().unit);
+    let elapsed = before.elapsed();
+    let _ = release.send(());
+    owner.join().unwrap();
+    assert!(matches!(acquired, Err(SessionError::Io(error))
+        if error.kind() == std::io::ErrorKind::WouldBlock));
+    assert!(elapsed < Duration::from_secs(1));
+    assert!(runtime.app_lease(&app().unit).is_ok());
+}
+
+#[test]
+fn app_lease_waits_for_short_record_updates() {
+    let directory = Directory::new();
+    let runtime = Runtime::create_at(&directory.0, GENERATION).unwrap();
+    let held = runtime.app_lease(&app().unit).unwrap();
+    let owner = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        drop(held);
+    });
+    let acquired = runtime.app_lease(&app().unit);
+    owner.join().unwrap();
+    assert!(acquired.is_ok());
+}
