@@ -16,22 +16,45 @@ const MAX_BYTES: u64 = 1024 * 1024;
 pub fn publish(tty: &str) -> io::Result<()> {
     let path = snapshot_path(tty)?;
     let font = capture::read(tty)?;
-    fs::create_dir_all(path.parent().unwrap())?;
-    let temp = path.with_extension(format!("{}.tmp", std::process::id()));
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o644)
-        .open(&temp)?;
+    write_snapshot(&path, &font)
+}
+
+fn write_snapshot(path: &Path, font: &ConsoleFont) -> io::Result<()> {
+    let parent = path.parent().ok_or_else(invalid_font)?;
+    fs::create_dir_all(parent)?;
+    let (temp, mut file) = create_snapshot_temp(path)?;
     let result = (|| {
         file.set_permissions(fs::Permissions::from_mode(0o644))?;
-        file.write_all(&encode(&font))?;
-        fs::rename(&temp, &path)
+        file.write_all(&encode(font))?;
+        file.sync_all()?;
+        fs::rename(&temp, path)?;
+        OpenOptions::new().read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(parent)?.sync_all()
     })();
     if result.is_err() {
         let _ = fs::remove_file(temp);
     }
     result
+}
+
+fn create_snapshot_temp(path: &Path) -> io::Result<(PathBuf, File)> {
+    let mut random = File::open("/dev/urandom")?;
+    for _ in 0..16 {
+        let mut bytes = [0_u8; 16];
+        random.read_exact(&mut bytes)?;
+        let suffix: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        let temp = path.with_extension(format!("{suffix}.tmp"));
+        let result = OpenOptions::new().write(true).create_new(true).mode(0o644)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC).open(&temp);
+        match result {
+            Ok(file) => return Ok((temp, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(io::ErrorKind::AlreadyExists,
+        "could not create a unique console font snapshot file"))
 }
 
 pub fn load(tty: &str) -> io::Result<ConsoleFont> {
@@ -106,48 +129,5 @@ impl ConsoleFont {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn preserves_wide_glyphs_and_unicode_aliases() {
-        let font = ConsoleFont {
-            width: 12,
-            height: 22,
-            bitmap: vec![0xa5; 88],
-            unicode: [('A', 0), ('─', 1), ('━', 1)].into(),
-        };
-        let restored = ConsoleFont::from_snapshot(&encode(&font)).unwrap();
-        assert_eq!((restored.width(), restored.height()), (12, 22));
-        assert_eq!(restored.glyph('A'), Some(&[0xa5; 44][..]));
-        assert_eq!(restored.glyph('─'), restored.glyph('━'));
-    }
-
-    #[test]
-    fn rejects_truncated_and_invalid_snapshots() {
-        let font = ConsoleFont {
-            width: 8,
-            height: 16,
-            bitmap: vec![0; 16],
-            unicode: [('A', 0)].into(),
-        };
-        let bytes = encode(&font);
-        for length in 0..bytes.len() {
-            assert!(ConsoleFont::from_snapshot(&bytes[..length]).is_err());
-        }
-        let mut unmapped = bytes[..40].to_vec();
-        unmapped[20..24].copy_from_slice(&0_u32.to_le_bytes());
-        assert!(ConsoleFont::from_snapshot(&unmapped).is_err());
-        for (offset, value) in [
-            (8, 0_u32),
-            (12, 129),
-            (16, u32::MAX),
-            (20, u32::MAX),
-            (44, 1),
-        ] {
-            let mut invalid = bytes.clone();
-            invalid[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
-            assert!(ConsoleFont::from_snapshot(&invalid).is_err());
-        }
-    }
-}
+#[path = "snapshot_tests.rs"]
+mod tests;

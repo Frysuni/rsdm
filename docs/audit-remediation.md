@@ -53,7 +53,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 35 | Recover output-power changes after locker crashes | pending |
 | 36 | Harden remembered-state reads | implemented; runtime checks pending |
 | 37 | Harden privileged log file opens | pending |
-| 38 | Avoid console font temporary-file collisions | pending |
+| 38 | Avoid console font temporary-file collisions | implemented; runtime checks pending |
 | 39 | Reap closed generation lease files safely | pending |
 | 40 | Bound coordinator request backlog | pending |
 | 41 | Bound launch request payloads | pending |
@@ -179,3 +179,10 @@ Record unexecuted runtime checks explicitly for later verification.
   descriptor/path replacement, symlinks (including dangling links), FIFOs,
   directories, shared permissions, exact size, oversized data, and writer
   round-tripping. Syntax/diff checks passed; runtime checks remain pending.
+- 38: console font snapshots use random 128-bit temporary names with exclusive
+  creation and bounded collision retries. Publication synchronizes the file
+  before rename and the parent afterward; failed publication removes its own
+  temporary file. Tests cover stale PID files, distinct concurrent temporaries,
+  replacement/permissions, and failed-rename cleanup in private directories.
+  Existing codec tests are preserved. Syntax/diff checks passed; runtime checks
+  remain pending, and `/run` snapshots remain intentionally volatile.
