@@ -251,6 +251,13 @@ coordinator or recovery helper from replacing the live session while its D-Bus
 name is unavailable. Applications and native desktop services still need to
 handle their own disconnected D-Bus connections; RSDM cannot reconnect them.
 
+Each unit start/stop call has one timeout covering its preflight reads, signal
+subscription, method reply, and completion checks. A lost reply or job signal is
+reconciled against owned unit state inside the same budget, without repeating
+the mutation or adding another verification timeout. An expired start budget
+does not imply that an accepted service start was rolled back; recovery retains
+its ownership record.
+
 Installing an updated package does not replace a running coordinator. When
 upgrading from an affected version, end the old session before applying a live
 configuration switch, then start the updated DM and a new session. A reboot into

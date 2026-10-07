@@ -93,17 +93,6 @@ fn accepted_method_call_does_not_hide_a_failed_job() {
 }
 
 #[test]
-fn job_wait_has_a_deadline_even_if_no_matching_signal_arrives() {
-    let (manager, _server, _) = connect("250", "done");
-    async_io::block_on(async {
-        let proxy = manager.proxy().await.unwrap();
-        let mut signals = proxy.receive_signal("JobRemoved").await.unwrap();
-        let job = OwnedObjectPath::try_from("/org/freedesktop/systemd1/job/999").unwrap();
-        assert!(!wait_job(&mut signals, &job, Duration::from_millis(20)).await.unwrap());
-    });
-}
-
-#[test]
 fn transient_read_errors_are_retried_until_the_manager_returns() {
     let attempts = std::sync::atomic::AtomicUsize::new(0);
     let result = async_io::block_on(retry_read(|| async {

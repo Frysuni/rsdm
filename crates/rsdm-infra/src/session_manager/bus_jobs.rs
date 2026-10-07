@@ -11,37 +11,59 @@ enum Operation {
 pub(super) async fn start(
     manager: &UserManager, unit: &str, properties: &UnitProperties, timeout: Duration,
 ) -> Result<(), SessionError> {
-    let new_unit = match manager.read_async(|| async {
-        manager.proxy().await?.call::<_, _, OwnedObjectPath>("GetUnit", &(unit,)).await
-    }, Duration::from_secs(5)).await {
-        Ok(_) => false,
-        Err(error) if missing_unit(&error) => true,
-        Err(error) => return Err(error.into()),
-    };
-    let generation = generation(properties)?;
-    if new_unit && properties.iter().any(|(name, value)| *name == "AddRef" && matches!(value, Value::Bool(true))) {
-        if let Some(generation) = &generation { manager.transport.track(unit, generation.clone()); }
-    }
-    let proxy = manager.proxy().await?;
-    let mut signals = proxy.receive_signal_with_args("JobRemoved", &[(2, unit)]).await?;
-    let auxiliary: Vec<(&str, UnitProperties)> = Vec::new();
-    let reply = proxy.call("StartTransientUnit", &(unit, "fail", properties, auxiliary)).await;
-    complete(manager, unit, &mut signals, reply, Operation::Start { new_unit, generation }, timeout).await
+    let deadline = Instant::now().checked_add(timeout)
+        .ok_or_else(|| SessionError::State("systemd job deadline overflow".into()))?;
+    within_deadline(unit, deadline, async {
+        let new_unit = match manager.read_async(|| async {
+            manager.proxy().await?.call::<_, _, OwnedObjectPath>("GetUnit", &(unit,)).await
+        }, Duration::from_secs(5)).await {
+            Ok(_) => false,
+            Err(error) if missing_unit(&error) => true,
+            Err(error) => return Err(error.into()),
+        };
+        let generation = generation(properties)?;
+        if new_unit && properties.iter().any(|(name, value)| *name == "AddRef" && matches!(value, Value::Bool(true))) {
+            if let Some(generation) = &generation { manager.transport.track(unit, generation.clone()); }
+        }
+        let proxy = manager.proxy().await?;
+        let mut signals = proxy.receive_signal_with_args("JobRemoved", &[(2, unit)]).await?;
+        let auxiliary: Vec<(&str, UnitProperties)> = Vec::new();
+        let reply = proxy.call("StartTransientUnit", &(unit, "fail", properties, auxiliary)).await;
+        complete(manager, unit, &mut signals, reply, Operation::Start { new_unit, generation }, deadline).await
+    }).await
 }
 
 pub(super) async fn stop(manager: &UserManager, unit: &str, timeout: Duration) -> Result<(), SessionError> {
-    match manager.read_async(|| async {
-        manager.proxy().await?.call::<_, _, OwnedObjectPath>("GetUnit", &(unit,)).await
-    }, Duration::from_secs(5)).await {
-        Ok(_) => {},
-        Err(error) if missing_unit(&error) => return Ok(()),
-        Err(error) => return Err(error.into()),
-    }
-    let proxy = manager.proxy().await?;
-    let mut signals = proxy.receive_signal_with_args("JobRemoved", &[(2, unit)]).await?;
-    let reply = proxy.call::<_, _, OwnedObjectPath>("StopUnit", &(unit, "replace")).await;
-    if reply.as_ref().is_err_and(missing_unit) { return Ok(()); }
-    complete(manager, unit, &mut signals, reply, Operation::Stop, timeout).await
+    let deadline = Instant::now().checked_add(timeout)
+        .ok_or_else(|| SessionError::State("systemd job deadline overflow".into()))?;
+    within_deadline(unit, deadline, async {
+        match manager.read_async(|| async {
+            manager.proxy().await?.call::<_, _, OwnedObjectPath>("GetUnit", &(unit,)).await
+        }, Duration::from_secs(5)).await {
+            Ok(_) => {},
+            Err(error) if missing_unit(&error) => return Ok(()),
+            Err(error) => return Err(error.into()),
+        }
+        let proxy = manager.proxy().await?;
+        let mut signals = proxy.receive_signal_with_args("JobRemoved", &[(2, unit)]).await?;
+        let reply = proxy.call::<_, _, OwnedObjectPath>("StopUnit", &(unit, "replace")).await;
+        if reply.as_ref().is_err_and(missing_unit) { return Ok(()); }
+        complete(manager, unit, &mut signals, reply, Operation::Stop, deadline).await
+    }).await
+}
+
+async fn within_deadline<T>(
+    unit: &str, deadline: Instant, operation: impl Future<Output = Result<T, SessionError>>,
+) -> Result<T, SessionError> {
+    if Instant::now() >= deadline { return Err(job_timeout(unit)); }
+    future::or(operation, async {
+        async_io::Timer::at(deadline).await;
+        Err(job_timeout(unit))
+    }).await
+}
+
+fn job_timeout(unit: &str) -> SessionError {
+    zbus::Error::from(zbus::fdo::Error::TimedOut(format!("systemd job deadline expired for {unit}"))).into()
 }
 
 fn generation(properties: &UnitProperties) -> Result<Option<String>, SessionError> {
@@ -55,39 +77,35 @@ fn generation(properties: &UnitProperties) -> Result<Option<String>, SessionErro
 
 async fn complete(
     manager: &UserManager, unit: &str, signals: &mut zbus::proxy::SignalStream<'_>,
-    reply: zbus::Result<OwnedObjectPath>, operation: Operation, timeout: Duration,
+    reply: zbus::Result<OwnedObjectPath>, operation: Operation, deadline: Instant,
 ) -> Result<(), SessionError> {
     let job = match reply {
-        Ok(job) => {
-            if wait_job(signals, &job, timeout).await? { return Ok(()); }
-            Some(job)
-        }
+        Ok(job) => Some(job),
         Err(error) if retryable_error(&error) => None,
         Err(error) => return Err(error.into()),
     };
-    tracing::warn!(unit, "systemd job completion was not received; checking unit state without repeating the request");
-    // A timeout already spent the job budget. Permit a single bounded state
-    // query afterwards; an ambiguous method reply can still await its job.
-    let budget = if job.is_some() { Duration::from_secs(5) } else { timeout };
-    let deadline = Instant::now() + budget;
-    future::or(async {
-        loop {
-            if let Some(job) = &job {
-                if drain_job(signals, job).await? { return Ok(()); }
-            }
-            let complete = manager.read_async(|| inspect(manager, unit, &operation), budget).await?;
-            if let Some(job) = &job {
-                if drain_job(signals, job).await? { return Ok(()); }
-            }
-            if complete { return Ok(()); }
-            if job.is_some() { break; }
-            async_io::Timer::after(Duration::from_millis(50)).await;
+    // Reconcile missing replies/signals inside the original operation budget.
+    // Never start a second wait after the deadline or replay the mutation.
+    loop {
+        if Instant::now() >= deadline { return Err(job_timeout(unit)); }
+        if let Some(job) = &job {
+            if drain_job(signals, job).await? { return Ok(()); }
         }
-        Err(zbus::Error::from(zbus::fdo::Error::TimedOut(format!("{unit} job completion could not be confirmed"))).into())
-    }, async {
-        async_io::Timer::at(deadline).await;
-        Err(zbus::Error::from(zbus::fdo::Error::TimedOut(format!("timed out confirming systemd job for {unit}"))).into())
-    }).await
+        let remaining = deadline.saturating_duration_since(Instant::now()).min(Duration::from_secs(5));
+        let complete = manager.read_async(|| inspect(manager, unit, &operation), remaining).await;
+        if let Some(job) = &job {
+            if drain_job(signals, job).await? { return Ok(()); }
+        }
+        match complete {
+            Ok(true) => return Ok(()),
+            Ok(false) => {},
+            // A short-lived start can be collected before GetUnit sees it.
+            // Its exact JobRemoved signal can still confirm completion.
+            Err(error) if job.is_some() && missing_unit(&error) => {},
+            Err(error) => return Err(error.into()),
+        }
+        async_io::Timer::at((Instant::now() + Duration::from_millis(50)).min(deadline)).await;
+    }
 }
 
 async fn inspect(manager: &UserManager, unit: &str, operation: &Operation) -> zbus::Result<bool> {
@@ -157,21 +175,6 @@ async fn drain_job(signals: &mut zbus::proxy::SignalStream<'_>, job: &OwnedObjec
         if job_message(message, job)? { return Ok(true); }
     }
     Ok(false)
-}
-
-// False means the result was not observed, not that the job failed.
-pub(super) async fn wait_job(
-    signals: &mut zbus::proxy::SignalStream<'_>, job: &OwnedObjectPath, timeout: Duration,
-) -> Result<bool, SessionError> {
-    future::or(async {
-        while let Some(message) = signals.next().await {
-            if job_message(message, job)? { return Ok(true); }
-        }
-        Ok(false)
-    }, async {
-        async_io::Timer::after(timeout).await;
-        Ok(false)
-    }).await
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 
 | Finding | Work | Status |
 | --- | --- | --- |
-| 1 | One shutdown deadline across all teardown phases | pending |
+| 1 | One shutdown deadline across all teardown phases | in progress; unit job budgets implemented |
 | 2 | Bound application lease acquisition | implemented; runtime checks pending |
 | 3 | Release application leases before slow shutdown work | fixed |
 | 4 | Durable recovery record publication | fixed |
@@ -224,3 +224,11 @@ Record unexecuted runtime checks explicitly for later verification.
   cover private peer replies, denied/unknown capabilities, hung connections or
   methods, and independent footer visibility. Syntax/diff checks passed;
   runtime tests and a real logind/polkit check are pending.
+- 1 (unit job layer): Each start/stop operation uses one deadline covering
+  preflight reads, signal subscription, the mutation reply, and verification of
+  the exact job or terminal unit state. Lost replies/signals are reconciled
+  inside that budget, with no additional five-second wait and no replay.
+  Private-peer tests cover slow preflight/replies/state reads, missing signals,
+  zero budgets, and preserving accepted mutations on timeout. Syntax/diff checks
+  passed; runtime tests are pending. Sharing a shutdown deadline across all
+  calls, worker draining, leases, and child waits is still outstanding.

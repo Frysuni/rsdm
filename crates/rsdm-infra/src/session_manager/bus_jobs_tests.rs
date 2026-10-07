@@ -19,6 +19,9 @@ struct State {
     active: bool,
     status: i32,
     generation: &'static str,
+    preflight_delay: Duration,
+    reply_delay: Duration,
+    inspection_delay: Duration,
 }
 
 struct Manager(Arc<State>);
@@ -30,24 +33,32 @@ impl Manager {
 
     fn subscribe(&self) {}
 
-    fn get_unit(&self, _name: &str) -> Result<OwnedObjectPath, ManagerError> {
+    async fn get_unit(&self, _name: &str) -> Result<OwnedObjectPath, ManagerError> {
+        let delay = if self.0.calls.load(Ordering::SeqCst) == 0 {
+            self.0.preflight_delay
+        } else {
+            self.0.inspection_delay
+        };
+        if !delay.is_zero() { async_io::Timer::after(delay).await; }
         if !self.0.exists.load(Ordering::SeqCst) {
             return Err(ManagerError::NoSuchUnit("not loaded".into()));
         }
         Ok(OwnedObjectPath::try_from("/unit").unwrap())
     }
 
-    fn start_transient_unit(
+    async fn start_transient_unit(
         &self, _unit: &str, _mode: &str,
         _properties: Vec<(String, OwnedValue)>, _auxiliary: Vec<(String, Vec<(String, OwnedValue)>)>,
     ) -> zbus::fdo::Result<OwnedObjectPath> {
         self.0.calls.fetch_add(1, Ordering::SeqCst);
         self.0.exists.store(true, Ordering::SeqCst);
+        if !self.0.reply_delay.is_zero() { async_io::Timer::after(self.0.reply_delay).await; }
         self.reply()
     }
 
-    fn stop_unit(&self, _unit: &str, _mode: &str) -> zbus::fdo::Result<OwnedObjectPath> {
+    async fn stop_unit(&self, _unit: &str, _mode: &str) -> zbus::fdo::Result<OwnedObjectPath> {
         self.0.calls.fetch_add(1, Ordering::SeqCst);
+        if !self.0.reply_delay.is_zero() { async_io::Timer::after(self.0.reply_delay).await; }
         self.reply()
     }
 
@@ -116,7 +127,9 @@ fn fixture(state: State) -> (UserManager, Connection, Arc<State>) {
 }
 
 fn state(lost_reply: bool, active: bool, status: i32) -> State {
-    State { exists: AtomicBool::new(false), calls: AtomicUsize::new(0), lost_reply, active, status, generation: "ours" }
+    State { exists: AtomicBool::new(false), calls: AtomicUsize::new(0), lost_reply, active, status,
+        generation: "ours", preflight_delay: Duration::ZERO, reply_delay: Duration::ZERO,
+        inspection_delay: Duration::ZERO }
 }
 
 #[test]
@@ -165,4 +178,65 @@ fn a_lost_stop_reply_requires_an_empty_stopped_unit() {
         }
         assert_eq!(state.calls.load(Ordering::SeqCst), 1);
     }
+}
+
+#[test]
+fn the_operation_budget_includes_preflight_reads() {
+    let mut initial = state(false, false, 0);
+    initial.exists.store(true, Ordering::SeqCst);
+    initial.preflight_delay = Duration::from_secs(2);
+    let (manager, _server, state) = fixture(initial);
+    let before = Instant::now();
+    let result = async_io::block_on(stop(&manager, "example.service", Duration::from_millis(50)));
+    assert!(matches!(&result, Err(SessionError::Bus(error)) if retryable_error(error)));
+    assert!(before.elapsed() < Duration::from_secs(1));
+    assert_eq!(state.calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn an_accepted_mutation_cannot_wait_past_its_budget_for_the_reply() {
+    let mut initial = state(false, true, 0);
+    initial.reply_delay = Duration::from_secs(2);
+    let (manager, _server, state) = fixture(initial);
+    let before = Instant::now();
+    let result = async_io::block_on(start(&manager, "example.service", &Vec::new(), Duration::from_millis(50)));
+    assert!(matches!(&result, Err(SessionError::Bus(error)) if retryable_error(error)));
+    assert!(before.elapsed() < Duration::from_secs(1));
+    assert_eq!(state.calls.load(Ordering::SeqCst), 1);
+    assert!(state.exists.load(Ordering::SeqCst));
+}
+
+#[test]
+fn a_missing_job_signal_does_not_get_an_additional_inspection_budget() {
+    let mut initial = state(false, false, 0);
+    initial.exists.store(true, Ordering::SeqCst);
+    initial.inspection_delay = Duration::from_secs(2);
+    let (manager, _server, state) = fixture(initial);
+    let before = Instant::now();
+    let result = async_io::block_on(stop(&manager, "example.service", Duration::from_millis(50)));
+    assert!(matches!(&result, Err(SessionError::Bus(error)) if retryable_error(error)));
+    assert!(before.elapsed() < Duration::from_secs(1));
+    assert_eq!(state.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn an_expired_budget_does_not_send_a_mutation() {
+    let initial = state(false, false, 0);
+    let (manager, _server, state) = fixture(initial);
+    assert!(async_io::block_on(start(&manager, "example.service", &Vec::new(), Duration::ZERO)).is_err());
+    assert!(async_io::block_on(stop(&manager, "example.service", Duration::ZERO)).is_err());
+    assert_eq!(state.calls.load(Ordering::SeqCst), 0);
+    assert!(!state.exists.load(Ordering::SeqCst));
+}
+
+#[test]
+fn a_missing_job_signal_and_unfinished_unit_cannot_extend_the_stop_budget() {
+    let initial = state(false, true, 0);
+    initial.exists.store(true, Ordering::SeqCst);
+    let (manager, _server, state) = fixture(initial);
+    let before = Instant::now();
+    let result = async_io::block_on(stop(&manager, "example.service", Duration::from_millis(50)));
+    assert!(matches!(&result, Err(SessionError::Bus(error)) if retryable_error(error)));
+    assert!(before.elapsed() < Duration::from_secs(1));
+    assert_eq!(state.calls.load(Ordering::SeqCst), 1);
 }

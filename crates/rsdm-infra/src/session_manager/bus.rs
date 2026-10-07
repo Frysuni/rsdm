@@ -13,9 +13,6 @@ mod jobs;
 #[path = "bus_connection.rs"]
 mod transport;
 
-#[cfg(test)]
-use jobs::wait_job;
-
 const DESTINATION: &str = "org.freedesktop.systemd1";
 const MANAGER_PATH: &str = "/org/freedesktop/systemd1";
 const MANAGER_INTERFACE: &str = "org.freedesktop.systemd1.Manager";
