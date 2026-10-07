@@ -97,6 +97,12 @@ pub(super) fn lock_too_small(
     scene: &LockScene<'_>,
     p: Palette,
 ) {
+    if scene.authentication_active {
+        super::authentication::draw_prompt(
+            surface, area, &scene.password_preview, scene.message, scene.message_is_error, p,
+        );
+        return;
+    }
     let cx = area.center_x();
     let cy = area.center_y();
     surface.text_centered(

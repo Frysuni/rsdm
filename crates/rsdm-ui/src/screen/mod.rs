@@ -1,5 +1,6 @@
 //! Shared screen composition over an abstract [`Surface`].
 
+mod authentication;
 mod layout;
 mod lock;
 mod login;
@@ -136,7 +137,13 @@ pub fn render_login(
         );
     }
     if area.w < MIN_W || area.h < MIN_H {
-        too_small(surface, area, p);
+        if scene.authentication_active {
+            authentication::draw_prompt(
+                surface, area, &scene.password_preview, scene.message, scene.message_is_error, p,
+            );
+        } else {
+            too_small(surface, area, p);
+        }
         return;
     }
 
@@ -149,7 +156,10 @@ pub fn render_login(
 
     let fields = login_fields(scene);
     let content_w = content_width(&scene.title, &fields, scene.message, area.w);
-    let body = login_body(scene, fields, content_w, design);
+    let mut body = login_body(scene, fields, content_w, design);
+    if scene.authentication_active {
+        authentication::fit_body(&mut body, design, area);
+    }
 
     draw_framed_box(surface, design, area, content_w, &body, p, true);
     if scene.picker_open {
@@ -238,7 +248,10 @@ pub fn render_lock_content(
         ),
     ];
     let content_w = content_width(&scene.title, &fields, scene.message, area.w);
-    let body = lock_body(scene, fields, content_w, design);
+    let mut body = lock_body(scene, fields, content_w, design);
+    if scene.authentication_active {
+        authentication::fit_body(&mut body, design, area);
+    }
 
     draw_framed_box(surface, design, area, content_w, &body, p, opaque_regions);
     if menu.is_open() {
@@ -249,3 +262,6 @@ pub fn render_lock_content(
 #[cfg(test)]
 #[path = "screen_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod authentication_tests;
