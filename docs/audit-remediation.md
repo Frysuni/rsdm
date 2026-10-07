@@ -48,7 +48,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 30 | Generic autovt ownership | pending |
 | 31 | Synchronize generic service and configured VT | pending |
 | 32 | Avoid disabled-DM service restart loops | fixed |
-| 33 | Reuse render buffers and avoid unnecessary frames | pending |
+| 33 | Reuse render buffers and avoid unnecessary frames | fixed |
 | 34 | Cache scaled wallpaper | fixed |
 | 35 | Recover output-power changes after locker crashes | pending |
 | 36 | Harden remembered-state reads | fixed |
@@ -486,3 +486,27 @@ verification separate from private-peer and unit-test evidence.
   The existing Wayland module is 303 lines: one cache field belongs beside its
   per-output surface/buffer state. Existing larger rendering and startup
   orchestration is retained. Persistent frame-buffer reuse remains separate (33).
+
+- 33: Each surface retains a reusable software canvas and at most two SHM
+  buffers. Compositor-owned buffers remain immutable until wl_buffer.release;
+  old-size active buffers count against the same limit during resize. When all
+  buffers are busy, draw skips painting/copying and retains the dirty request
+  for a later poll. Stable black secondary geometry is not submitted again.
+  Canvas reset clears the previous frame, and checked resize preserves existing
+  pixels after allocation failure. SHM selection/commit lives separately from
+  pure software composition; the enlarged draw method was reduced below 50 lines.
+  Five new regressions verify canvas reuse/reset/failed resize, actual Release
+  events on a private Wayland socket, unchanged buffer IDs/data across 100 reuse
+  calls, no pool growth across 999 busy geometry changes, and replacement of
+  released obsolete geometry. No host display or service was accessed.
+  `nix develop --command cargo test -p rsdm-lock --locked` passed all 40 tests.
+  `nix develop --command cargo test --workspace --locked --quiet` passed all
+  425 tests, plus the existing child-only fixture ignored in its parent run.
+  Workspace/all-targets checking passed on Rust 1.88.0; `git diff --check` passed.
+  New modules/functions remain below 300/50 lines. The existing Wayland module
+  is 307 lines: its per-output resource ownership and dirty-retry orchestration
+  belong together. Its pre-existing larger run initializer and event loop remain.
+  One software-to-SHM copy per submitted frame is retained; buffer allocation and
+  repeated static-black submissions are removed. No performance benchmark or
+  real multi-output compositor run is claimed. Static-background clock refresh
+  was observed as a separate existing issue and still needs its own fix.

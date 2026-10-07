@@ -1,8 +1,8 @@
 use rsdm_core::domain::SecondaryOutput;
 use rsdm_ui::{LockScene, Surface, banner};
-use smithay_client_toolkit::reexports::client::{QueueHandle, protocol::wl_shm};
+use smithay_client_toolkit::reexports::client::QueueHandle;
 
-use super::{ANIMATION_FRAME, App, LockSurface};
+use super::{ANIMATION_FRAME, App, LockSurface, buffers::BufferGeometry};
 use crate::render::{Canvas, FbSurface, resolve_zoom};
 
 impl App {
@@ -38,7 +38,9 @@ impl App {
                 _fractional_scale: fractional_scale,
                 width: 0,
                 height: 0,
-                buffer: None,
+                buffers: Vec::new(),
+                canvas: Canvas::default(),
+                black_geometry: None,
                 wallpaper_cache: None,
             });
         }
@@ -75,51 +77,52 @@ impl App {
             return;
         }
 
+        let geometry = BufferGeometry {
+            width, height, logical_width, logical_height, scale: buffer_scale,
+        };
+        let content = if primary {
+            OutputContent::Primary
+        } else if matches!(self.ctx.secondary_output, SecondaryOutput::Black | SecondaryOutput::Off) {
+            OutputContent::Black
+        } else {
+            OutputContent::Background
+        };
+        if content == OutputContent::Black && surface.black_geometry == Some(geometry) { return; }
+        let Some(buffer) = self.prepare_buffer(index, width, height) else { return; };
+        let mut canvas = std::mem::take(&mut self.surfaces[index].canvas);
+        match self.paint_frame(index, &mut canvas, geometry, content) {
+            Ok(()) => {
+                if self.commit_buffer(index, buffer, &canvas, geometry) {
+                    self.surfaces[index].black_geometry = (content == OutputContent::Black).then_some(geometry);
+                }
+            }
+            Err(error) => tracing::error!(%error, output = %output_name, "failed to allocate lock framebuffer"),
+        }
+        self.surfaces[index].canvas = canvas;
+    }
+
+    fn paint_frame(
+        &mut self, index: usize, canvas: &mut Canvas, geometry: BufferGeometry, content: OutputContent,
+    ) -> anyhow::Result<()> {
         let palette = self.ctx.design.palette();
-        let black_secondary = !primary
-            && matches!(
-                self.ctx.secondary_output,
-                SecondaryOutput::Black | SecondaryOutput::Off
-            );
-        let initial = if black_secondary {
+        let initial = if content == OutputContent::Black {
             0xff00_0000
         } else {
             palette.bg_base.argb(0xff)
         };
-        let mut canvas = match Canvas::try_new(width, height, initial) {
-            Ok(canvas) => canvas,
-            Err(error) => {
-                tracing::error!(%error, output = %output_name, "failed to allocate lock framebuffer");
-                return;
-            }
-        };
+        canvas.resize(geometry.width, geometry.height, initial)?;
+        if content == OutputContent::Black { return Ok(()); }
 
         let zoom = resolve_zoom(self.menu.lock_settings().and_then(|settings| settings.size));
         let frame = self.animation_frame();
-        let wallpaper_present = !black_secondary
-            && crate::compose_lock_base(
-                &mut canvas,
-                &self.ctx.design,
-                self.ctx.wallpaper.as_ref(),
-                &self.ctx.font,
-                zoom,
-                frame,
-                &mut self.surfaces[index].wallpaper_cache,
-            );
-        if primary {
-            self.draw_primary(&mut canvas, zoom, palette, wallpaper_present);
-        }
-        self.commit_buffer(
-            index,
-            canvas,
-            BufferGeometry {
-                width,
-                height,
-                logical_width,
-                logical_height,
-                scale: buffer_scale,
-            },
+        let wallpaper_present = crate::compose_lock_base(
+            canvas, &self.ctx.design, self.ctx.wallpaper.as_ref(), &self.ctx.font,
+            zoom, frame, &mut self.surfaces[index].wallpaper_cache,
         );
+        if content == OutputContent::Primary {
+            self.draw_primary(canvas, zoom, palette, wallpaper_present);
+        }
+        Ok(())
     }
 
     fn draw_primary(
@@ -159,37 +162,6 @@ impl App {
         );
     }
 
-    fn commit_buffer(&mut self, index: usize, canvas: Canvas, geometry: BufferGeometry) {
-        let buffer = self.pool.create_buffer(
-            geometry.width as i32,
-            geometry.height as i32,
-            geometry.width as i32 * 4,
-            wl_shm::Format::Argb8888,
-        );
-        let Ok((buffer, slot)) = buffer else {
-            tracing::error!("failed to allocate shm buffer for the locker");
-            return;
-        };
-        slot[..canvas.as_bytes().len()].copy_from_slice(canvas.as_bytes());
-
-        let surface = &mut self.surfaces[index];
-        let wl_surface = surface.surface.wl_surface().clone();
-        wl_surface.set_buffer_scale(geometry.scale);
-        if let Some(viewport) = &surface.viewport {
-            viewport.set_destination(
-                geometry.logical_width as i32,
-                geometry.logical_height as i32,
-            );
-        }
-        if let Err(error) = buffer.attach_to(&wl_surface) {
-            tracing::debug!(%error, "lock shm buffer is active; skipping redraw");
-            return;
-        }
-        wl_surface.damage_buffer(0, 0, geometry.width as i32, geometry.height as i32);
-        wl_surface.commit();
-        surface.buffer = Some(buffer);
-    }
-
     pub(super) fn animation_frame(&self) -> u64 {
         let tick_ms = ANIMATION_FRAME.as_millis().max(1);
         (self.animation_started.elapsed().as_millis() / tick_ms) as u64
@@ -205,12 +177,11 @@ impl App {
     }
 }
 
-struct BufferGeometry {
-    width: u32,
-    height: u32,
-    logical_width: u32,
-    logical_height: u32,
-    scale: i32,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OutputContent {
+    Primary,
+    Background,
+    Black,
 }
 
 fn buffer_dimensions(

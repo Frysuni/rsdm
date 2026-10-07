@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 pub const MAX_CANVAS_BYTES: usize = 256 * 1024 * 1024;
 
 /// An ARGB pixel buffer.
+#[derive(Default)]
 pub struct Canvas {
     width: u32,
     height: u32,
@@ -16,6 +17,16 @@ pub struct Canvas {
 }
 
 impl Canvas {
+    /// Reset an existing allocation, replacing it only when geometry changes.
+    pub fn resize(&mut self, width: u32, height: u32, fill: u32) -> Result<()> {
+        if (self.width, self.height) != (width, height) {
+            *self = Self::try_new(width, height, fill)?;
+        } else {
+            self.pixels.fill(fill);
+        }
+        Ok(())
+    }
+
     pub fn try_new(width: u32, height: u32, fill: u32) -> Result<Self> {
         let len = (width as usize)
             .checked_mul(height as usize)
@@ -169,5 +180,31 @@ mod tests {
     fn unreasonable_canvas_is_rejected_before_allocation() {
         assert!(Canvas::try_new(u32::MAX, u32::MAX, 0).is_err());
         assert!(Canvas::try_new(16_384, 16_384, 0).is_err());
+    }
+
+    #[test]
+    fn repeated_geometry_reuses_allocation_and_clears_the_previous_frame() {
+        let mut canvas = Canvas::default();
+        canvas.resize(8, 8, 0).unwrap();
+        let address = canvas.pixels().as_ptr();
+        canvas.put(3, 4, 0xffff_ffff);
+        for fill in [0xff00_0000, 0xff12_3456, 0] {
+            canvas.resize(8, 8, fill).unwrap();
+            assert_eq!(canvas.pixels().as_ptr(), address);
+            assert!(canvas.pixels().iter().all(|pixel| *pixel == fill));
+        }
+    }
+
+    #[test]
+    fn geometry_change_replaces_pixels_and_failed_resize_preserves_the_frame() {
+        let mut canvas = Canvas::try_new(8, 8, 0).unwrap();
+        canvas.resize(4, 3, 42).unwrap();
+        assert_eq!((canvas.width(), canvas.height()), (4, 3));
+        assert_eq!(canvas.pixels(), &[42; 12]);
+        let address = canvas.pixels().as_ptr();
+        assert!(canvas.resize(u32::MAX, u32::MAX, 0).is_err());
+        assert_eq!((canvas.width(), canvas.height()), (4, 3));
+        assert_eq!(canvas.pixels().as_ptr(), address);
+        assert_eq!(canvas.pixels(), &[42; 12]);
     }
 }

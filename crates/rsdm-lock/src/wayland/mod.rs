@@ -36,6 +36,7 @@ use wayland_protocols::wp::{
 use crate::{model::LockModel, render::Wallpaper, util};
 
 mod authentication;
+mod buffers;
 mod handlers;
 mod input;
 mod output;
@@ -71,7 +72,9 @@ struct LockSurface {
     preferred_scale_120: Option<u32>,
     width: u32,
     height: u32,
-    buffer: Option<Buffer>,
+    buffers: Vec<Buffer>,
+    canvas: crate::render::Canvas,
+    black_geometry: Option<buffers::BufferGeometry>,
     wallpaper_cache: Option<crate::render::Canvas>,
 }
 
@@ -207,9 +210,10 @@ fn run_event_loop(
             app.unlock();
         }
         if app.needs_redraw {
+            // A busy buffer may request a retry while drawing this batch.
+            app.needs_redraw = false;
             app.draw_all();
             app.last_animation_frame = app.animation_frame();
-            app.needs_redraw = false;
         }
         if app.exit {
             break;

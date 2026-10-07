@@ -7,6 +7,7 @@ use std::{
 use smithay_client_toolkit::{output::OutputData, reexports::client::Proxy};
 
 use super::*;
+use crate::render::Canvas;
 
 #[test]
 fn output_removal_destroys_extensions_before_the_lock_surface() {
@@ -74,7 +75,9 @@ fn create_surface(
         preferred_scale_120: None,
         width: 0,
         height: 0,
-        buffer: None,
+        buffers: Vec::new(),
+        canvas: Canvas::default(),
+        black_geometry: None,
         wallpaper_cache: None,
     };
     connection.flush().unwrap();

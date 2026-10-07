@@ -108,7 +108,9 @@ Locker (`lock`) runtime path:
 2. Bind `ext-session-lock-v1`, `fractional-scale-v1`, and `viewporter`; select
    the configured primary output (or the largest current mode), and create one
    lock surface per active output
-3. Render a physical-pixel shm buffer per output. The primary receives the full
+3. Reuse one physical-pixel software canvas and at most two shm buffers per
+   output, writing only released buffers and retaining redraw requests while
+   both are busy. The primary receives the full
    interactive scene; secondary outputs receive background-only or black. niri
    `off` outputs use one bounded IPC worker, which retains connector restoration
    obligations even when the corresponding Wayland globals disappear

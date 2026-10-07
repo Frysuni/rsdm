@@ -80,6 +80,12 @@ size. Resizing or changing output scale replaces that output's cache; animation,
 text size, and dim changes reuse the prepared image. If cache allocation fails,
 Lock still renders by resampling the original image.
 
+Each output reuses its software canvas and at most two SHM buffers. Buffers held
+by the compositor remain read-only until `wl_buffer.release`, including during
+resize; when both are busy, the latest redraw stays pending. Unchanged black
+secondary frames are skipped. Rendering still copies each submitted software
+frame into SHM; it does not introduce borrowed pixel storage or GPU rendering.
+
 Sleep and Hibernate shortcuts are offered only when logind's `CanSuspend` or
 `CanHibernate` reports `yes` or `challenge` for the locker user. The snapshot is
 queried in a background worker with a five-second deadline covering connection
