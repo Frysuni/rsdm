@@ -22,7 +22,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 4 | Durable recovery record publication | fixed |
 | 5 | Symmetric record read/write size limits | fixed |
 | 6 | Reap lockers that never confirm readiness | pending |
-| 7 | Bound idle hooks | pending |
+| 7 | Bound idle hooks | fixed |
 | 8 | Retain restoration state for removed niri outputs | implemented; compositor checks pending |
 | 9 | Move bounded niri IPC off the Wayland loop | pending |
 | 10 | Cancellable, bounded PAM helper processes | pending |
@@ -425,3 +425,21 @@ verification separate from private-peer and unit-test evidence.
   Rust files stay below 300 lines, and new functions below 50. The existing
   larger Greeter loop changes only its checked reclaim call. Global console
   log-level crash recovery (28) and generic VT configuration (30/31) remain open.
+- 7: Idle hook phases share a 30-second budget, including escalation and
+  nonblocking child reaping. Hooks run in a distinct process group; timeout
+  signals it before reaping its leader, avoiding numeric group-ID reuse, and
+  also kills the owned leader if it moved groups. Timeout skips remaining
+  hooks in that phase, while ordinary failure still permits later hooks.
+  The existing bounded recovery-child waiter is reused without changing its
+  behavior. No dependency or configuration field was added; root config and
+  idle/configuration guides explain the foreground-hook budget.
+  `nix develop --command cargo test -p rsdm-idle --locked` passed all five
+  tests, including timeout followed by a later cycle and ordinary hook failure.
+  `nix develop --command cargo test -p rsdm-infra unix:: --locked --quiet`
+  passed 48 tests plus the existing ignored child fixture. New command tests
+  pin and observe the fixture's stopped leader/shell descendant after timeout,
+  preserve nonzero status, and reject expired launches without spawning.
+  `nix develop --command cargo test --workspace --locked --quiet` passed all
+  408 tests; workspace/all-targets checking passed on Rust 1.88.0. No changed
+  source file exceeds 300 lines or new function exceeds 50. Locker readiness
+  recovery (6) remains a separate pending lifecycle issue.

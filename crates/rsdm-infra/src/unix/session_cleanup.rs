@@ -3,11 +3,11 @@
 use std::{
     os::unix::process::CommandExt,
     process::{Child, Command, ExitStatus},
-    thread,
     time::{Duration, Instant},
 };
 
 use rsdm_core::ports::SessionLaunchError;
+use super::child_wait::wait_for_exit;
 
 pub(super) fn cleanup(environment: &[(String, String)], uid: u32, gid: u32, generation: &str) -> Result<(), SessionLaunchError> {
     let executable = std::env::current_exe().map_err(|error| SessionLaunchError::Setup(error.to_string()))?;
@@ -38,15 +38,6 @@ fn wait_for_recovery(child: &mut Child, timeout: Duration) -> std::io::Result<Ex
         "session recovery timed out; helper exit remains unconfirmed after SIGKILL"
     };
     Err(std::io::Error::new(std::io::ErrorKind::TimedOut, message))
-}
-
-fn wait_for_exit(child: &mut Child, deadline: Instant) -> std::io::Result<Option<ExitStatus>> {
-    loop {
-        if let Some(status) = child.try_wait()? { return Ok(Some(status)); }
-        let now = Instant::now();
-        if now >= deadline { return Ok(None); }
-        thread::sleep(Duration::from_millis(50).min(deadline - now));
-    }
 }
 
 #[cfg(test)]

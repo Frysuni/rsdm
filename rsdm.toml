@@ -130,5 +130,5 @@ ignore_inhibitors = false # optional | bool | default: false | values: true, fal
 # Empty invokes this rsdm binary's built-in lock command without shell parsing.
 lock_command = [] # optional | array<string> | default: [] | values: executable followed by arguments
 # Hooks are shell commands and therefore must be treated as trusted configuration.
-on_lock = [] # optional | array<string> | default: [] | values: shell command strings
-on_unlock = [] # optional | array<string> | default: [] | values: shell command strings
+on_lock = [] # optional | array<string> | default: [] | values: foreground shell commands; shared 30-second phase budget
+on_unlock = [] # optional | array<string> | default: [] | values: foreground shell commands; shared 30-second phase budget

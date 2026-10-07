@@ -36,6 +36,10 @@ on_unlock = ["notify-send 'rsdm unlocked'"]
   configured readiness point and whose locker exited successfully. It also runs
   after a privileged emergency unlock, but never after a crash, signal, nonzero
   exit, or wait failure. Do not put untrusted config text in these fields.
+  Each phase has one 30-second budget for all its hooks, including forced
+  termination and exit checks. A timed-out hook and its owned group receive SIGKILL,
+  remaining hooks in that phase are skipped, and a later cycle can run normally.
+  Keep hooks in the foreground; explicitly detached processes leave that group.
 
 The daemon never unlocks on pointer movement or resume. Activity only resets
 the next idle timeout; authentication still belongs to `rsdm lock`.
