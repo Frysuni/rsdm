@@ -5,7 +5,7 @@ use std::{thread, time::{Duration, Instant}};
 use rsdm_core::domain::SessionPhase;
 
 use super::{
-    SessionError, activation, coordinator::{Coordinator, Work}, provider::ProviderKind, units,
+    SessionError, activation, coordinator::{Coordinator, Work}, processes::monotonic_usec, provider::ProviderKind, units,
 };
 
 impl Coordinator {
@@ -87,7 +87,7 @@ impl Coordinator {
             }
         }
         if self.exit_code != 0 {
-            self.begin_stop("compositor-exited", true)?;
+            self.begin_stop("compositor-exited", Some(monotonic_usec()?.saturating_add(5_000_000)))?;
         }
         if !self.finalize_replies.is_empty() && self.lifecycle.accepts_finalize() {
             self.activate();

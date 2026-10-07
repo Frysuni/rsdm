@@ -83,6 +83,12 @@ pub(crate) struct ShutdownMonitor {
 }
 
 impl ShutdownMonitor {
+    #[cfg(test)]
+    pub(crate) fn idle_for_test() -> Self {
+        let (stop, _) = async_channel::bounded(1);
+        Self { _inhibitor: None, stop, listener: None }
+    }
+
     pub(crate) fn start(notices: Sender<ShutdownNotice>) -> Result<Self, SessionError> {
         async_io::block_on(async {
             Self::listen(connection(Duration::from_secs(5)).await?, notices).await

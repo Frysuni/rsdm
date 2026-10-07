@@ -23,8 +23,8 @@ impl Coordinator {
         }
         while let Ok(notice) = self.notices.try_recv() {
             if notice.preparing {
-                self.begin_stop("external-shutdown", true)?;
                 let proposed = monotonic_usec()?.saturating_add(notice.budget_usec);
+                self.begin_stop("external-shutdown", Some(proposed))?;
                 let control = self.shutdown.as_ref().expect("shutdown control");
                 let old = control.hard_deadline.load(Ordering::SeqCst);
                 let deadline = if old == 0 { proposed } else { old.min(proposed) };

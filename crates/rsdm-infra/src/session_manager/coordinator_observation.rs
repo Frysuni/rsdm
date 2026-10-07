@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use rsdm_core::domain::SessionPhase;
 
-use super::{SessionError, apps, coordinator::Coordinator, provider::ProviderKind, units};
+use super::{SessionError, apps, coordinator::Coordinator, processes::monotonic_usec, provider::ProviderKind, units};
 
 impl Coordinator {
     pub fn observe(&mut self) -> Result<(), SessionError> {
@@ -15,7 +15,7 @@ impl Coordinator {
             self.last_reap = Instant::now();
         }
         if super::signals::requested() && self.lifecycle.accepts_launch() {
-            self.begin_stop("logout", false)?;
+            self.begin_stop("logout", None)?;
         }
 
         self.observe_process()?;
@@ -23,7 +23,7 @@ impl Coordinator {
             && (!self.manager.active(&self.record.anchor_unit)?
                 || !self.manager.active(units::SESSION_TARGET)?)
         {
-            self.begin_stop("external-stop", true)?;
+            self.begin_stop("external-stop", Some(monotonic_usec()?.saturating_add(5_000_000)))?;
         }
         self.observe_readiness()?;
 
@@ -49,7 +49,7 @@ impl Coordinator {
             if !native_running && !native_starting {
                 self.exit_code = code;
                 if self.lifecycle.phase != SessionPhase::StoppingSession {
-                    self.begin_stop("compositor-exited", true)?;
+                    self.begin_stop("compositor-exited", Some(monotonic_usec()?.saturating_add(5_000_000)))?;
                 }
             }
         }

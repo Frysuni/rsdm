@@ -87,7 +87,7 @@ impl Coordinator {
             let _ = reply.try_send(Err("another shutdown action is already in progress".into()));
         } else {
             self.stop_replies.push(reply);
-            self.begin_stop(&action, false)?;
+            self.begin_stop(&action, None)?;
         }
         Ok(())
     }

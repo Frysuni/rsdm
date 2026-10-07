@@ -6,22 +6,23 @@ use rsdm_core::domain::{SessionPhase, ShutdownMethod};
 
 use super::{
     SessionError, app_stop::{self, ShutdownControl}, apps, control::StopOutcome,
-    coordinator::{Coordinator, Work}, env, processes::monotonic_usec,
+    coordinator::{Coordinator, Work}, env,
     provider::Provider, runtime::{Runtime, SessionRecord}, session_process::SessionProcess,
     bus::UserManager, units,
 };
 
 impl Coordinator {
-    pub fn begin_stop(&mut self, action: &str, noncancelable: bool) -> Result<(), SessionError> {
+    pub fn begin_stop(&mut self, action: &str, hard_deadline: Option<u64>) -> Result<(), SessionError> {
         if self.lifecycle.phase == SessionPhase::StoppingSession { return Ok(()); }
+        // Only logind may revise its shutdown budget or revoke its request.
+        if self.action == "external-shutdown" && action != "external-shutdown" { return Ok(()); }
         if self.shutdown.is_none() {
             self.forced_units.clear();
             self.action = action.to_string();
             self.shutdown = Some(Arc::new(ShutdownControl::default()));
         }
-        if noncancelable {
+        if let Some(proposed) = hard_deadline {
             let control = self.shutdown.as_ref().expect("shutdown control");
-            let proposed = monotonic_usec()?.saturating_add(5_000_000);
             let old = control.hard_deadline.load(Ordering::SeqCst);
             control.force(if old == 0 { proposed } else { old.min(proposed) });
             self.action = action.to_string();
@@ -203,3 +204,7 @@ fn run_logout_command(manager: &UserManager, record: &SessionRecord, provider: &
     let _ = manager.unref(&unit);
     result
 }
+
+#[cfg(test)]
+#[path = "coordinator_shutdown_tests.rs"]
+mod tests;
