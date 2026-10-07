@@ -154,11 +154,12 @@ pub(super) fn draw_picker(
     let title = [Segment::bold(" sessions ", Role::Accent)];
     draw_double_frame(surface, modal, p.accent);
     draw_segments_centered(surface, modal.center_x(), modal.y + 1, &title, p);
-    for (i, label) in rows.iter().enumerate() {
-        let y = modal.y + 3 + i as u16;
-        if y >= modal.bottom() - 1 {
-            break;
-        }
+    let visible_rows = usize::from(modal.h.saturating_sub(4));
+    let first = scene.selected.saturating_sub(visible_rows / 2)
+        .min(rows.len().saturating_sub(visible_rows));
+    for (row, label) in rows.iter().skip(first).take(visible_rows).enumerate() {
+        let i = first + row;
+        let y = modal.y + 3 + row as u16;
         let selected = i == scene.selected;
         let marker = if selected { "> " } else { "  " };
         let color = if selected { p.accent } else { p.fg_secondary };

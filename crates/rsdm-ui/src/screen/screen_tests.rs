@@ -117,3 +117,38 @@ fn lock_too_small_keeps_a_usable_prompt() {
     );
     assert!(dump.contains("too small"));
 }
+
+#[test]
+fn session_picker_keeps_the_selected_session_visible() {
+    let sessions: Vec<Session> = (0..30)
+        .map(|i| Session::new(format!("session-{i}"), format!("Session {i}"), "start", "/x"))
+        .collect();
+    for (width, height) in [(80, 24), (44, 16)] {
+        for selected in [0, 15, 25, 29] {
+            let scene = LoginScene {
+                title: vec!["RSDM".into()],
+                hostname: None,
+                clock: None,
+                username: "alice",
+                password_preview: String::new(),
+                authentication_active: false,
+                field: Field::Session,
+                pending: None,
+                console_exit_enabled: false,
+                message: None,
+                message_is_error: false,
+                sessions: &sessions,
+                selected,
+                session_field_visible: true,
+                session_picker_enabled: true,
+                picker_open: true,
+            };
+            let mut surface = VecSurface::new(width, height);
+            render_login(&mut surface, &design(), &scene, &Menu::new(), 0);
+            let dump = surface.dump();
+            assert!(dump.contains(&format!("> Session {selected} (session-{selected})")),
+                "selected session must be visible at {width}x{height}:\n{dump}");
+            assert_eq!(dump.matches("> Session ").count(), 1);
+        }
+    }
+}
