@@ -29,6 +29,7 @@ impl Coordinator {
         }
         self.stopping.store(true, Ordering::SeqCst);
         self.lifecycle.prepare();
+        self.reject_pending_environment("session shutdown started before environment publication");
         while let Some((_, reply, _)) = self.queued.pop_front() {
             let _ = reply.try_send(Err("session shutdown started before the application was launched".into()));
         }
@@ -40,7 +41,7 @@ impl Coordinator {
 
     pub fn advance(&mut self) -> Result<(), SessionError> {
         if self.lifecycle.phase != SessionPhase::Preparing || self.preparing || self.ready_busy
-            || self.booting() || self.lifecycle.pending_launches()
+            || self.booting() || self.lifecycle.pending_launches() || self.environment_reply.is_some()
         { return Ok(()); }
         self.preparing = true;
         let manager = self.manager.clone();
@@ -78,10 +79,7 @@ impl Coordinator {
                 }
             }
         }
-        if control.cancelled.load(Ordering::SeqCst) && !control.noncancelable.load(Ordering::SeqCst) {
-            self.resume("cancelled", "shutdown cancelled; applications already closed cannot be restored")?;
-            return Ok(());
-        }
+        if self.resume_if_cancelled()? { return Ok(()); }
         if self.provider.native_desktop() && matches!(self.action.as_str(), "logout" | "reboot" | "poweroff") {
             self.lifecycle.phase = SessionPhase::StoppingSession;
             let provider = self.provider.clone();
@@ -155,6 +153,15 @@ impl Coordinator {
         self.stopping.store(false, Ordering::SeqCst);
         apps::reset_preparation(&self.runtime)?;
         self.save()
+    }
+
+    pub(super) fn resume_if_cancelled(&mut self) -> Result<bool, SessionError> {
+        let cancelled = self.shutdown.as_ref().is_some_and(|control| {
+            control.cancelled.load(Ordering::SeqCst) && !control.noncancelable.load(Ordering::SeqCst)
+        });
+        if self.lifecycle.phase != SessionPhase::Preparing || !cancelled { return Ok(false); }
+        self.resume("cancelled", "shutdown cancelled; applications already closed cannot be restored")?;
+        Ok(true)
     }
 
     pub fn respond_stop(&mut self, result: &str, message: &str) {

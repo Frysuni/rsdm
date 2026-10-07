@@ -5,7 +5,7 @@ use std::{sync::atomic::Ordering, thread, time::Instant};
 use rsdm_core::domain::{SessionPhase, ShutdownMethod};
 
 use super::{
-    SessionError, activation, apps,
+    SessionError, apps,
     control::{LaunchRequest, Reply, Request, SessionStatus, StopOutcome},
     coordinator::{Coordinator, Work},
     runtime::AppRecord,
@@ -41,33 +41,6 @@ impl Coordinator {
                         });
                     self.xsmp.prepare(units, allowed, reply);
                 }
-            }
-        }
-        Ok(())
-    }
-
-    fn finalize_request(
-        &mut self,
-        generation: String,
-        environment: Vec<(String, String)>,
-        reply: Reply<()>,
-    ) -> Result<(), SessionError> {
-        if generation != self.runtime.generation || !self.lifecycle.accepts_finalize() {
-            let _ = reply.try_send(Err("session is shutting down or generation is stale".into()));
-            return Ok(());
-        }
-
-        match activation::export(&self.manager, &self.runtime, &mut self.record, environment) {
-            Ok(()) if self.lifecycle.phase == SessionPhase::Running => {
-                let _ = reply.try_send(Ok(()));
-            }
-            Ok(()) => {
-                self.finalize_replies.push(reply);
-                self.activate();
-                self.save()?;
-            }
-            Err(error) => {
-                let _ = reply.try_send(Err(error.to_string()));
             }
         }
         Ok(())

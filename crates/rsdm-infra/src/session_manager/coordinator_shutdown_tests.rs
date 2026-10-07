@@ -65,7 +65,7 @@ impl Fixture {
         let coordinator = Coordinator {
             manager, runtime, record, provider, lifecycle, process: None, environment: Vec::new(),
             directory: directory.clone(), requests, work, events, queued: Default::default(),
-            finalize_replies: Vec::new(), stop_replies: Vec::new(), stopping: Arc::default(),
+            finalize_replies: Vec::new(), pending_environment: Default::default(), environment_reply: None, stop_replies: Vec::new(), stopping: Arc::default(),
             shutdown: None, action: String::new(), ready_busy: false, ready_once: true,
             pending_ready: false,
             pending_boot: false,

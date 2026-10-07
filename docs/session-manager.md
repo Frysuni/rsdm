@@ -222,12 +222,17 @@ rsdm session finalize MY_VAR ANOTHER_VAR
 Finalize exports live `WAYLAND_DISPLAY`, `DISPLAY` and `XAUTHORITY` when present
 and activates the anchor once the provider is ready. Repeating finalize in a
 running session updates the environment without recreating its anchor. Automatic
-managed readiness
-observes a newly published display or an already active graphical target;
+managed readiness observes a newly published display or an already active graphical target;
 native providers must also confirm their own readiness. Stale display
 assignments are cleared before launch without inventing addresses. For managed
 sessions, a readiness timeout keeps owned targets inactive; a late explicit
 finalize can still activate them.
+
+Finalize publications run serially in a worker, so their D-Bus calls do not
+block status or cancellation. The coordinator saves ownership before publication.
+Shutdown rejects queued publications and waits for the active one within the
+shared shutdown deadline before preparing applications. Cancelling shutdown
+preserves an accepted startup finalize until readiness is confirmed.
 
 For an RSDM-owned lifecycle, the anchor activates `graphical-session.target` and
 `xdg-desktop-autostart.target`. Ownership is recorded before activation. Native

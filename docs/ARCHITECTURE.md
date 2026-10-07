@@ -79,8 +79,10 @@ Greeter (`dm`) runtime path:
 When `session_manager.enabled` is set, step 8 wraps the original command in
 `rsdm session start`, with the selected config and desktop metadata. Its user
 coordinator owns one generation, separate from logind and desktop-entry IDs.
-Typed D-Bus handlers feed a serial lifecycle actor; blocking systemd/app work
-runs in bounded workers so cancellation remains responsive. Registration and
+Typed D-Bus handlers feed a serial lifecycle actor. Start/stop jobs, app
+preparation, control-bus maintenance and serialized finalize publication run in
+workers. Observation and readiness still perform synchronous manager reads;
+their timeouts can delay cancellation. Registration and
 recovery records precede side effects. InvocationID and pidfd checks keep
 cleanup/signals attached to the recorded processes.
 

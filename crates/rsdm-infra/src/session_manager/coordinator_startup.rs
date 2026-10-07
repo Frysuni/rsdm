@@ -85,6 +85,8 @@ impl Coordinator {
             events,
             queued: VecDeque::new(),
             finalize_replies: Vec::new(),
+            pending_environment: VecDeque::new(),
+            environment_reply: None,
             stop_replies: Vec::new(),
             stopping: Arc::new(AtomicBool::new(false)),
             shutdown: None,

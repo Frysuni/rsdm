@@ -71,7 +71,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 53 | Validate ready timeout representability | fixed |
 | 54 | Document pidfd emergency unlock protection | fixed with 12 |
 | 55 | Match bounded recovery-record documentation | fixed with 5 |
-| 56 | Match bounded-worker architecture claims | pending |
+| 56 | Match bounded-worker architecture claims | in progress; maintenance and finalize publication off actor |
 | 57 | Correct obsolete first-seat documentation | fixed |
 
 Finding 48 conflicts with the explicit policy in
@@ -344,6 +344,26 @@ verification separate from private-peer and unit-test evidence.
   with `nix develop --command cargo test -p rsdm-infra repeated_finalize --locked`;
   it verifies both publications and the absence of unit queries/new workers.
   Changed Rust files remain below 300 lines and new functions below 50.
+- 56 (finalize publication): One worker serializes manager and activation
+  environment updates, with the endpoint admission permit bounding queued and
+  active requests. The actor persists ownership before side effects and remains
+  the only writer of lifecycle state. Shutdown rejects unstarted publications
+  and drains the active one before app preparation; recovery retains its intent
+  after partial or unconfirmed completion. A cancelled startup logout preserves
+  the accepted finalize until readiness instead of making its launcher exit.
+  Eight private-peer regressions cover repeat finalize, a paused publication
+  with status/cancel, serialized values, queued shutdown rejection, partial
+  failure, deadline-bounded recovery, cancelled startup, and failed record save.
+  The coordinator suite passed five consecutive parallel runs after its fixture
+  dispatcher race was repaired. Observation/readiness manager calls still need
+  to leave the actor, so finding 56 remains open.
+  `nix develop --command cargo test --workspace --locked --quiet` passed 395
+  tests with one existing subprocess-only fixture ignored in the parent run.
+  `cargo check --workspace --all-targets --locked` passed with Rust 1.88.0
+  cargo/rustc inside `nix develop`. Architecture documentation now states the
+  remaining synchronous-read limitation explicitly. Changed Rust files stay
+  below 300 lines; new functions stay below 50. The existing larger startup
+  constructor and test fixture retain explicit field initialization.
 - Regression fixture readiness: The coordinator's private peer now starts its
   method dispatcher through `Builder::serve_at` before the connection is
   returned. Dynamically registering interfaces did not wait for the match

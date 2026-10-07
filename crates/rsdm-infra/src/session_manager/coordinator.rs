@@ -21,6 +21,7 @@ use super::{
 pub(super) enum Work {
     Boot(Result<Vec<u8>, SessionError>),
     Ready(Result<bool, SessionError>),
+    EnvironmentPublished(Result<(), SessionError>),
     Launched(String, Reply<String>, Result<String, SessionError>),
     Prepared(Result<Vec<String>, SessionError>),
     Delegated(Result<(), SessionError>),
@@ -42,6 +43,8 @@ pub(super) struct Coordinator {
     pub events: Sender<Work>,
     pub queued: VecDeque<(LaunchRequest, Reply<String>, Instant)>,
     pub finalize_replies: Vec<Reply<()>>,
+    pub pending_environment: VecDeque<(Vec<(String, String)>, Reply<()>)>,
+    pub environment_reply: Option<Reply<()>>,
     pub stop_replies: Vec<Reply<StopOutcome>>,
     pub stopping: Arc<AtomicBool>,
     pub shutdown: Option<Arc<ShutdownControl>>,
@@ -93,6 +96,7 @@ impl Coordinator {
             if self.lifecycle.phase == SessionPhase::Closed {
                 break;
             }
+            self.publish_next_environment()?;
             self.verify_boot()?;
             self.verify_readiness()?;
             match self.observe() {
@@ -129,11 +133,12 @@ impl Coordinator {
         self.runtime.save_session(&self.record)
     }
 
-    fn completed(&mut self, work: Work) -> Result<(), SessionError> {
+    pub(super) fn completed(&mut self, work: Work) -> Result<(), SessionError> {
         self.workers = self.workers.saturating_sub(1);
         match work {
             Work::Boot(result) => self.boot_completed(result)?,
             Work::Ready(result) => self.ready_completed(result)?,
+            Work::EnvironmentPublished(result) => self.environment_published(result)?,
             Work::Launched(unit, reply, result) => {
                 self.lifecycle.complete_launch(&unit);
                 let _ = reply.try_send(result.map_err(|error| error.to_string()));

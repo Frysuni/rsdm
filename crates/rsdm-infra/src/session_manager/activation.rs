@@ -2,7 +2,7 @@
 
 use std::{path::Path, sync::atomic::{AtomicBool, Ordering}};
 
-use super::{SessionError, bus::UserManager, env, provider::{Provider, ProviderKind}, runtime::{Runtime, SessionRecord}, units};
+use super::{SessionError, bus::UserManager, env, provider::{Provider, ProviderKind}, runtime::SessionRecord, units};
 
 pub(super) fn activate(
     manager: &UserManager, provider: &Provider, anchor: &str, compositor: Option<&str>,
@@ -41,17 +41,15 @@ pub(super) fn published_display(manager: &UserManager) -> Result<bool, SessionEr
     Ok(current.is_some_and(|value| value != "WAYLAND_DISPLAY="))
 }
 
-pub(super) fn export(
-    manager: &UserManager, runtime: &Runtime, record: &mut SessionRecord, pairs: Vec<(String, String)>,
+pub(super) fn claim_environment(
+    record: &mut SessionRecord, pairs: &[(String, String)],
 ) -> Result<(), SessionError> {
     if pairs.iter().any(|(name, value)| !env::valid_environment_name(name) || value.contains('\0')) {
         return Err(SessionError::State("invalid session environment".into()));
     }
-    for (name, value) in &pairs {
+    for (name, value) in pairs {
         if let Some((_, old)) = record.exported_environment.iter_mut().find(|(key, _)| key == name) { *old = value.clone(); }
         else { record.exported_environment.push((name.clone(), value.clone())); }
     }
-    // SetEnvironment can succeed before activation-environment publication fails.
-    runtime.save_session(record)?;
-    env::publish(manager, &pairs)
+    Ok(())
 }
