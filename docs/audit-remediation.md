@@ -33,7 +33,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 15 | Account throttling after PAM identity mapping | pending |
 | 16 | Audit successful starts after launch confirmation | fixed |
 | 17 | Audit termination separately from cleanup failure | pending |
-| 18 | Move control-bus maintenance off the actor | pending |
+| 18 | Move control-bus maintenance off the actor | implemented; runtime checks pending |
 | 19 | Release transport mutex during async reconnect | implemented; runtime checks pending |
 | 20 | Scale reference restoration within bounded work | pending |
 | 21 | Roll back definitely failed app registrations | pending |
@@ -132,3 +132,8 @@ Record unexecuted runtime checks explicitly for later verification.
   activation-environment writes while ordinary state access remains available.
   Private peer tests cover a suspended RefUnit call, concurrent release, stale
   publication rejection, and guard timeout/drop; only syntax checks have run.
+- 18: control endpoint health/reconnect runs in one cancellable worker; the
+  coordinator only polls its bounded result channel. Private peer tests suspend
+  the health reply and check caller responsiveness and cancellation on closure.
+  Only syntax checks have run. Finding 56 still needs the remaining synchronous
+  manager reads in observation/readiness/finalize to leave the actor loop.
