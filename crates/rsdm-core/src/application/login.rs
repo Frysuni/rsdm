@@ -5,8 +5,8 @@ use crate::{
     domain::{PasswordSecret, Session, SessionExit},
     ports::{
         AuditLogger, AuthConversation, AuthError, AuthProvider, AuthRequest, AuthenticatedSession,
-        LoginAttemptLimitError, LoginAttemptLimiter, SessionGate, SessionLaunchError,
-        SessionLaunchRequest, SessionLauncher, UserResolveError, UserResolver,
+        LoginAttemptLimitError, LoginAttemptLimiter, ResolvedUser, RunningSession, SessionGate,
+        SessionLaunchError, SessionLaunchRequest, SessionLauncher, UserResolveError, UserResolver,
     },
 };
 
@@ -32,21 +32,31 @@ impl LoginUseCase<'_> {
         request.password.zeroize();
         let mut authenticated = authenticated?;
 
-        let session_result = StartUserSession {
+        let started = StartUserSession {
             resolver: self.resolver,
             launcher: self.launcher,
             audit: self.audit,
             gate: self.gate,
         }
-        .execute(
-            &authenticated,
-            request.session,
-            request.vtnr,
-            request.seat,
-            request.wrapper,
-        );
+        .execute(&authenticated, &request);
 
+        let mut running = None;
+        let session_result = match started {
+            Ok((mut handle, user)) => {
+                let result = handle.wait().map_err(LoginError::from);
+                if let Ok(exit) = result {
+                    self.audit.session_finished(&user, request.session, exit);
+                }
+                running = Some(handle);
+                result
+            }
+            Err(error) => Err(error),
+        };
         let close_result = ReturnToGreeterAfterSessionExit.execute(&mut authenticated);
+        // The shutdown inhibitor belongs to the running handle, including on
+        // wait/cleanup errors. Release it only after PAM has closed.
+        drop(authenticated);
+        drop(running);
         let exit = session_result?;
         close_result?;
 
@@ -91,28 +101,24 @@ impl StartUserSession<'_> {
     fn execute(
         &self,
         authenticated: &AuthenticatedSession,
-        session: &Session,
-        vtnr: Option<u32>,
-        seat: &str,
-        wrapper: &[String],
-    ) -> Result<SessionExit, LoginError> {
+        request: &LoginRequest<'_>,
+    ) -> Result<(Box<dyn RunningSession>, ResolvedUser), LoginError> {
         let user = self
             .resolver
             .resolve_user(&authenticated.outcome.username)?;
         if let Some(gate) = self.gate {
             gate.session_authorized()?;
         }
-        self.audit.session_started(&user, session);
-        let exit = self.launcher.launch(SessionLaunchRequest {
-            session,
+        self.audit.session_started(&user, request.session);
+        let running = self.launcher.start(SessionLaunchRequest {
+            session: request.session,
             user: &user,
             pam_environment: authenticated.pam_session.environment(),
-            vtnr,
-            seat,
-            wrapper,
+            vtnr: request.vtnr,
+            seat: request.seat,
+            wrapper: request.wrapper,
         })?;
-        self.audit.session_finished(&user, session, exit);
-        Ok(exit)
+        Ok((running, user))
     }
 }
 
@@ -184,3 +190,7 @@ impl AuditReason for AuthError {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "login_tests.rs"]
+mod tests;

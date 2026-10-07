@@ -81,3 +81,24 @@ of other names.
 as the desktop user. The system configuration is therefore trusted input. With
 the built-in locker, `on_lock` is delayed until compositor lock confirmation;
 user activity never causes an automatic unlock.
+
+## Session coordination
+
+The user coordinator authenticates D-Bus callers by UID and checks generation
+on lifecycle requests. It acquires its non-replaceable bus name before touching
+shared manager state. Recovery files are private, owner-checked, bounded regular
+files opened without following symlinks. Root never parses them: it launches the
+same executable's cleanup command after dropping UID/GID and supplementary groups,
+and bounds the helper wait. Cleanup verifies recorded unit InvocationID; signals
+use pidfds and verified cgroup membership, rather than PID guesses or KillUser.
+
+XSMP uses local Unix ICE listeners, private cookie authentication, no host-based
+authentication, and kernel peer credentials. A client must be in a registered
+application's verified invocation. Its properties, including SmProcessID and
+restart commands, cannot grant ownership or execute commands. The server does
+not replace native DE session-management endpoints.
+
+Quit commands execute as the desktop user with the application's environment.
+Power requests remain subject to logind/polkit; RSDM never retries them as root.
+Delay inhibitors live through cleanup and PAM end but cannot extend the OS's
+finite shutdown budget. Lock retains its surfaces on power rejection/cancellation.

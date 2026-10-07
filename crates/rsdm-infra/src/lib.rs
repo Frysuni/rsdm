@@ -5,6 +5,7 @@ pub mod config;
 pub mod console_font;
 pub mod lock_control;
 pub mod pam;
+pub mod power;
 pub mod security;
 pub mod session_manager;
 pub mod sessions;

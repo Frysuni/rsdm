@@ -4,6 +4,7 @@ mod getty_query;
 mod group;
 mod launcher;
 mod session_environment;
+mod session_cleanup;
 mod session_leader;
 mod session_conversation;
 mod session_pipe;
@@ -14,6 +15,7 @@ mod vt;
 mod vt_owner;
 
 pub use fallback::{FallbackError, exec_fallback};
+pub use command::split_exec;
 pub use getty_query::discover_system_getty;
 pub use launcher::UnixSessionLauncher;
 pub use session_leader::{

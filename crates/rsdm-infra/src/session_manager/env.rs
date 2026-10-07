@@ -1,7 +1,5 @@
 //! Environment exported to systemd and D-Bus for the managed session.
 
-use rsdm_core::domain::SessionManagerConfig;
-
 /// Variables that exist before the compositor and are safe to export up front.
 pub(super) const BASE_VARS: &[&str] = &[
     "PATH",
@@ -27,45 +25,6 @@ pub(super) const WAYLAND_VARS: &[&str] = &[
 
 /// Display endpoints must not come from a previous login in the user manager.
 pub(super) const DISPLAY_VARS: &[&str] = &["WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY"];
-
-/// Push `pairs` into the systemd user manager and D-Bus activation environment.
-pub(super) fn export(pairs: &[(String, String)]) {
-    if pairs.is_empty() {
-        tracing::debug!("no environment variables to export");
-        return;
-    }
-    tracing::debug!(
-        names = ?pairs.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
-        "exporting environment variables"
-    );
-    let names: Vec<&str> = pairs.iter().map(|(key, _)| key.as_str()).collect();
-
-    let mut dbus = std::process::Command::new("dbus-update-activation-environment");
-    dbus.arg("--systemd")
-        .args(&names)
-        .envs(pairs.iter().map(|(key, value)| (key, value)));
-    match dbus.status() {
-        Ok(status) if status.success() => return,
-        Ok(status) => {
-            tracing::warn!(%status, "dbus-update-activation-environment failed")
-        }
-        Err(error) => {
-            tracing::debug!(%error, "dbus-update-activation-environment unavailable")
-        }
-    }
-    // --systemd already updates both environments; use systemctl only when the
-    // combined update is unavailable or fails.
-    let result = std::process::Command::new("systemctl")
-        .args(["--user", "import-environment"])
-        .args(&names)
-        .envs(pairs.iter().map(|(key, value)| (key, value)))
-        .status();
-    match result {
-        Ok(status) if status.success() => {}
-        Ok(status) => tracing::warn!(%status, "systemctl import-environment failed"),
-        Err(error) => tracing::debug!(%error, "systemctl unavailable"),
-    }
-}
 
 /// Names of every variable we manage, for export/unset.
 pub(super) fn all_var_names(extra_env: &[String], extra_names: &[String]) -> Vec<String> {
@@ -113,37 +72,6 @@ fn collect_command_environment(
     environment
 }
 
-/// The `systemctl --user unset-environment` argument list for every managed name.
-pub(super) fn unset_environment_command(cfg: &SessionManagerConfig) -> Vec<String> {
-    let names = all_var_names(&cfg.extra_env, &[])
-        .into_iter()
-        // These belong to the user's login environment, not to one compositor.
-        .filter(|name| !matches!(name.as_str(), "PATH" | "LANG" | "XDG_RUNTIME_DIR"))
-        .filter(|name| valid_environment_name(name));
-    let mut unset: Vec<String> = vec!["unset-environment".to_string()];
-    unset.extend(names);
-    unset
-}
-
-/// Return the serialized display assignment for change detection. Its presence
-/// alone is not readiness: the user manager can outlive a graphical session.
-pub(super) fn manager_wayland_display() -> Option<String> {
-    std::process::Command::new("systemctl")
-        .args(["--user", "show-environment"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .find(|line| {
-                    line.strip_prefix("WAYLAND_DISPLAY=")
-                        .is_some_and(|value| !matches!(value, "" | "\"\"" | "''"))
-                })
-                .map(str::to_owned)
-        })
-}
-
 /// Whether `name` is a valid systemd environment variable name.
 pub(super) fn valid_environment_name(name: &str) -> bool {
     let mut chars = name.chars();
@@ -153,6 +81,59 @@ pub(super) fn valid_environment_name(name: &str) -> bool {
     (first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
+
+pub(super) fn publish(
+    manager: &super::bus::UserManager, pairs: &[(String, String)],
+) -> Result<(), super::SessionError> {
+    if pairs.iter().any(|(name, value)| !valid_environment_name(name) || value.contains('\0')) {
+        return Err(super::SessionError::State("invalid session environment".into()));
+    }
+    manager.set_environment(&pairs.iter().map(|(name, value)| format!("{name}={value}")).collect::<Vec<_>>())?;
+    update_activation(manager, pairs)
+}
+
+fn update_activation(
+    manager: &super::bus::UserManager, pairs: &[(String, String)],
+) -> Result<(), super::SessionError> {
+    async_io::block_on(async {
+        let bus = zbus::Proxy::new(&manager.connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").await?;
+        let values: std::collections::HashMap<&str, &str> = pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
+        bus.call::<_, _, ()>("UpdateActivationEnvironment", &(values,)).await?;
+        Ok(())
+    })
+}
+
+pub(super) fn clear_owned(
+    manager: &super::bus::UserManager, pairs: &[(String, String)],
+) -> Result<(), super::SessionError> {
+    let current = manager.environment()?;
+    clear_names(manager, &owned_names(pairs, &current))
+}
+
+pub(super) fn clear_names(
+    manager: &super::bus::UserManager, names: &[String],
+) -> Result<(), super::SessionError> {
+    if names.is_empty() {
+        return Ok(());
+    }
+    // D-Bus has no unset operation. Empty values prevent activation with stale
+    // display endpoints; clear them before removing the manager ownership data
+    // so a failed update can still be retried by generation recovery.
+    let empty = names.iter().map(|name| (name.clone(), String::new())).collect::<Vec<_>>();
+    update_activation(manager, &empty)?;
+    manager.unset_environment(names)
+}
+
+fn owned_names(pairs: &[(String, String)], current: &[String]) -> Vec<String> {
+    pairs.iter().filter(|(name, value)| {
+        !matches!(name.as_str(), "PATH" | "LANG" | "XDG_RUNTIME_DIR")
+            && current.contains(&format!("{name}={value}"))
+    }).map(|(name, _)| name.clone()).collect()
+}
+
+#[cfg(test)]
+#[path = "env_transport_tests.rs"]
+mod transport_tests;
 
 #[cfg(test)]
 mod tests {
@@ -193,12 +174,16 @@ mod tests {
 
     #[test]
     fn logout_keeps_the_user_managers_base_environment() {
-        let command = unset_environment_command(&SessionManagerConfig::default());
+        let pairs: Vec<_> = all_var_names(&[], &[]).into_iter()
+            .map(|name| (name, "value".to_string())).collect();
+        let current: Vec<_> = pairs.iter().map(|(name, value)| format!("{name}={value}")).collect();
+        let command = owned_names(&pairs, &current);
         for name in ["PATH", "LANG", "XDG_RUNTIME_DIR"] {
             assert!(!command.iter().any(|arg| arg == name));
         }
         for name in ["WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "XDG_SESSION_ID"] {
             assert!(command.iter().any(|arg| arg == name));
         }
+        assert!(owned_names(&pairs, &["WAYLAND_DISPLAY=new-owner".into()]).is_empty());
     }
 }

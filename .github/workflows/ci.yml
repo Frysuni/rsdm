@@ -27,7 +27,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libpam0g-dev libwayland-dev libxkbcommon-dev pkg-config
+            libpam0g-dev libwayland-dev libxkbcommon-dev libsm-dev libice-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -46,7 +46,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libpam0g-dev libwayland-dev libxkbcommon-dev pkg-config
+            libpam0g-dev libwayland-dev libxkbcommon-dev libsm-dev libice-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@1.88.0
       - uses: Swatinem/rust-cache@v2
@@ -83,6 +83,16 @@ jobs:
 
       - name: build rsdm from source
         run: nix build .#rsdm-unstable --print-build-logs
+
+      - name: test session lifecycle in isolated VMs
+        run: |
+          nix build --print-build-logs \
+            .#checks.x86_64-linux.session-lifecycle \
+            .#checks.x86_64-linux.native-niri \
+            .#checks.x86_64-linux.native-de-handoff \
+            .#checks.x86_64-linux.power-lifecycle \
+            .#checks.x86_64-linux.lock-power \
+            .#checks.x86_64-linux.dm-lifecycle
 
       - name: build prebuilt rsdm
         run: nix build .#rsdm-stable --print-build-logs

@@ -15,18 +15,21 @@ authors = ["Frys"]
 edition = "2024"
 license = "GPL-3.0-only"
 rust-version = "1.88"
-version = "2.1.0"
+version = "2.2.0"
 repository = "https://github.com/Frysuni/rsdm"
 homepage = "https://github.com/Frysuni/rsdm"
 description = "Standalone Rust TTY/TUI Wayland display manager and screen locker"
 
 [workspace.dependencies]
 anyhow = "1.0.103"
+async-channel = "2.5.0"
+async-io = "2.6.0"
 camino = { version = "1.1.9", features = ["serde1"] }
 clap = { version = "4.5.37", features = ["derive", "env"] }
 crossterm = "0.29.0"
 font8x8 = "0.3.1"
 figrs = "0.3.1"
+futures-lite = "2.6.1"
 image = { version = "0.25.5", default-features = false, features = ["png", "jpeg"] }
 libc = "0.2.186"
 ratatui = { version = "0.30.0", default-features = false, features = ["crossterm", "underline-color"] }
@@ -41,6 +44,9 @@ tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
 wayland-protocols = { version = "=0.32.12", features = ["client", "staging"] }
 wayland-client = "0.31.11"
 zeroize = { version = "1.8.1", features = ["derive"] }
+zbus = { version = "=5.14.0", default-features = false, features = ["async-io", "blocking-api"] }
+# Interface macros use runtime internals; keep both on the same release.
+zbus_macros = "=5.14.0"
 
 [profile.release]
 lto = "thin"

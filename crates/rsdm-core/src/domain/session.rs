@@ -1,5 +1,6 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
+    /// Desktop entry identity, independent of the authenticated logind session.
     pub id: String,
     pub name: String,
     pub comment: Option<String>,

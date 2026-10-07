@@ -64,10 +64,11 @@ let
     };
   };
   rsdmAssertionsHold = cfg:
-    builtins.all (entry: entry.assertion) (builtins.filter (entry:
+    # Successful assertion messages may refer to failure-only data.
+    builtins.all (entry: entry.assertion || !(
       nixpkgs.lib.hasPrefix "services.rsdm" entry.message
       || nixpkgs.lib.hasPrefix "RSDM" entry.message
-    ) cfg.assertions);
+    )) cfg.assertions;
   incompatibleStable = evaluate {
     dm.design.borderStyle = "none";
     lock.design.borderStyle = "none";

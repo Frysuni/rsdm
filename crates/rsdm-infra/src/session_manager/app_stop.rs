@@ -1,0 +1,252 @@
+//! Application shutdown, shared by preflight and the synchronous ExecStop hook.
+
+use std::{
+    path::Path,
+    sync::{Arc, OnceLock, atomic::{AtomicBool, AtomicU64, Ordering}},
+    thread,
+    time::Duration,
+};
+
+use rsdm_core::domain::{ShutdownMethod, TimeoutAction};
+use zbus::zvariant::Value;
+
+use super::{
+    SessionError, bus::UserManager,
+    processes::{app_processes, monotonic_usec, signal_app, terminate_main},
+    runtime::{AppRecord, Runtime}, units::command_properties,
+};
+
+#[derive(Default)]
+pub(super) struct ShutdownControl {
+    pub cancelled: AtomicBool,
+    pub noncancelable: AtomicBool,
+    pub hard_deadline: AtomicU64,
+    pub recovery: AtomicBool,
+    xsmp_units: OnceLock<Vec<String>>,
+}
+
+impl ShutdownControl {
+    pub fn force(&self, deadline: u64) {
+        self.noncancelable.store(true, Ordering::SeqCst);
+        self.cancelled.store(false, Ordering::SeqCst);
+        self.hard_deadline.store(deadline, Ordering::SeqCst);
+    }
+
+    fn cancelled(&self) -> bool {
+        !self.noncancelable.load(Ordering::SeqCst) && self.cancelled.load(Ordering::SeqCst)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum AppOutcome {
+    Closed,
+    Cancelled,
+    Forced,
+}
+
+pub(super) fn prepare_apps(
+    manager: &UserManager, runtime: &Runtime, apps: Vec<AppRecord>, control: Arc<ShutdownControl>,
+) -> Result<Vec<String>, SessionError> {
+    let selected = prepare_xsmp(
+        manager, runtime, &apps.iter().map(|app| app.unit.clone()).collect::<Vec<_>>(), &control,
+    )?;
+    // Keep one protocol selection for the batch. Reissuing Prepare from each
+    // app worker could start a new save after the server already cancelled it.
+    let _ = control.xsmp_units.set(selected);
+    let workers: Vec<_> = apps.into_iter().map(|app| {
+        let manager = manager.clone();
+        let runtime = runtime.clone();
+        let control = control.clone();
+        thread::spawn(move || {
+            let result = prepare_app(&manager, &runtime, &app.unit, &control);
+            (app.unit, result)
+        })
+    }).collect();
+    let mut forced = Vec::new();
+    let mut failure = None;
+    for worker in workers {
+        match worker.join() {
+            Ok((unit, Ok(AppOutcome::Forced))) => forced.push(unit),
+            Ok((_, Ok(_))) => {}
+            Ok((_, Err(error))) => {
+                control.cancelled.store(true, Ordering::SeqCst);
+                failure.get_or_insert(error);
+            }
+            Err(_) => {
+                failure.get_or_insert(SessionError::State("application shutdown worker panicked".into()));
+            }
+        }
+    }
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    Ok(forced)
+}
+
+pub(super) fn prepare_app(
+    manager: &UserManager, runtime: &Runtime, unit: &str, control: &ShutdownControl,
+) -> Result<AppOutcome, SessionError> {
+    if !super::apps::pin_pending(manager, runtime, unit)? {
+        return Ok(AppOutcome::Closed);
+    }
+    let _lease = runtime.app_lease(unit)?;
+    let mut app = runtime.app(unit)?;
+    if app_processes(manager, &app)?.is_empty() {
+        return Ok(AppOutcome::Closed);
+    }
+    if control.cancelled() {
+        return Ok(AppOutcome::Cancelled);
+    }
+
+    let deadline = app.deadline_usec.get_or_insert(
+        monotonic_usec()?.checked_add(app.policy.timeout_secs * 1_000_000)
+            .ok_or_else(|| SessionError::State("shutdown deadline overflow".into()))?
+    );
+    let hard = control.hard_deadline.load(Ordering::SeqCst);
+    if hard != 0 {
+        *deadline = (*deadline).min(hard);
+    }
+    let deadline = *deadline;
+    let quit_unit = request_quit(manager, runtime, &mut app, control)?;
+    let result = await_exit(manager, &app, deadline, control);
+    if let Some(unit) = quit_unit {
+        release_quit(manager, &unit);
+    }
+    if matches!(result, Ok(AppOutcome::Cancelled)) {
+        app.deadline_usec = None;
+        app.quit_started = false;
+        runtime.save_app(&app)?;
+    }
+    result
+}
+
+fn request_quit(manager: &UserManager, runtime: &Runtime, app: &mut AppRecord, control: &ShutdownControl) -> Result<Option<String>, SessionError> {
+    if app.quit_started {
+        return Ok(None);
+    }
+    app.quit_started = true;
+    runtime.save_app(app)?;
+    if !app.policy.quit_command.is_empty() {
+        return launch_quit(manager, app).map(Some);
+    }
+    if app.policy.method != ShutdownMethod::Term {
+        let selected = match control.xsmp_units.get() {
+            Some(selected) => selected.clone(),
+            None => prepare_xsmp(manager, runtime, std::slice::from_ref(&app.unit), control)?,
+        };
+        if selected.contains(&app.unit) {
+            return Ok(None);
+        }
+        if app.policy.method == ShutdownMethod::Xsmp && !control.noncancelable.load(Ordering::SeqCst)
+            && !app_processes(manager, app)?.is_empty()
+        {
+            return Err(SessionError::State("this application has no XSMP connection".into()));
+        }
+    }
+    terminate_main(manager, app)?;
+    Ok(None)
+}
+
+fn prepare_xsmp(
+    manager: &UserManager, runtime: &Runtime, units: &[String], control: &ShutdownControl,
+) -> Result<Vec<String>, SessionError> {
+    if !cfg!(feature = "xsmp") || units.is_empty() || control.recovery.load(Ordering::SeqCst) {
+        return Ok(Vec::new());
+    }
+    let result = async_io::block_on(async {
+        let proxy = zbus::Proxy::new(&manager.connection, super::control::BUS_NAME,
+            super::control::OBJECT_PATH, super::control::BUS_NAME).await?;
+        let selected = proxy.call("XsmpPrepare", &(&runtime.generation, units, !control.noncancelable.load(Ordering::SeqCst))).await?;
+        Ok::<Vec<String>, SessionError>(selected)
+    });
+    match result {
+        Err(error) if control.noncancelable.load(Ordering::SeqCst) => {
+            tracing::warn!(%error, "XSMP is unavailable during noncancellable cleanup; using application signals");
+            Ok(Vec::new())
+        }
+        other => other,
+    }
+}
+
+fn await_exit(
+    manager: &UserManager, app: &AppRecord, deadline: u64, control: &ShutdownControl,
+) -> Result<AppOutcome, SessionError> {
+    loop {
+        if app_processes(manager, app)?.is_empty() {
+            return Ok(AppOutcome::Closed);
+        }
+        if control.cancelled() {
+            return Ok(AppOutcome::Cancelled);
+        }
+        let hard = control.hard_deadline.load(Ordering::SeqCst);
+        let effective_deadline = if hard == 0 { deadline } else { deadline.min(hard) };
+        if monotonic_usec()? >= effective_deadline {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    if app.policy.on_timeout == TimeoutAction::Cancel && !control.noncancelable.load(Ordering::SeqCst) {
+        control.cancelled.store(true, Ordering::SeqCst);
+        return Ok(AppOutcome::Cancelled);
+    }
+    force_exit(manager, app, control)
+}
+
+fn force_exit(manager: &UserManager, app: &AppRecord, control: &ShutdownControl) -> Result<AppOutcome, SessionError> {
+    if control.cancelled() {
+        return Ok(AppOutcome::Cancelled);
+    }
+    if app_processes(manager, app)?.is_empty() {
+        return Ok(AppOutcome::Closed);
+    }
+    signal_app(manager, app, libc::SIGTERM)?;
+    let hard = control.hard_deadline.load(Ordering::SeqCst);
+    let grace = monotonic_usec()?.saturating_add(5_000_000);
+    let deadline = if hard == 0 { grace } else { grace.min(hard) };
+    while monotonic_usec()? < deadline {
+        if app_processes(manager, app)?.is_empty() {
+            return Ok(AppOutcome::Forced);
+        }
+        if control.cancelled() {
+            return Ok(AppOutcome::Cancelled);
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    if control.cancelled() {
+        return Ok(AppOutcome::Cancelled);
+    }
+    signal_app(manager, app, libc::SIGKILL)?;
+    let deadline = monotonic_usec()?.saturating_add(5_000_000);
+    while !app_processes(manager, app)?.is_empty() {
+        if monotonic_usec()? >= deadline {
+            return Err(SessionError::State(format!("{} still has processes after SIGKILL", app.unit)));
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    Ok(AppOutcome::Forced)
+}
+
+fn launch_quit(manager: &UserManager, app: &AppRecord) -> Result<String, SessionError> {
+    let unit = app.unit.replacen("app-rsdm-", "rsdm-quit-", 1);
+    let environment: Vec<String> = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Service", "Environment")?;
+    let environment: Vec<_> = environment.iter().filter_map(|entry| entry.split_once('=')
+        .map(|(name, value)| (name.to_string(), value.to_string()))).collect();
+    let directory: String = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Service", "WorkingDirectory")?;
+    let mut properties = command_properties(&app.policy.quit_command, &environment, Path::new(&directory))?;
+    properties.extend([
+        ("Slice", Value::from(super::units::APP_SLICE)),
+        ("TimeoutStopUSec", Value::from(1_000_000_u64)),
+    ]);
+    if let Err(error) = manager.start_service(&unit, &properties) {
+        release_quit(manager, &unit);
+        return Err(error);
+    }
+    Ok(unit)
+}
+
+fn release_quit(manager: &UserManager, unit: &str) {
+    if let Err(error) = manager.stop(unit, Duration::from_secs(3)) {
+        tracing::warn!(unit, %error, "quit command cleanup failed");
+    }
+    let _ = manager.unref(unit);
+}

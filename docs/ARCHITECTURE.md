@@ -50,25 +50,37 @@ Greeter (`dm`) runtime path:
 7. The child parks once authorized; the greeter tears down and clears the
    terminal, then releases it
 8. In the child: fork again; set environment, initialize groups, drop UID/GID,
-   chdir HOME, and exec the configured Wayland session; wait for it and close
-   the PAM session. Stopping `rsdm.service` cannot reach this child, so a
+   chdir HOME, and exec the configured Wayland session. The root leader keeps
+   a running-session handle and shutdown delay FD while waiting, recovering
+   recorded units as the desktop UID, and closing/ending PAM. Stopping
+   `rsdm.service` cannot reach this child, so a
    restart never logs the live session out
 9. The greeter waits for the child's final report, reclaims the VT foreground
    and redraws; on a fatal error it hands the TTY to the fallback login (the
    configured command first, then a built-in `agetty`/`login` chain) instead
    of dying
 
-When `session_manager.enabled` is set, step 9 execs the compositor wrapped in
-`rsdm session start -- <compositor>` instead of directly. That supervisor
-exports the Wayland/XDG environment (including the keyring agent variables
-inherited from step 7) to `systemctl --user` and D-Bus, and then watches who owns
-the graphical session: a
-compositor that brings up `graphical-session.target` itself (niri's
-`niri.service`, sway, ...) is left to manage and tear down its own session, while
-a bare compositor that does not gets `graphical-session.target` and
-`xdg-desktop-autostart.target` anchored by rsdm. Either way the compositor and
-`rsdm app` launches run as transient user units, and rsdm tears down only what it
-brought up when the compositor exits.
+When `session_manager.enabled` is set, step 8 wraps the original command in
+`rsdm session start`, with the selected config and desktop metadata. Its user
+coordinator owns one generation, separate from logind and desktop-entry IDs.
+Typed D-Bus handlers feed a serial lifecycle actor; blocking systemd/app work
+runs in bounded workers so cancellation remains responsive. Registration and
+recovery records precede side effects. InvocationID and pidfd checks keep
+cleanup/signals attached to the recorded processes.
+
+Bare compositors use a transient service and a per-generation anchor. The
+official `niri-session` runs unchanged outside that service and owns its real
+notify `niri.service`. GNOME and Plasma retain their native session managers.
+RSDM publishes selected environment values, preserves native graphical-target
+ownership and creates graphical/autostart targets only for its managed lifecycle.
+
+Orderly logout closes the launch gate, drains accepted jobs and prepares
+registered `rsdm app` processes in parallel before infrastructure teardown.
+Each app also has a synchronous ExecStop backstop sharing the saved deadline.
+Optional libSM/libICE support implements authenticated local XSMP, phase-2
+barriers, interaction, cancel and Die; native DE XSMP is preserved. Save replies
+and helper success never replace actual cgroup exit. See
+[session-manager.md](session-manager.md) for provider/policy boundaries.
 
 Locker (`lock`) runtime path:
 
@@ -83,6 +95,9 @@ Locker (`lock`) runtime path:
    rate limited
 5. On success send `unlock`, round-trip so the compositor acknowledges it, then
    exit (an unflushed unlock leaves the compositor stuck on an abandoned lock)
+
+Lock power requests run in a separate worker while the Wayland event loop keeps
+servicing opaque surfaces. Cancellation and request failure never invoke unlock.
 
 Idle (`idle`) runtime path:
 

@@ -67,8 +67,12 @@ systemctl --user enable --now rsdm-idle.service
 
 ## Dependencies
 
-Runtime: `pam`, `systemd-libs`, `wayland`, `libxkbcommon`, `gcc-libs`.
+Runtime: `pam`, `systemd>=250`, `systemd-libs`, `wayland`, `libxkbcommon`,
+`libsm`, `libice`, `gcc-libs`.
 Build: `cargo`, `pkgconf`.
+
+The session manager uses a logind login session and a user D-Bus. XSMP is
+enabled by default; see [session-manager.md](../session-manager.md).
 
 A Wayland session must be installed and discoverable. Picker mode reads
 `.desktop` files from `/usr/share/wayland-sessions` (where compositors like niri,

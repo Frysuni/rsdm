@@ -9,7 +9,12 @@ pub trait SessionDiscoverer {
 }
 
 pub trait SessionLauncher {
-    fn launch(&self, request: SessionLaunchRequest<'_>) -> Result<SessionExit, SessionLaunchError>;
+    fn start(&self, request: SessionLaunchRequest<'_>) -> Result<Box<dyn RunningSession>, SessionLaunchError>;
+}
+
+/// Owns the child and its shutdown guard through the subsequent PAM close.
+pub trait RunningSession {
+    fn wait(&mut self) -> Result<SessionExit, SessionLaunchError>;
 }
 
 /// Parks the login between "the user is authenticated and authorized" and "the

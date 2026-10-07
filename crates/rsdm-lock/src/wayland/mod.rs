@@ -39,6 +39,7 @@ mod authentication;
 mod handlers;
 mod input;
 mod output;
+mod power;
 mod protocol;
 mod render;
 
@@ -89,6 +90,7 @@ struct App {
     keyboards: Vec<(wl_seat::WlSeat, wl_keyboard::WlKeyboard)>,
     model: LockModel,
     authentication: Option<crate::auth::AuthenticationJob>,
+    power_action: Option<power::PowerJob>,
     ctx: LockContext,
     menu: Menu,
     menu_enabled: bool,
@@ -139,6 +141,7 @@ pub fn run(config: &AppConfig, config_path: &Path) -> Result<()> {
         keyboards: Vec::new(),
         model: LockModel::new(config.lock.design.password_mode),
         authentication: None,
+        power_action: None,
         ctx: context,
         menu,
         menu_enabled: config.lock.design.menu,
@@ -180,6 +183,7 @@ fn run_event_loop(
             .dispatch_pending(app)
             .context("Wayland dispatch failed")?;
         app.process_authentication();
+        app.process_power_action();
         if rsdm_infra::unix::emergency_unlock_requested() && app.lock_state.is_some() {
             app.unlock();
         }
@@ -192,7 +196,7 @@ fn run_event_loop(
             break;
         }
 
-        let timeout = if app.authentication.is_some() {
+        let timeout = if app.authentication.is_some() || app.power_action.is_some() {
             app.animation_poll_timeout_ms().min(50)
         } else {
             app.animation_poll_timeout_ms()

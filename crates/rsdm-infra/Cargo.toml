@@ -6,9 +6,16 @@ license.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
+[features]
+default = []
+xsmp = []
+
 [dependencies]
+async-channel.workspace = true
+async-io.workspace = true
 camino.workspace = true
 libc.workspace = true
+futures-lite.workspace = true
 rsdm-core = { path = "../rsdm-core" }
 serde.workspace = true
 thiserror.workspace = true
@@ -16,6 +23,11 @@ toml.workspace = true
 toml_edit.workspace = true
 tracing.workspace = true
 zeroize.workspace = true
+zbus.workspace = true
+zbus_macros.workspace = true
+
+[dev-dependencies]
+zbus = { workspace = true, features = ["p2p"] }
 
 [build-dependencies]
 pkg-config = "0.3.32"

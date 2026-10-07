@@ -5,13 +5,17 @@ The source and release binary build on Ubuntu 26.04 LTS. For a source build:
 ```sh
 sudo apt update
 sudo apt install cargo rustc gcc pkg-config libpam0g-dev libwayland-dev \
-  libxkbcommon-dev
+  libxkbcommon-dev libsm-dev libice-dev
 cargo build --release --locked -p rsdm
 ```
 
 rsdm requires Rust 1.88 or newer. On an older supported Ubuntu release whose
 archive Rust is older, install a current Rust toolchain with rustup and keep the
 same system development packages.
+
+The session manager requires systemd 250 or newer, a logind login session and
+a user D-Bus. Release binaries also need `libsm6` and `libice6` at runtime.
+XSMP is enabled by default; see [session-manager.md](../session-manager.md).
 
 Install the runtime files from the repository root:
 

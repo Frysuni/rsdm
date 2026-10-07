@@ -14,7 +14,10 @@ use tracing::{error, info};
 
 mod dm;
 mod logging;
+mod session;
 mod unlock;
+
+use session::SessionAction;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -63,23 +66,14 @@ enum Command {
         action: SessionAction,
     },
     /// Launch an application inside the graphical session.
-    App {
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
-        argv: Vec<String>,
+    App(session::AppOptions),
+    /// Prepare the current session and ask logind or the native desktop for power.
+    Power {
+        #[arg(value_enum)]
+        action: session::PowerAction,
     },
     /// Validate the TOML configuration file.
     ValidateConfig,
-}
-
-#[derive(Debug, Subcommand)]
-enum SessionAction {
-    Start {
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
-        compositor: Vec<String>,
-    },
-    Finalize {
-        names: Vec<String>,
-    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -116,8 +110,9 @@ fn run(cli: Cli) -> Result<()> {
             component,
         } => run_logs(follow, lines, component),
         Command::Status => run_status(&cli.config),
-        Command::Session { action } => run_session(&cli.config, action),
-        Command::App { argv } => run_app(&argv),
+        Command::Session { action } => session::run(&cli.config, action),
+        Command::App(options) => session::run_app(options),
+        Command::Power { action } => session::power(action),
         Command::ValidateConfig => validate_config(&cli.config),
     }
 }
@@ -130,11 +125,6 @@ fn run_lock(path: &Path) -> Result<()> {
 fn run_idle(path: &Path) -> Result<()> {
     let config = load_config(path)?;
     rsdm_idle::run(&config.idle, path).context("running idle monitor")
-}
-
-fn run_app(argv: &[String]) -> Result<()> {
-    let code = rsdm_infra::session_manager::run_app(argv).context("launching app")?;
-    std::process::exit(code);
 }
 
 fn validate_config(path: &Path) -> Result<()> {
@@ -239,25 +229,9 @@ fn run_dm(path: &Path) -> Result<()> {
     let tty_path = config.dm.tty.path.clone();
     let fallback = config.dm.fallback.clone();
     let security = config.security.clone();
-    match dm::run_dm(config) {
+    match dm::run_dm(config, path) {
         Ok(()) => Ok(()),
         Err(error) => fallback_or_error(&fallback, &security, &tty_path, error),
-    }
-}
-
-fn run_session(path: &Path, action: SessionAction) -> Result<()> {
-    let config = load_config(path)?;
-    match action {
-        SessionAction::Start { compositor } => {
-            let code = rsdm_infra::session_manager::start(&compositor, &config.session_manager)
-                .context("running the graphical session")?;
-            std::process::exit(code);
-        }
-        SessionAction::Finalize { names } => {
-            rsdm_infra::session_manager::finalize(&config.session_manager, &names)
-                .context("finalizing the graphical session")?;
-            Ok(())
-        }
     }
 }
 

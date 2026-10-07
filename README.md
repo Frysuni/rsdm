@@ -23,8 +23,8 @@ compositor.
 - Compositor-driven idle locking (`rsdm idle`) with confirmed-lock hooks and an
   optional user service.
 - Optional uwsm-style systemd `--user` session manager (`rsdm session`,
-  `rsdm app`) that exports the Wayland/XDG environment and supervises the
-  compositor.
+  `rsdm app`) that exports the Wayland/XDG environment and closes registered
+  applications before the compositor, with XSMP and native DE delegation.
 - Compositor-agnostic: niri, Hyprland, sway, KDE, GNOME, anything with a Wayland
   session.
 - Runs on Arch (AUR) and NixOS (flake module). GPL-3.0.
@@ -59,10 +59,20 @@ rsdm idle                    # lock automatically after the configured timeout
 rsdm unlock                  # root-authorized emergency unlock
 rsdm logs --follow           # combined DM/idle/lock journal
 rsdm status                  # configuration and live lock state
-rsdm session start -- niri   # run a compositor as a systemd --user session
+rsdm session start -- niri-session # use niri's original native session wrapper
+rsdm session stop            # prepare registered apps, then close the session
+rsdm session cancel          # cancel preparation before infrastructure teardown
+rsdm session status          # provider, phase, generation and app policies
+rsdm power reboot            # prepare the current session and request reboot
+rsdm power poweroff          # prepare the current session and request shutdown
 rsdm app -- waybar           # launch a program into the graphical session
 rsdm validate-config         # check the config
 ```
+
+Session coordination requires Linux with systemd 250+, logind and a user bus.
+It manages applications started through `rsdm app`; it cannot guarantee saving
+for programs without a supported quit method. See the
+[session manager guide](docs/session-manager.md) for WM bindings and policies.
 
 ## Install
 

@@ -1,5 +1,3 @@
-use std::process::Command;
-
 use rsdm_ui::{LockPending, MenuKey, MenuOutcome};
 use smithay_client_toolkit::{
     reexports::client::{
@@ -140,10 +138,8 @@ impl KeyboardHandler for App {
             return;
         }
         if let Some(armed) = self.pending.take() {
-            if event.keysym == pending_keysym(armed)
-                && let Some(message) = run_power_action(armed)
-            {
-                self.model.set_error(message);
+            if event.keysym == pending_keysym(armed) {
+                self.start_power_action(armed);
             }
             self.needs_redraw = true;
             return;
@@ -202,25 +198,5 @@ fn pending_keysym(action: LockPending) -> Keysym {
         LockPending::Shutdown => Keysym::F12,
         LockPending::Hibernate => Keysym::F9,
         LockPending::Sleep => Keysym::F10,
-    }
-}
-
-fn run_power_action(action: LockPending) -> Option<String> {
-    let verb = match action {
-        LockPending::Reboot => "reboot",
-        LockPending::Shutdown => "poweroff",
-        LockPending::Hibernate => "hibernate",
-        LockPending::Sleep => "suspend",
-    };
-    match Command::new("systemctl").arg(verb).status() {
-        Ok(status) if status.success() => None,
-        Ok(status) => {
-            tracing::error!(%status, action = verb, "power action rejected");
-            Some(format!("{verb} was rejected: {status}"))
-        }
-        Err(error) => {
-            tracing::error!(%error, action = verb, "power action failed");
-            Some(format!("{verb} failed: {error}"))
-        }
     }
 }

@@ -100,6 +100,11 @@ For direct package use, the flake exposes `rsdm-stable` and `rsdm-unstable`;
 `default` selects stable. `rsdm-prebuilt` and `rsdm-source` remain compatibility
 aliases. An explicit `services.rsdm.package` overrides the channel selection.
 
+The source package enables XSMP and supplies libSM/libICE. Session coordination
+uses systemd 250 or newer, logind and the user's bus; it adds no WM/DE tables to
+`rsdm.toml`. See [session-manager.md](../session-manager.md) for orderly logout,
+native desktop delegation and application policies.
+
 The module rejects `dm.design.borderStyle = "none"` and
 `lock.design.borderStyle = "none"` when the selected package is older than 2.0.0,
 including values supplied through `config` or `extraConfig`. Use a supported

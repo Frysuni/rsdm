@@ -9,6 +9,10 @@ homepage.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
+[features]
+default = ["xsmp"]
+xsmp = ["rsdm-infra/xsmp"]
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
@@ -20,6 +24,10 @@ rsdm-lock = { path = "../rsdm-lock" }
 rsdm-tui = { path = "../rsdm-tui" }
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+zbus.workspace = true
+zbus_macros.workspace = true
 
 [[bin]]
 name = "rsdm"

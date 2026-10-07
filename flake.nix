@@ -38,6 +38,9 @@
               pkgs.pam
               pkgs.wayland
               pkgs.libxkbcommon
+              pkgs.libsm
+              pkgs.libice
+              pkgs.xorgproto
             ];
             cargoExtraArgs = "-p rsdm";
             doCheck = false;
@@ -72,6 +75,8 @@
             pkgs.pam
             pkgs.stdenv.cc.cc.lib
             pkgs.wayland
+            pkgs.libsm
+            pkgs.libice
           ];
           dontConfigure = true;
           dontBuild = true;
@@ -111,9 +116,19 @@
         default = rsdm;
       });
 
-      checks = forAllSystems (system: {
-        module = import ./packaging/nix/check.nix { inherit self nixpkgs system; };
-      });
+      checks = forAllSystems (system:
+        let
+          pkgs = pkgsFor system;
+          rsdm = self.packages.${system}.rsdm-source;
+        in {
+          module = import ./packaging/nix/check.nix { inherit self nixpkgs system; };
+          session-lifecycle = import ./tests/session-lifecycle { inherit pkgs rsdm; };
+          native-niri = import ./tests/session-lifecycle/niri.nix { inherit pkgs rsdm; };
+          native-de-handoff = import ./tests/session-lifecycle/native.nix { inherit pkgs rsdm; };
+          power-lifecycle = import ./tests/session-lifecycle/power.nix { inherit pkgs rsdm; };
+          lock-power = import ./tests/session-lifecycle/lock.nix { inherit pkgs rsdm; };
+          dm-lifecycle = import ./tests/session-lifecycle/dm.nix { inherit pkgs rsdm; };
+        });
 
       devShells = forAllSystems (
         system:
@@ -131,12 +146,15 @@
               pam
               wayland
               libxkbcommon
+              libsm
+              libice
+              xorgproto
               gcc
               clang
             ];
             shellHook = ''
-              export PKG_CONFIG_PATH="${pkgs.pam}/lib/pkgconfig:${pkgs.wayland.dev}/lib/pkgconfig:${pkgs.libxkbcommon.dev}/lib/pkgconfig''${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-              export LD_LIBRARY_PATH="${pkgs.wayland}/lib:${pkgs.libxkbcommon}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+              export PKG_CONFIG_PATH="${pkgs.pam}/lib/pkgconfig:${pkgs.wayland.dev}/lib/pkgconfig:${pkgs.libxkbcommon.dev}/lib/pkgconfig:${pkgs.libsm.dev}/lib/pkgconfig:${pkgs.libice.dev}/lib/pkgconfig:${pkgs.xorgproto}/share/pkgconfig''${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+              export LD_LIBRARY_PATH="${pkgs.wayland}/lib:${pkgs.libxkbcommon}/lib:${pkgs.libsm}/lib:${pkgs.libice}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             '';
           };
         }

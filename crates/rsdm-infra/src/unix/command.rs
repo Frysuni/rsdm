@@ -13,8 +13,9 @@ impl PreparedCommand {
     /// runs the session directly while a prefix like `[rsdm, session, start,
     /// --]` wraps it in the session manager.
     pub fn new_wrapped(prefix: &[String], exec: &str) -> Result<Self, SessionLaunchError> {
-        let mut args = prefix.to_vec();
-        args.extend(split_exec(exec)?);
+        let session_argv = split_exec(exec)?;
+        let mut args = if is_session_manager_command(&session_argv) { Vec::new() } else { prefix.to_vec() };
+        args.extend(session_argv);
         let argv = args
             .iter()
             .enumerate()
@@ -37,11 +38,23 @@ impl PreparedCommand {
     }
 }
 
+pub(super) fn is_session_manager_command(argv: &[String]) -> bool {
+    let rsdm = argv.first().is_some_and(|program| std::path::Path::new(program).file_name().is_some_and(|name| name == "rsdm"));
+    if !rsdm { return false; }
+    let mut arguments = argv.iter().skip(1);
+    while let Some(argument) = arguments.next() {
+        if argument == "--config" { arguments.next(); continue; }
+        if argument.starts_with("--config=") { continue; }
+        return argument == "session" && arguments.next().is_some_and(|action| action == "start");
+    }
+    false
+}
+
 pub fn cstring(label: &str, value: &str) -> Result<CString, SessionLaunchError> {
     CString::new(value).map_err(|_| SessionLaunchError::Setup(format!("{label} contains NUL byte")))
 }
 
-fn split_exec(input: &str) -> Result<Vec<String>, SessionLaunchError> {
+pub fn split_exec(input: &str) -> Result<Vec<String>, SessionLaunchError> {
     let mut args = Vec::new();
     let mut current = String::new();
     let mut in_quotes = false;
@@ -151,5 +164,15 @@ mod tests {
             vec!["rsdm", "session", "start", "--", "niri-session"]
         );
         assert_eq!(command.program.to_string_lossy(), "rsdm");
+    }
+
+    #[test]
+    fn explicit_session_start_is_not_wrapped_twice() {
+        let prefix = vec!["/usr/bin/rsdm".into(), "session".into(), "start".into(), "--".into()];
+        let command = PreparedCommand::new_wrapped(&prefix, "/usr/bin/rsdm --config /etc/example.toml session start -- example-session").unwrap();
+        assert_eq!(argv_strings(&command), ["/usr/bin/rsdm", "--config", "/etc/example.toml", "session", "start", "--", "example-session"]);
+        let command = PreparedCommand::new_wrapped(&prefix, "example -- session start").unwrap();
+        assert_eq!(&argv_strings(&command)[..4], prefix.as_slice());
+        assert!(!is_session_manager_command(&split_exec("rsdm app -- example session start").unwrap()));
     }
 }

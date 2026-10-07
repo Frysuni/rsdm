@@ -5,7 +5,8 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use super::systemd::ManagedUnitKind;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ManagedUnitKind { Session, App }
 
 static NEXT_UNIT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -27,6 +28,12 @@ pub(super) fn unique_unit_name(kind: ManagedUnitKind, program: &str) -> String {
     }
 }
 
+pub(super) fn app_unit_name(program: &str, generation: &str) -> String {
+    let name = unique_unit_name(ManagedUnitKind::App, program);
+    let (identity, instance) = name.split_once('@').expect("application instance");
+    format!("{identity}@{generation}-{instance}.service")
+}
+
 fn sanitize(program: &str) -> String {
     let stem = Path::new(program)
         .file_name()
@@ -34,7 +41,7 @@ fn sanitize(program: &str) -> String {
         .unwrap_or(program);
     let mut sanitized = String::new();
     let mut previous_dash = false;
-    for ch in stem.chars() {
+    for ch in stem.chars().take(100) {
         if ch.is_ascii_alphanumeric() {
             sanitized.push(ch);
             previous_dash = false;

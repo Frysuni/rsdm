@@ -1,8 +1,8 @@
-use std::{ffi::CString, path::PathBuf};
+use std::{ffi::CString, os::fd::OwnedFd, path::PathBuf};
 
 use rsdm_core::{
     domain::{Session, SessionExit},
-    ports::{ResolvedUser, SessionLaunchError, SessionLaunchRequest, SessionLauncher},
+    ports::{ResolvedUser, RunningSession, SessionLaunchError, SessionLaunchRequest, SessionLauncher},
 };
 
 use super::command::{PreparedCommand, cstring};
@@ -13,9 +13,10 @@ struct SessionLaunchPlan {
     uid: u32,
     gid: u32,
     home: PathBuf,
-    session_id: String,
+    desktop_entry_id: String,
     command: String,
     environment: Vec<(String, String)>,
+    generation: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -28,27 +29,34 @@ impl UnixSessionLauncher {
         pam_environment: &[(String, String)],
         vtnr: Option<u32>,
         seat: &str,
-    ) -> SessionLaunchPlan {
-        SessionLaunchPlan {
+        wrapper: &[String],
+    ) -> Result<SessionLaunchPlan, SessionLaunchError> {
+        let mut environment = session_environment(
+            user, &session.desktop_names, pam_environment, vtnr, seat,
+        );
+        environment.retain(|(name, _)| name != "RSDM_DESKTOP_ENTRY_ID");
+        environment.push(("RSDM_DESKTOP_ENTRY_ID".into(), session.id.clone()));
+        let coordinated = !wrapper.is_empty() || super::command::is_session_manager_command(&super::command::split_exec(&session.exec)?);
+        let generation = if coordinated {
+            Some(crate::session_manager::new_generation().map_err(|error| SessionLaunchError::Setup(error.to_string()))?)
+        } else { None };
+        environment.retain(|(name, _)| name != "RSDM_SESSION_GENERATION");
+        if let Some(generation) = &generation { environment.push(("RSDM_SESSION_GENERATION".into(), generation.clone())); }
+        Ok(SessionLaunchPlan {
             username: user.username.clone(),
             uid: user.uid,
             gid: user.gid,
             home: PathBuf::from(&user.home),
-            session_id: session.id.clone(),
+            desktop_entry_id: session.id.clone(),
             command: session.exec.clone(),
-            environment: session_environment(
-                user,
-                &session.desktop_names,
-                pam_environment,
-                vtnr,
-                seat,
-            ),
-        }
+            environment,
+            generation,
+        })
     }
 }
 
 impl SessionLauncher for UnixSessionLauncher {
-    fn launch(&self, request: SessionLaunchRequest<'_>) -> Result<SessionExit, SessionLaunchError> {
+    fn start(&self, request: SessionLaunchRequest<'_>) -> Result<Box<dyn RunningSession>, SessionLaunchError> {
         refuse_if_output_is_tty()?;
 
         let plan = Self::plan(
@@ -57,40 +65,74 @@ impl SessionLauncher for UnixSessionLauncher {
             request.pam_environment,
             request.vtnr,
             request.seat,
-        );
+            request.wrapper,
+        )?;
         tracing::info!(
             username = %plan.username,
             uid = plan.uid,
             gid = plan.gid,
-            session_id = %plan.session_id,
+            desktop_entry_id = %plan.desktop_entry_id,
             command = %plan.command,
             wrapper = ?request.wrapper,
             "launching user session"
         );
         tracing::debug!(
             username = %plan.username,
-            session_id = %plan.session_id,
+            desktop_entry_id = %plan.desktop_entry_id,
             env_names = ?plan.environment.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
             "prepared user session environment"
         );
-        let command = PreparedCommand::new_wrapped(request.wrapper, &plan.command)?;
-        let username = cstring("username", &plan.username)?;
-        let home = cstring("home", path_to_str(&plan.home)?)?;
+        let pid = spawn_child(&plan, request.wrapper)?;
+        tracing::info!(pid, username = %plan.username, desktop_entry_id = %plan.desktop_entry_id, "user session child spawned");
 
-        let env = prepare_environment(&plan.environment)?;
+        // Starting a bus executor before the manual fork would leave the child
+        // with locks belonging to threads that no longer exist.
+        let shutdown_guard = if plan.generation.is_some() {
+            match crate::power::pam_shutdown_guard() {
+                Ok(guard) => Some(guard),
+                Err(error) => { tracing::error!(%error, "PAM shutdown delay inhibitor unavailable"); None }
+            }
+        } else { None };
+        Ok(Box::new(UnixRunningSession { pid, plan, shutdown_guard, reaped: false }))
+    }
+}
 
-        // SAFETY: fork has no Rust-side memory safety preconditions. The child
-        // only calls async-signal-safe-ish libc setup followed by exec/_exit.
-        let pid = unsafe { libc::fork() };
-        if pid < 0 {
-            return Err(last_os_error("fork"));
+fn spawn_child(plan: &SessionLaunchPlan, wrapper: &[String]) -> Result<libc::pid_t, SessionLaunchError> {
+    let command = PreparedCommand::new_wrapped(wrapper, &plan.command)?;
+    let username = cstring("username", &plan.username)?;
+    let home = cstring("home", path_to_str(&plan.home)?)?;
+    let environment = prepare_environment(&plan.environment)?;
+
+    // SAFETY: all command data is prepared before fork. No bus executor has
+    // been started; the child sets credentials and executes the session.
+    let pid = unsafe { libc::fork() };
+    if pid < 0 { return Err(last_os_error("fork")); }
+    if pid == 0 { child_exec(plan, &command, &username, &home, &environment); }
+    Ok(pid)
+}
+
+struct UnixRunningSession {
+    pid: libc::pid_t,
+    plan: SessionLaunchPlan,
+    shutdown_guard: Option<OwnedFd>,
+    reaped: bool,
+}
+
+impl RunningSession for UnixRunningSession {
+    fn wait(&mut self) -> Result<SessionExit, SessionLaunchError> {
+        let exit = wait_for_child(self.pid);
+        self.reaped = true;
+        if let Some(generation) = &self.plan.generation {
+            super::session_cleanup::cleanup(&self.plan.environment, self.plan.uid, self.plan.gid, generation)?;
         }
-        if pid == 0 {
-            child_exec(&plan, &command, &username, &home, &env);
-        }
-        tracing::info!(pid, username = %plan.username, session_id = %plan.session_id, "user session child spawned");
+        let _ = &self.shutdown_guard;
+        exit
+    }
+}
 
-        wait_for_child(pid)
+impl Drop for UnixRunningSession {
+    fn drop(&mut self) {
+        if !self.reaped { let _ = wait_for_child(self.pid); }
     }
 }
 

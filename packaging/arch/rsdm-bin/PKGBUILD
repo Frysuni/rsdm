@@ -7,7 +7,7 @@ pkgdesc='Standalone Rust TTY/TUI Wayland display manager and screen locker (preb
 arch=('x86_64' 'aarch64')
 url='https://github.com/Frysuni/rsdm'
 license=('GPL-3.0-only')
-depends=('pam' 'systemd' 'wayland' 'libxkbcommon' 'gcc-libs')
+depends=('pam' 'systemd>=250' 'wayland' 'libxkbcommon' 'libsm' 'libice' 'gcc-libs')
 provides=('rsdm')
 conflicts=('rsdm')
 backup=('etc/rsdm.toml'

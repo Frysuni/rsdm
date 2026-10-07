@@ -5,9 +5,13 @@ toolchain:
 
 ```sh
 sudo dnf install rust cargo gcc pkgconf-pkg-config pam-devel wayland-devel \
-  libxkbcommon-devel
+  libxkbcommon-devel libSM-devel libICE-devel
 cargo build --release --locked -p rsdm
 ```
+
+The session manager requires systemd 250 or newer, a logind login session and
+a user D-Bus. Release binaries also need `libSM` and `libICE` at runtime.
+XSMP is enabled by default; see [session-manager.md](../session-manager.md).
 
 Install the runtime files from the repository root:
 

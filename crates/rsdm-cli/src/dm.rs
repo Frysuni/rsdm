@@ -1,7 +1,6 @@
 use std::{
     fmt,
     path::{Path, PathBuf},
-    process::Command,
     thread,
     time::Duration,
 };
@@ -21,7 +20,7 @@ use rsdm_tui::RatatuiLoginUi;
 
 mod login;
 
-pub fn run_dm(config: AppConfig) -> Result<()> {
+pub fn run_dm(config: AppConfig, config_path: &Path) -> Result<()> {
     if !config.dm.enable {
         tracing::info!("display manager is disabled by configuration");
         return Ok(());
@@ -30,7 +29,7 @@ pub fn run_dm(config: AppConfig) -> Result<()> {
     ensure_stdio_not_active_tty(&config)?;
     install_terminate_handler();
     let vt = acquire_vt(&config.dm.tty.path)?;
-    let wrapper = session_wrapper(&config);
+    let wrapper = session_wrapper(&config, config_path)?;
     let sessions = resolve_sessions(&config)?;
     let store = FileUserStore::new(&config.paths.cache_dir);
     let limiter = MemoryLoginAttemptLimiter::new(
@@ -115,14 +114,9 @@ fn run_greeter_loop(
 
 fn request_power_action(action: &str) -> Result<Option<String>> {
     tracing::warn!(action, "power action requested from greeter");
-    let status = match Command::new("systemctl").arg(action).status() {
-        Ok(status) => status,
+    match rsdm_infra::power::request_direct(action) {
+        Ok(()) => {}
         Err(error) => return Ok(Some(format!("failed to request {action}: {error}"))),
-    };
-    if !status.success() {
-        return Ok(Some(format!(
-            "failed to request {action}: systemctl exited with {status}"
-        )));
     }
 
     while !terminate_requested() {
@@ -158,23 +152,22 @@ pub(crate) fn ensure_stdio_not_active_tty(config: &AppConfig) -> Result<()> {
     Ok(())
 }
 
-fn session_wrapper(config: &AppConfig) -> Vec<String> {
+fn session_wrapper(config: &AppConfig, config_path: &Path) -> Result<Vec<String>> {
     if !config.session_manager.enabled {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
-    match std::env::current_exe() {
-        Ok(executable) => vec![
-            executable.to_string_lossy().into_owned(),
-            "session".to_string(),
-            "start".to_string(),
-            "--".to_string(),
-        ],
-        Err(error) => {
-            tracing::warn!(%error, "cannot resolve rsdm binary; launching session directly");
-            Vec::new()
-        }
-    }
+    let executable = std::env::current_exe().context("resolving the session manager binary")?;
+    // The session child changes to the user's home before invoking this wrapper.
+    let config_path = std::path::absolute(config_path).context("resolving the configuration path")?;
+    Ok(vec![
+        executable.to_string_lossy().into_owned(),
+        "--config".to_string(),
+        config_path.to_string_lossy().into_owned(),
+        "session".to_string(),
+        "start".to_string(),
+        "--".to_string(),
+    ])
 }
 
 fn resolve_sessions(config: &AppConfig) -> Result<Vec<Session>> {
@@ -239,6 +232,24 @@ mod tests {
         config.dm.enable = false;
         config.dm.tty.path = "/path/that/must/not/be/opened".to_string();
 
-        assert!(run_dm(config).is_ok());
+        assert!(run_dm(config, Path::new("unused.toml")).is_ok());
+    }
+
+    #[test]
+    fn session_wrapper_preserves_the_selected_configuration_after_chdir() {
+        let config = AppConfig::default();
+        let path = Path::new("custom directory/rsdm.toml");
+        let wrapper = session_wrapper(&config, path).unwrap();
+
+        assert_eq!(wrapper[1], "--config");
+        assert_eq!(Path::new(&wrapper[2]), std::path::absolute(path).unwrap());
+        assert_eq!(&wrapper[3..], &["session", "start", "--"]);
+    }
+
+    #[test]
+    fn disabled_session_manager_does_not_wrap_the_desktop() {
+        let mut config = AppConfig::default();
+        config.session_manager.enabled = false;
+        assert!(session_wrapper(&config, Path::new("unused.toml")).unwrap().is_empty());
     }
 }
