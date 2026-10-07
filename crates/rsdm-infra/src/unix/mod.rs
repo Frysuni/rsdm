@@ -3,6 +3,7 @@ mod fallback;
 mod getty_query;
 mod group;
 mod launcher;
+pub(crate) mod process_handle;
 mod session_environment;
 mod session_cleanup;
 mod session_leader;

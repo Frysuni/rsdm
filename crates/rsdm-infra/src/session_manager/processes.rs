@@ -1,6 +1,6 @@
 //! Cgroup membership and signals that cannot hit a reused process ID.
 
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+pub(super) use crate::unix::process_handle::ProcessHandle;
 
 use super::{SessionError, bus::{UserManager, missing_unit}, runtime::AppRecord};
 
@@ -93,42 +93,6 @@ pub(super) fn terminate_main(manager: &UserManager, app: &AppRecord) -> Result<(
         handle.signal(libc::SIGTERM)?;
     }
     Ok(())
-}
-
-pub(super) struct ProcessHandle(OwnedFd);
-
-impl ProcessHandle {
-    pub fn open(pid: u32) -> Result<Option<Self>, SessionError> {
-        // SAFETY: pidfd_open takes a process ID and flags, and returns a new FD.
-        let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
-        if fd < 0 {
-            let error = std::io::Error::last_os_error();
-            return if error.raw_os_error() == Some(libc::ESRCH) { Ok(None) } else { Err(error.into()) };
-        }
-        // SAFETY: the successful syscall returned a new descriptor we own.
-        Ok(Some(Self(unsafe { OwnedFd::from_raw_fd(fd as i32) })))
-    }
-
-    #[cfg(feature = "xsmp")]
-    pub fn alive(&self) -> Result<bool, SessionError> {
-        let mut descriptor = libc::pollfd { fd: self.0.as_raw_fd(), events: libc::POLLIN, revents: 0 };
-        // SAFETY: descriptor describes the owned pidfd; the poll never blocks.
-        let result = unsafe { libc::poll(&mut descriptor, 1, 0) };
-        if result < 0 { return Err(std::io::Error::last_os_error().into()); }
-        Ok(result == 0)
-    }
-
-    pub fn signal(&self, signal: i32) -> Result<(), SessionError> {
-        // SAFETY: the owned pidfd identifies the process; no siginfo is supplied.
-        let result = unsafe {
-            libc::syscall(libc::SYS_pidfd_send_signal, self.0.as_raw_fd(), signal, std::ptr::null::<libc::siginfo_t>(), 0)
-        };
-        if result < 0 {
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() != Some(libc::ESRCH) { return Err(error.into()); }
-        }
-        Ok(())
-    }
 }
 
 pub(super) fn monotonic_usec() -> Result<u64, SessionError> {

@@ -17,7 +17,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod process_identity;
 mod state_file;
+use process_identity::{pin as pin_process, process_start_time, verify as verify_process};
 use state_file::read as read_state_file;
 
 const STATE_VERSION: u8 = 1;
@@ -30,7 +32,7 @@ pub struct LockState {
     pub version: u8,
     pub pid: u32,
     pub uid: u32,
-    /// Linux `/proc/<pid>/stat` field 22, immune to PID reuse.
+    /// Linux `/proc/<pid>/stat` field 22, checked after pinning emergency targets.
     pub start_time: u64,
 }
 
@@ -125,11 +127,8 @@ pub fn request_emergency_unlock(
         return Err(LockControlError::RootRequired);
     }
     let state = lock_state(uid)?.ok_or(LockControlError::NotLocked(uid))?;
-    // SAFETY: `state.pid` was checked against procfs immediately above. SIGUSR1
-    // only raises the locker's atomic emergency flag.
-    if unsafe { libc::kill(state.pid as libc::pid_t, libc::SIGUSR1) } != 0 {
-        return Err(LockControlError::Signal(std::io::Error::last_os_error()));
-    }
+    let process = pin_process(&state, uid)?;
+    process.signal(libc::SIGUSR1).map_err(LockControlError::Signal)?;
 
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
@@ -182,64 +181,6 @@ fn state_path(uid: u32) -> PathBuf {
     runtime_dir(uid).join(STATE_FILE)
 }
 
-fn verify_process(state: &LockState, expected_uid: u32) -> Result<(), LockControlError> {
-    if state.uid != expected_uid || process_uid(state.pid)? != expected_uid {
-        return Err(LockControlError::ProcessMismatch(state.pid));
-    }
-    if process_start_time(state.pid)? != state.start_time {
-        return Err(LockControlError::ProcessMismatch(state.pid));
-    }
-    let exe = fs::read_link(format!("/proc/{}/exe", state.pid)).map_err(|source| {
-        LockControlError::Io {
-            path: PathBuf::from(format!("/proc/{}/exe", state.pid)),
-            source,
-        }
-    })?;
-    if !matches!(
-        exe.file_name().and_then(|name| name.to_str()),
-        Some("rsdm" | "rsdm (deleted)")
-    ) {
-        return Err(LockControlError::ProcessMismatch(state.pid));
-    }
-    let cmdline = fs::read(format!("/proc/{}/cmdline", state.pid)).map_err(|source| {
-        LockControlError::Io {
-            path: PathBuf::from(format!("/proc/{}/cmdline", state.pid)),
-            source,
-        }
-    })?;
-    if !cmdline.split(|byte| *byte == 0).any(|arg| arg == b"lock") {
-        return Err(LockControlError::ProcessMismatch(state.pid));
-    }
-    Ok(())
-}
-
-fn process_uid(pid: u32) -> Result<u32, LockControlError> {
-    let path = PathBuf::from(format!("/proc/{pid}/status"));
-    let status =
-        fs::read_to_string(&path).map_err(|source| LockControlError::Io { path, source })?;
-    status
-        .lines()
-        .find_map(|line| line.strip_prefix("Uid:"))
-        .and_then(|uids| uids.split_whitespace().nth(1))
-        .and_then(|uid| uid.parse().ok())
-        .ok_or(LockControlError::InvalidProc(pid))
-}
-
-fn process_start_time(pid: u32) -> Result<u64, LockControlError> {
-    let path = PathBuf::from(format!("/proc/{pid}/stat"));
-    let stat = fs::read_to_string(&path).map_err(|source| LockControlError::Io { path, source })?;
-    let after_comm = stat
-        .rfind(')')
-        .and_then(|end| stat.get(end + 1..))
-        .ok_or(LockControlError::InvalidProc(pid))?;
-    // The remaining fields begin at field 3 (state), so field 22 is index 19.
-    after_comm
-        .split_whitespace()
-        .nth(19)
-        .and_then(|field| field.parse().ok())
-        .ok_or(LockControlError::InvalidProc(pid))
-}
-
 #[derive(Debug, Error)]
 pub enum LockControlError {
     #[error("emergency unlock requires root privileges")]
@@ -277,7 +218,7 @@ mod tests {
     #[test]
     fn reads_own_proc_identity() {
         let pid = std::process::id();
-        assert_eq!(process_uid(pid).expect("uid"), current_uid());
+        assert_eq!(process_identity::process_uid(pid).expect("uid"), current_uid());
         assert!(process_start_time(pid).expect("start time") > 0);
     }
 

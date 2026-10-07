@@ -27,7 +27,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 9 | Move bounded niri IPC off the Wayland loop | pending |
 | 10 | Cancellable, bounded PAM helper processes | pending |
 | 11 | Remove complex post-PAM fork child work | pending |
-| 12 | Pin emergency unlock targets with pidfds | pending |
+| 12 | Pin emergency unlock targets with pidfds | implemented; runtime checks pending |
 | 13 | Validate lock state through one open descriptor | implemented; runtime checks pending |
 | 14 | Honor PAM-requested authentication delay | pending |
 | 15 | Account throttling after PAM identity mapping | pending |
@@ -69,7 +69,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 51 | Reject ambiguous fixed-session display names | pending |
 | 52 | Use logind power capabilities for lock UI | pending |
 | 53 | Validate ready timeout representability | pending |
-| 54 | Document pidfd emergency unlock protection | pending |
+| 54 | Document pidfd emergency unlock protection | implemented with 12; runtime checks pending |
 | 55 | Match bounded recovery-record documentation | fixed with 5 |
 | 56 | Match bounded-worker architecture claims | pending |
 | 57 | Correct obsolete first-seat documentation | pending |
@@ -114,3 +114,8 @@ Record unexecuted runtime checks explicitly for later verification.
   descriptor's owner/type/mode, and cap input at 4 KiB. Regression tests cover
   pathname replacement, symlinks, FIFOs, shared permissions, ownership, and size;
   only syntax checks have run under the battery restriction.
+- 12, 54: emergency unlock pins a pidfd, repeats UID/start-time/executable/argv
+  validation, checks that the pinned process remains alive, and signals only
+  through that handle. The existing session pidfd primitive is shared through
+  `unix::process_handle`; session ownership and ESRCH behavior remain unchanged.
+  Syntax checks passed; pidfd and isolated emergency-unlock tests remain pending.

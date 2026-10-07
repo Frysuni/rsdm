@@ -68,8 +68,10 @@ of other names.
   black are opaque lock surfaces, while `off` is used only after the compositor
   has confirmed the session lock and falls back to opaque black if unsupported
 - Emergency `rsdm unlock` is root-only. It verifies the runtime file owner,
-  target UID, executable name, `lock` argv and `/proc` start time before sending
-  SIGUSR1, preventing stale PID reuse or signaling an unrelated process. The
+  target UID, executable name, `lock` argv and `/proc` start time, then pins the
+  process with a pidfd and repeats process validation. It verifies the pinned
+  process survived those checks and sends SIGUSR1 through that descriptor, so
+  numeric PID reuse cannot redirect the signal to a replacement process. The
   signal handler also checks the kernel-supplied sender UID and ignores every
   non-root signal, so `kill -USR1` cannot bypass PAM. The live locker then sends
   the ordinary Wayland `unlock` request; killing a locker is intentionally never
