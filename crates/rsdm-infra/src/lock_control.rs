@@ -8,14 +8,17 @@
 use std::{
     fs::{self, OpenOptions},
     io::Write,
-    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
-    path::{Path, PathBuf},
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    path::PathBuf,
     thread,
     time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+mod state_file;
+use state_file::read as read_state_file;
 
 const STATE_VERSION: u8 = 1;
 const STATE_DIR: &str = "rsdm";
@@ -40,7 +43,7 @@ pub struct LockStateGuard {
 
 impl Drop for LockStateGuard {
     fn drop(&mut self) {
-        if read_state_file(&self.path).is_ok_and(|state| state == self.state) {
+        if read_state_file(&self.path, self.state.uid).is_ok_and(|state| state == self.state) {
             let _ = fs::remove_file(&self.path);
         }
     }
@@ -103,18 +106,12 @@ pub fn register_lock() -> Result<LockStateGuard, LockControlError> {
 /// Return verified live lock state for `uid`; stale or forged records are errors.
 pub fn lock_state(uid: u32) -> Result<Option<LockState>, LockControlError> {
     let path = state_path(uid);
-    let metadata = match fs::symlink_metadata(&path) {
-        Ok(metadata) => metadata,
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => {
-            return Err(LockControlError::Io {
-                path: path.clone(),
-                source,
-            });
-        }
+    let state = match read_state_file(&path, uid) {
+        Ok(state) => state,
+        Err(LockControlError::Io { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
     };
-    verify_state_file_metadata(&path, &metadata, uid)?;
-    let state = read_state_file(&path)?;
     verify_process(&state, uid)?;
     Ok(Some(state))
 }
@@ -183,32 +180,6 @@ fn runtime_dir(uid: u32) -> PathBuf {
 
 fn state_path(uid: u32) -> PathBuf {
     runtime_dir(uid).join(STATE_FILE)
-}
-
-fn read_state_file(path: &Path) -> Result<LockState, LockControlError> {
-    let text = fs::read_to_string(path).map_err(|source| LockControlError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let state: LockState = toml::from_str(&text).map_err(LockControlError::Decode)?;
-    if state.version != STATE_VERSION {
-        return Err(LockControlError::UnsupportedVersion(state.version));
-    }
-    Ok(state)
-}
-
-fn verify_state_file_metadata(
-    path: &Path,
-    metadata: &fs::Metadata,
-    uid: u32,
-) -> Result<(), LockControlError> {
-    if !metadata.file_type().is_file()
-        || metadata.uid() != uid
-        || metadata.permissions().mode() & 0o022 != 0
-    {
-        return Err(LockControlError::UnsafeState(path.to_path_buf()));
-    }
-    Ok(())
 }
 
 fn verify_process(state: &LockState, expected_uid: u32) -> Result<(), LockControlError> {

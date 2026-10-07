@@ -28,7 +28,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 10 | Cancellable, bounded PAM helper processes | pending |
 | 11 | Remove complex post-PAM fork child work | pending |
 | 12 | Pin emergency unlock targets with pidfds | pending |
-| 13 | Validate lock state through one open descriptor | pending |
+| 13 | Validate lock state through one open descriptor | implemented; runtime checks pending |
 | 14 | Honor PAM-requested authentication delay | pending |
 | 15 | Account throttling after PAM identity mapping | pending |
 | 16 | Audit successful starts after launch confirmation | fixed |
@@ -110,3 +110,7 @@ Record unexecuted runtime checks explicitly for later verification.
 - 2: application leases use nonblocking flock with a 250 ms retry budget for
   short record updates. Contention and successful short-wait regression tests
   were added and syntax-checked; execute them when build restrictions are lifted.
+- 13: lock-state reads open once with NOFOLLOW/NONBLOCK/CLOEXEC, validate that
+  descriptor's owner/type/mode, and cap input at 4 KiB. Regression tests cover
+  pathname replacement, symlinks, FIFOs, shared permissions, ownership, and size;
+  only syntax checks have run under the battery restriction.
