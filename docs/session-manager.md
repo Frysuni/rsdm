@@ -239,6 +239,23 @@ InvocationID, never KillUser or a UID process sweep. Root runs recovery after
 changing to the session UID; user records and quit commands are not interpreted
 with elevated privileges.
 
+User-manager reload and reexec, including the reexec performed by a NixOS
+configuration switch, do not request logout. Temporary D-Bus read failures defer
+observation and readiness checks. If a start or stop reply is lost, RSDM checks
+the resulting unit state without sending the command again.
+
+After a user-bus restart, the coordinator reconnects its manager and control
+connections, restores references to matching owned invocations and republishes
+matching activation-environment values. A private runtime lock prevents another
+coordinator or recovery helper from replacing the live session while its D-Bus
+name is unavailable. Applications and native desktop services still need to
+handle their own disconnected D-Bus connections; RSDM cannot reconnect them.
+
+Installing an updated package does not replace a running coordinator. When
+upgrading from an affected version, end the old session before applying a live
+configuration switch, then start the updated DM and a new session. A reboot into
+the updated configuration also starts the new coordinator.
+
 ## Power and PAM lifetime
 
 Managed reboot/poweroff checks logind authorization, prepares apps, then requests
