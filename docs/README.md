@@ -10,7 +10,7 @@ for Wayland sessions. No greetd, GTK, Qt, webview, or Electron. One binary,
 | `rsdm lock`             | lock the current Wayland session                    |
 | `rsdm idle`             | lock after compositor-reported inactivity           |
 | `rsdm unlock`           | privileged emergency unlock of a live rsdm locker   |
-| `rsdm logs`             | open the system/user journal interactively          |
+| `rsdm logs`             | show the system/user journal, optionally following new entries |
 | `rsdm status`           | show config and live lock state                     |
 | `rsdm session start`    | start coordination around the original session command |
 | `rsdm session finalize` | export env + activate the session from a compositor |
@@ -27,30 +27,44 @@ also `RSDM_CONFIG`).
 
 ## CLI output
 
-Help, system/session status, command results and diagnostics use colored panels
-in the terminal. Reports stay in scrollback and the command returns normally.
+Help, system/session status and command results use rounded panels, section
+headings and colored badges in the terminal. Every command's help includes
+examples. Runtime diagnostics use the same palette with a level badge, source
+and timestamp. Reports stay in scrollback and the command returns normally.
 Long values wrap to the available width, including application unit names and
 configuration paths.
 
 ```sh
 rsdm --help
+rsdm app --help
 rsdm status
 rsdm session status
 rsdm validate-config
+rsdm logs --component dm --lines 50
+rsdm logs --follow
 env NO_COLOR=1 rsdm status
 rsdm session status > session-status.txt
 ```
 
-Colors distinguish successful states, pending/cancelled requests, warnings and
-errors. Redirected streams keep the plain text format. A nonempty `NO_COLOR`,
+Teal highlights commands and values, purple marks sections, green indicates
+success, yellow marks warnings/pending requests and rose indicates errors.
+Redirected streams keep the plain text format. A nonempty `NO_COLOR`,
 `TERM=dumb` or a terminal narrower than 28 columns selects plain output too.
 Errors and warnings remain on stderr, and command exit codes retain their
 meaning.
 
 Successful app launches, finalize and cancel requests show a confirmation when
 terminal styling is active; they stay quiet in scripts and autostart. The
-Greeter and Lock keep their existing interfaces. `rsdm logs` opens journalctl
-with its normal pager/follow behavior and formatting.
+Greeter and Lock keep their existing interfaces.
+
+In a styled terminal, `rsdm logs` reads the journal through `journalctl` and
+prints entries directly into scrollback without a pager. Each entry shows a UTC
+timestamp, severity badge and service/source; multiline messages remain
+readable and long lines wrap. `--follow` prints entries as they arrive; press
+Ctrl+C to stop. The existing current-boot and component filters still apply.
+Journal access permissions and failure exit codes remain those of `journalctl`.
+When styling is disabled or stdout is redirected, logs use journalctl's
+original `short-precise` format and normal pager/follow behavior.
 
 ## Guides
 

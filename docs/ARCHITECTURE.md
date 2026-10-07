@@ -28,6 +28,13 @@ narrow terminals. The Greeter's ratatui backend and Lock's Wayland rendering are
 separate. CLI diagnostic events remain in file/journal logs; their terminal
 reports replace duplicate tracing lines while styling is active.
 
+The CLI's `logs` module retains journalctl filters and access checks. Styled
+terminals request newline-delimited JSON, decode text/binary fields and render
+each record incrementally through `output/journal`. Runtime tracing events use
+`output/events` with the same layout; span context and event fields are retained.
+The CLI does not restyle file logs. Plain journal output delegates directly to
+journalctl as before.
+
 Core does not depend on PAM, libc, ratatui, systemd, Wayland, or other OS APIs.
 There is no "skin" concept: a single composition in `rsdm-ui` renders on both
 fronts, so a theme/border/background/title means the same on the VT and on

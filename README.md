@@ -69,9 +69,12 @@ rsdm app -- waybar           # launch a program into the graphical session
 rsdm validate-config         # check the config
 ```
 
-The CLI uses colored panels, status indicators and highlighted help in the
-terminal. Reports stay in normal scrollback. Pipes receive plain text; use
-`env NO_COLOR=1 rsdm status` to disable terminal styling.
+The CLI uses rounded panels, colored status badges and highlighted help with
+examples for every command. `rsdm logs` shows timestamps, sources and severity
+badges in the same palette; `--follow` streams new entries until Ctrl+C. Output
+stays in normal scrollback. Pipes receive plain text; use
+`env NO_COLOR=1 rsdm status` to disable terminal styling. See
+[CLI output](docs/README.md#cli-output) for details.
 
 ## Session manager
 
