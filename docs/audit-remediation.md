@@ -51,7 +51,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 33 | Reuse render buffers and avoid unnecessary frames | pending |
 | 34 | Cache scaled wallpaper | pending |
 | 35 | Recover output-power changes after locker crashes | pending |
-| 36 | Harden remembered-state reads | pending |
+| 36 | Harden remembered-state reads | implemented; runtime checks pending |
 | 37 | Harden privileged log file opens | pending |
 | 38 | Avoid console font temporary-file collisions | pending |
 | 39 | Reap closed generation lease files safely | pending |
@@ -172,3 +172,10 @@ Record unexecuted runtime checks explicitly for later verification.
   [official Arch announcement](https://archlinux.org/news/aur-migration-new-ssh-hostkeys/).
   YAML/shell/SSH configuration parsing and fingerprint checks passed locally;
   no authenticated AUR connection, workflow execution, or publication occurred.
+- 36: remembered state opens without symlink following or FIFO blocking,
+  validates regular-file ownership/private permissions through the same
+  descriptor, and bounds reads/writes to 4 KiB. Missing files remain empty state;
+  unsafe files are errors rather than silently accepted data. Tests cover
+  descriptor/path replacement, symlinks (including dangling links), FIFOs,
+  directories, shared permissions, exact size, oversized data, and writer
+  round-tripping. Syntax/diff checks passed; runtime checks remain pending.

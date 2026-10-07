@@ -41,6 +41,11 @@ There are no shared design defaults and no overrides: `[dm.design]` and
 `[lock.design]` are each a complete design, and a field left unset in either
 falls back to its own default - never to the other front's value.
 
+Remembered username/session state in `paths.cache_dir` must be a regular file
+owned by the process user, with no group/other permissions. Reads reject
+symlinks and files larger than 4 KiB; missing state simply leaves the fields
+unset. Normal writes create private state automatically.
+
 ## Choosing a session (`[dm]`)
 
 Set `fixed_session` to a `.desktop` id, a unique session Name/Exec, or a literal

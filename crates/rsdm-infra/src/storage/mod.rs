@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
+    io::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -8,6 +8,8 @@ use std::{
 
 use rsdm_core::ports::{StorageError, UserStore};
 use serde::{Deserialize, Serialize};
+
+mod state_file;
 
 const REMEMBERED_FILE: &str = "remembered.toml";
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -25,15 +27,9 @@ impl FileUserStore {
     }
 
     fn load_state(&self) -> Result<RememberedState, StorageError> {
-        if !self.path.exists() {
+        let Some(text) = state_file::read(&self.path)? else {
             return Ok(RememberedState::default());
-        }
-
-        let mut text = String::new();
-        File::open(&self.path)
-            .map_err(io_error)?
-            .read_to_string(&mut text)
-            .map_err(io_error)?;
+        };
         let state = toml::from_str::<RememberedState>(&text)
             .map_err(|source| StorageError::Invalid(source.to_string()))?;
         state.validate()?;
@@ -44,6 +40,10 @@ impl FileUserStore {
         state.validate()?;
         let text = toml::to_string_pretty(state)
             .map_err(|source| StorageError::Invalid(source.to_string()))?;
+
+        if text.len() > state_file::MAX_STATE_BYTES {
+            return Err(StorageError::Invalid("remembered state file is too large".into()));
+        }
 
         let parent = self.path.parent().ok_or_else(|| {
             StorageError::Invalid("remembered state path has no parent".to_string())
