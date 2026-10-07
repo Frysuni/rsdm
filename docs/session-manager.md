@@ -220,7 +220,9 @@ rsdm session finalize MY_VAR ANOTHER_VAR
 ```
 
 Finalize exports live `WAYLAND_DISPLAY`, `DISPLAY` and `XAUTHORITY` when present
-and activates the anchor once the provider is ready. Automatic managed readiness
+and activates the anchor once the provider is ready. Repeating finalize in a
+running session updates the environment without recreating its anchor. Automatic
+managed readiness
 observes a newly published display or an already active graphical target;
 native providers must also confirm their own readiness. Stale display
 assignments are cleared before launch without inventing addresses. For managed

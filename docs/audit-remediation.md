@@ -338,3 +338,9 @@ verification separate from private-peer and unit-test evidence.
   larger coordinator test fixture retains its explicit initialization.
   The lifecycle VM remains unverified because its Nix cache download failed
   DNS resolution. Findings 1, 26, and 56 stay open; no version bump or push.
+- Adjacent finalize regression: Repeating finalize after readiness now publishes
+  updated manager/activation values and returns success without recreating the
+  live anchor or changing phase/ownership. The private-peer regression passed
+  with `nix develop --command cargo test -p rsdm-infra repeated_finalize --locked`;
+  it verifies both publications and the absence of unit queries/new workers.
+  Changed Rust files remain below 300 lines and new functions below 50.

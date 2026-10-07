@@ -58,6 +58,9 @@ impl Coordinator {
         }
 
         match activation::export(&self.manager, &self.runtime, &mut self.record, environment) {
+            Ok(()) if self.lifecycle.phase == SessionPhase::Running => {
+                let _ = reply.try_send(Ok(()));
+            }
             Ok(()) => {
                 self.finalize_replies.push(reply);
                 self.activate();

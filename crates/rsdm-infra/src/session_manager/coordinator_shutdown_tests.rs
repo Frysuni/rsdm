@@ -167,3 +167,6 @@ mod recovery;
 
 #[path = "coordinator_reply_tests.rs"]
 mod replies;
+
+#[path = "coordinator_environment_tests.rs"]
+mod environment;
