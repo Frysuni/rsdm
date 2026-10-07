@@ -40,7 +40,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 22 | Roll back definitely failed start references | pending |
 | 23 | Recover generation-owned quit/logout helpers | pending |
 | 24 | Bound shutdown concurrency and polling | pending |
-| 25 | Linear process snapshot/pidfd signaling | pending |
+| 25 | Linear process snapshot/pidfd signaling | implemented; runtime checks pending |
 | 26 | One recovery deadline across all teardown phases | pending |
 | 27 | Establish shutdown backstop before child startup | pending |
 | 28 | Recover console log level after greeter crashes | pending |
@@ -119,3 +119,7 @@ Record unexecuted runtime checks explicitly for later verification.
   through that handle. The existing session pidfd primitive is shared through
   `unix::process_handle`; session ownership and ESRCH behavior remain unchanged.
   Syntax checks passed; pidfd and isolated emergency-unlock tests remain pending.
+- 25: snapshot app processes once, pin at most 32 pidfds per batch, revalidate
+  InvocationID after pinning, and check each pinned process's systemd cgroup in
+  procfs. This avoids repeated full process lists and unbounded descriptor use.
+  Query-count and hierarchy/boundary regression tests were syntax-checked only.

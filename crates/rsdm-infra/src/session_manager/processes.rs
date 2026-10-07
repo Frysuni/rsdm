@@ -57,14 +57,40 @@ pub(super) fn generation_invocation(
 
 pub(super) fn signal_app(manager: &UserManager, app: &AppRecord, signal: i32) -> Result<(), SessionError> {
     let processes = app_processes(manager, app)?;
-    for pid in processes {
-        let Some(handle) = ProcessHandle::open(pid)? else { continue; };
-        // Opening the pidfd pins an identity; recheck that identity's membership.
-        if app_processes(manager, app)?.contains(&pid) {
-            handle.signal(signal)?;
+    if processes.is_empty() { return Ok(()); }
+    let group: String = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Unit", "ControlGroup")?;
+    if !group.starts_with('/') || group == "/" {
+        return Err(SessionError::State(format!("{} has no dedicated cgroup", app.unit)));
+    }
+    // Bound live descriptors even for large browser cgroups. Each batch is
+    // pinned before checking InvocationID, and membership uses procfs directly.
+    for batch in processes.chunks(32) {
+        let mut pinned = Vec::new();
+        for &pid in batch {
+            if let Some(handle) = ProcessHandle::open(pid)? { pinned.push((pid, handle)); }
+        }
+        if !verify_invocation(manager, app)? { return Ok(()); }
+        for (pid, handle) in pinned {
+            let membership = match std::fs::read_to_string(format!("/proc/{pid}/cgroup")) {
+                Ok(membership) => membership,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if belongs_to_cgroup(&membership, &group) { handle.signal(signal)?; }
         }
     }
     Ok(())
+}
+
+fn belongs_to_cgroup(membership: &str, group: &str) -> bool {
+    membership.lines().any(|line| {
+        let mut fields = line.splitn(3, ':');
+        let (Some(hierarchy), Some(controllers), Some(path)) = (fields.next(), fields.next(), fields.next())
+        else { return false; };
+        let systemd = (hierarchy == "0" && controllers.is_empty())
+            || controllers.split(',').any(|name| name == "name=systemd");
+        systemd && (path == group || path.strip_prefix(group).is_some_and(|suffix| suffix.starts_with('/')))
+    })
 }
 
 pub(super) fn stop_invocation(manager: &UserManager, unit: &str, expected: &[u8]) -> Result<(), SessionError> {
