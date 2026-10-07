@@ -72,7 +72,7 @@ pub(super) fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), Se
 fn acquire_lease(manager: &UserManager) -> Result<(), SessionError> {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        let result = async_io::block_on(manager.connection.request_name_with_flags(BUS_NAME, RequestNameFlags::DoNotQueue.into()));
+        let result = async_io::block_on(manager.connection().request_name_with_flags(BUS_NAME, RequestNameFlags::DoNotQueue.into()));
         match result {
             Ok(_) => return Ok(()),
             Err(zbus::Error::NameTaken) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),

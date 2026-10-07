@@ -41,7 +41,7 @@ fn manager(invocation: Vec<u8>, state: &'static str, processes: Vec<u32>) -> (Us
     let connection = async_io::block_on(async {
         zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()
     });
-    (UserManager { connection }, worker.join().unwrap())
+    (UserManager::with_connection(connection), worker.join().unwrap())
 }
 
 #[test]

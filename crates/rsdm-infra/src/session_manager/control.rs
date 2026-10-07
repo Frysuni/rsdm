@@ -10,6 +10,10 @@ use super::SessionError;
 pub(super) const BUS_NAME: &str = "org.rsdm.Session1";
 pub(super) const OBJECT_PATH: &str = "/org/rsdm/Session1";
 
+#[path = "control_connection.rs"]
+mod connection;
+pub(super) use connection::Server as ControlServer;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub(super) struct LaunchRequest {
     pub generation: String,
@@ -52,6 +56,7 @@ pub(super) enum Request {
     StopReplySent,
 }
 
+#[derive(Clone)]
 pub(super) struct Endpoint {
     pub requests: Sender<Request>,
     pub uid: u32,
@@ -140,14 +145,6 @@ impl Endpoint {
         self.authorize(connection, &header).await?;
         self.request(|reply| Request::XsmpPrepare { generation, units, cancellable, reply }).await
     }
-}
-
-pub(super) fn serve(endpoint: Endpoint) -> Result<Connection, SessionError> {
-    async_io::block_on(async {
-        Ok(zbus::connection::Builder::session()?
-            .allow_name_replacements(false).replace_existing_names(false)
-            .serve_at(OBJECT_PATH, endpoint)?.name(BUS_NAME)?.build().await?)
-    })
 }
 
 pub(super) fn proxy(connection: &zbus::blocking::Connection) -> Result<zbus::blocking::Proxy<'_>, SessionError> {

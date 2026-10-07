@@ -68,15 +68,15 @@ impl Provider {
             return manager.active(unit);
         }
         match self.kind {
-            ProviderKind::Gnome => manager.read(|| native_gnome_running(&manager.connection)),
-            ProviderKind::Plasma => manager.read(|| native_name_owned(&manager.connection, "org.kde.ksmserver")),
+            ProviderKind::Gnome => manager.read(|| async { native_gnome_running(&manager.connection()).await }),
+            ProviderKind::Plasma => manager.read(|| async { native_name_owned(&manager.connection(), "org.kde.ksmserver").await }),
             _ => manager.active(super::units::SESSION_TARGET),
         }
     }
 
     pub fn delegate(&self, manager: &UserManager, action: &str) -> Result<(), SessionError> {
         async_io::block_on(async {
-            let connection = &manager.connection;
+            let connection = manager.connection();
             match self.kind {
                 ProviderKind::Gnome => {
                     let proxy = zbus::Proxy::new(&connection, "org.gnome.SessionManager", "/org/gnome/SessionManager", "org.gnome.SessionManager").await?;

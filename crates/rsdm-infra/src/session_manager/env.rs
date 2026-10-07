@@ -95,8 +95,10 @@ pub(super) fn publish(
 fn update_activation(
     manager: &super::bus::UserManager, pairs: &[(String, String)],
 ) -> Result<(), super::SessionError> {
+    manager.remember_activation(pairs);
     async_io::block_on(async {
-        let bus = zbus::Proxy::new(&manager.connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").await?;
+        let connection = manager.connection();
+        let bus = zbus::Proxy::new(&connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").await?;
         let values: std::collections::HashMap<&str, &str> = pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
         bus.call::<_, _, ()>("UpdateActivationEnvironment", &(values,)).await?;
         Ok(())

@@ -154,7 +154,8 @@ fn prepare_xsmp(
         return Ok(Vec::new());
     }
     let result = async_io::block_on(async {
-        let proxy = zbus::Proxy::new(&manager.connection, super::control::BUS_NAME,
+        let connection = manager.connection();
+        let proxy = zbus::Proxy::new(&connection, super::control::BUS_NAME,
             super::control::OBJECT_PATH, super::control::BUS_NAME).await?;
         let selected = proxy.call("XsmpPrepare", &(&runtime.generation, units, !control.noncancelable.load(Ordering::SeqCst))).await?;
         Ok::<Vec<String>, SessionError>(selected)

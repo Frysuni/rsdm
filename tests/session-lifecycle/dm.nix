@@ -11,7 +11,7 @@ let
   application = pkgs.writeShellScript "test-dm-application" ''
     set -eu
     trap 'test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"; touch /tmp/dm-app-saved; exit 0' TERM
-    touch "$XDG_RUNTIME_DIR/dm-app-ready"
+    echo "$$" > "$XDG_RUNTIME_DIR/dm-app-ready"
     while :; do sleep 1; done
   '';
 in
@@ -76,6 +76,7 @@ pkgs.testers.runNixOSTest {
     with subtest("user manager reload and reexec preserve the session and applications"):
         machine.succeed(session + "rsdm app -- ${application}")
         machine.wait_for_file("/run/user/1000/dm-app-ready")
+        app_pid = machine.succeed("cat /run/user/1000/dm-app-ready").strip()
         dm_pid = machine.succeed("systemctl show rsdm --property=MainPID --value").strip()
         for operation in ["daemon-reload", "daemon-reexec", "daemon-reexec"]:
             machine.succeed(user + "systemctl --user " + operation)
@@ -96,6 +97,24 @@ pkgs.testers.runNixOSTest {
         assert machine.succeed("systemctl show rsdm --property=MainPID --value").strip() == dm_pid
         machine.fail("test -e /tmp/dm-app-saved")
         machine.succeed(session + "swaymsg -t get_outputs --raw | grep '\"active\": true'")
+
+    with subtest("user bus restarts preserve ownership, applications and session control"):
+        for _ in range(2):
+            broker_pid = machine.succeed(user + "systemctl --user show dbus.service --property=MainPID --value").strip()
+            machine.execute(user + "systemctl --user restart dbus.service")
+            machine.wait_until_succeeds(user + "systemctl --user is-active --quiet dbus.service")
+            assert machine.succeed(user + "systemctl --user show dbus.service --property=MainPID --value").strip() != broker_pid
+            machine.wait_until_succeeds(session + "rsdm session status | grep ': running '")
+            assert "RSDM_SESSION_GENERATION=" + generation in machine.succeed(user + "systemctl --user show-environment")
+            assert machine.succeed(user + "systemctl --user show --property=MainPID --value " + shlex.quote(compositor)).strip() == compositor_pid
+            assert machine.succeed("systemctl show rsdm --property=MainPID --value").strip() == dm_pid
+            machine.succeed("kill -0 " + app_pid)
+            machine.fail("test -e /tmp/dm-app-saved")
+            machine.succeed(session + "swaymsg -t get_outputs --raw | grep '\"active\": true'")
+        machine.succeed("journalctl --no-pager -b | grep 'restored user manager connection'")
+        machine.succeed("journalctl --no-pager -b | grep 'restored session control endpoint'")
+        machine.fail(session + "rsdm session cleanup --generation " + generation)
+        machine.succeed(session + "rsdm app -- true")
 
     with subtest("a service restart preserves the seated session and PAM owner"):
         machine.succeed("systemctl restart rsdm")

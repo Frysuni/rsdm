@@ -58,7 +58,7 @@ fn connect(reject: bool) -> (UserManager, zbus::Connection, Effects) {
     let connection = async_io::block_on(async {
         zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()
     });
-    (UserManager { connection }, server.join().unwrap(), effects)
+    (UserManager::with_connection(connection), server.join().unwrap(), effects)
 }
 
 #[test]

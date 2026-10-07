@@ -11,7 +11,7 @@ enum Operation {
 pub(super) async fn start(
     manager: &UserManager, unit: &str, properties: &UnitProperties, timeout: Duration,
 ) -> Result<(), SessionError> {
-    let new_unit = match retry_read(|| async {
+    let new_unit = match manager.read_async(|| async {
         manager.proxy().await?.call::<_, _, OwnedObjectPath>("GetUnit", &(unit,)).await
     }, Duration::from_secs(5)).await {
         Ok(_) => false,
@@ -19,6 +19,9 @@ pub(super) async fn start(
         Err(error) => return Err(error.into()),
     };
     let generation = generation(properties)?;
+    if new_unit && properties.iter().any(|(name, value)| *name == "AddRef" && matches!(value, Value::Bool(true))) {
+        if let Some(generation) = &generation { manager.transport.track(unit, generation.clone()); }
+    }
     let proxy = manager.proxy().await?;
     let mut signals = proxy.receive_signal_with_args("JobRemoved", &[(2, unit)]).await?;
     let auxiliary: Vec<(&str, UnitProperties)> = Vec::new();
@@ -27,6 +30,13 @@ pub(super) async fn start(
 }
 
 pub(super) async fn stop(manager: &UserManager, unit: &str, timeout: Duration) -> Result<(), SessionError> {
+    match manager.read_async(|| async {
+        manager.proxy().await?.call::<_, _, OwnedObjectPath>("GetUnit", &(unit,)).await
+    }, Duration::from_secs(5)).await {
+        Ok(_) => {},
+        Err(error) if missing_unit(&error) => return Ok(()),
+        Err(error) => return Err(error.into()),
+    }
     let proxy = manager.proxy().await?;
     let mut signals = proxy.receive_signal_with_args("JobRemoved", &[(2, unit)]).await?;
     let reply = proxy.call::<_, _, OwnedObjectPath>("StopUnit", &(unit, "replace")).await;
@@ -65,7 +75,7 @@ async fn complete(
             if let Some(job) = &job {
                 if drain_job(signals, job).await? { return Ok(()); }
             }
-            let complete = retry_read(|| inspect(manager, unit, &operation), budget).await?;
+            let complete = manager.read_async(|| inspect(manager, unit, &operation), budget).await?;
             if let Some(job) = &job {
                 if drain_job(signals, job).await? { return Ok(()); }
             }
@@ -86,7 +96,8 @@ async fn inspect(manager: &UserManager, unit: &str, operation: &Operation) -> zb
         Err(error) if missing_unit(&error) => return Ok(matches!(operation, Operation::Stop)),
         Err(error) => return Err(error),
     };
-    let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(&manager.connection).destination(DESTINATION)?.path(path.clone())?
+    let connection = manager.connection();
+    let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(&connection).destination(DESTINATION)?.path(path.clone())?
         .interface("org.freedesktop.systemd1.Unit")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     let id: String = proxy.get_property("Id").await?;
     if id != unit { return Err(zbus::Error::Failure(format!("{unit} resolved to another unit"))); }
@@ -112,7 +123,8 @@ async fn inspect(manager: &UserManager, unit: &str, operation: &Operation) -> zb
 async fn inspect_start(
     manager: &UserManager, path: OwnedObjectPath, state: String, generation: &Option<String>,
 ) -> zbus::Result<bool> {
-    let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(&manager.connection).destination(DESTINATION)?.path(path)?
+    let connection = manager.connection();
+    let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(&connection).destination(DESTINATION)?.path(path)?
         .interface("org.freedesktop.systemd1.Service")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     if let Some(generation) = generation {
         let environment: Vec<String> = proxy.get_property("Environment").await?;

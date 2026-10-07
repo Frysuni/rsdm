@@ -55,7 +55,7 @@ pub(super) struct Coordinator {
     pub replies_pending: usize,
     pub workers: usize,
     pub xsmp: super::xsmp::Handle,
-    pub _control_bus: zbus::Connection,
+    pub control_bus: super::control::ControlServer,
     pub ready_deadline: Instant,
     pub display_since: Option<Instant>,
     pub _power_monitor: ShutdownMonitor,
@@ -78,6 +78,7 @@ impl Coordinator {
     fn run(&mut self) -> Result<i32, SessionError> {
         loop {
             self.notifications()?;
+            self.control_bus.maintain();
             while let Ok(work) = self.work.try_recv() {
                 self.completed(work)?;
             }

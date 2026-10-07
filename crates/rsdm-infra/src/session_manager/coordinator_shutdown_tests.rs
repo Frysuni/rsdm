@@ -34,7 +34,7 @@ impl Fixture {
         let connection = async_io::block_on(async {
             zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()
         });
-        let manager = UserManager { connection: connection.clone() };
+        let manager = UserManager::with_connection(connection.clone());
         let provider = Provider { kind: ProviderKind::External, native_unit: None, logout_command: Vec::new() };
         let xsmp = xsmp::Handle::start(&manager, &runtime, &provider).unwrap();
         // SAFETY: geteuid has no preconditions.
@@ -47,7 +47,7 @@ impl Fixture {
             phase: SessionPhase::Running, exported_environment: Vec::new(), shutdown_deadline_usec: None,
         };
         runtime.save_session(&record).unwrap();
-        let (_, requests) = std::sync::mpsc::channel();
+        let (sender, requests) = std::sync::mpsc::channel();
         let (events, work) = std::sync::mpsc::channel();
         let (notices, received) = std::sync::mpsc::channel();
         let mut lifecycle = Lifecycle::new();
@@ -59,7 +59,9 @@ impl Fixture {
             shutdown: None, action: String::new(), ready_busy: false, ready_once: true,
             pending_ready: false,
             preparing: false, forced_units: Vec::new(), exit_code: 0, replies_pending: 0, workers: 0,
-            xsmp, _control_bus: connection, ready_deadline: Instant::now(), display_since: None,
+            xsmp, control_bus: crate::session_manager::control::ControlServer::with_connection(
+                connection, crate::session_manager::control::Endpoint { requests: sender, uid },
+            ), ready_deadline: Instant::now(), display_since: None,
             _power_monitor: ShutdownMonitor::idle_for_test(), notices: received, last_reap: Instant::now(),
             _lease: crate::session_manager::session_lease::SessionLease::acquire_in(&directory).unwrap(),
         };
