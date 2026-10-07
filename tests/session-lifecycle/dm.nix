@@ -42,6 +42,7 @@ pkgs.testers.runNixOSTest {
       output * bg #ff00ff solid_color
       exec ${rsdm}/bin/rsdm session finalize SWAYSOCK
     '';
+    specialisation.updated.configuration.environment.etc."rsdm-switch-probe".text = "updated";
   };
 
   testScript = ''
@@ -85,6 +86,16 @@ pkgs.testers.runNixOSTest {
             machine.fail("test -e /tmp/dm-app-saved")
             machine.succeed(session + "swaymsg -t get_outputs --raw | grep '\"active\": true'")
         machine.fail("journalctl --no-pager -b | grep 'session coordinator failed'")
+
+    with subtest("NixOS switch preserves the live desktop and applications"):
+        machine.succeed("/run/current-system/specialisation/updated/bin/switch-to-configuration switch")
+        machine.succeed("test \"$(cat /etc/rsdm-switch-probe)\" = updated")
+        machine.sleep(2)
+        machine.succeed(session + "rsdm session status | grep ': running '")
+        assert machine.succeed(user + "systemctl --user show --property=MainPID --value " + shlex.quote(compositor)).strip() == compositor_pid
+        assert machine.succeed("systemctl show rsdm --property=MainPID --value").strip() == dm_pid
+        machine.fail("test -e /tmp/dm-app-saved")
+        machine.succeed(session + "swaymsg -t get_outputs --raw | grep '\"active\": true'")
 
     with subtest("a service restart preserves the seated session and PAM owner"):
         machine.succeed("systemctl restart rsdm")
