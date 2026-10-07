@@ -73,6 +73,14 @@ impl Coordinator {
     }
 
     pub fn boot_completed(&mut self, result: Result<Vec<u8>, SessionError>) -> Result<(), SessionError> {
+        if let Err(SessionError::Bus(error)) = &result {
+            if super::bus::retryable_error(error) {
+                tracing::warn!(%error, "deferring compositor start verification while the user manager is unavailable");
+                self.pending_boot = true;
+                return Ok(());
+            }
+        }
+        self.pending_boot = false;
         if let Some(process) = &mut self.process {
             process.booting = false;
             match result {
@@ -93,6 +101,24 @@ impl Coordinator {
             self.activate();
         }
         Ok(())
+    }
+
+    pub fn verify_boot(&mut self) -> Result<(), SessionError> {
+        if !self.pending_boot { return Ok(()); }
+        if !self.lifecycle.accepts_finalize() {
+            self.pending_boot = false;
+            if let Some(process) = &mut self.process { process.booting = false; }
+            return Ok(());
+        }
+        let unit = self.process.as_ref().and_then(|process| process.unit.as_deref())
+            .ok_or_else(|| SessionError::State("pending compositor start has no unit".into()))?;
+        let result = match super::processes::generation_invocation(&self.manager, unit, &self.runtime.generation) {
+            Err(SessionError::Bus(error)) if super::bus::retryable_error(&error) => return Ok(()),
+            Ok(Some(id)) if id.iter().any(|byte| *byte != 0) => Ok(id),
+            Ok(_) => Err(SessionError::State("compositor start did not create an invocation".into())),
+            Err(error) => Err(error),
+        };
+        self.boot_completed(result)
     }
 
     pub fn ready_completed(&mut self, result: Result<bool, SessionError>) -> Result<(), SessionError> {

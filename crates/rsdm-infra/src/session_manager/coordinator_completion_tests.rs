@@ -44,6 +44,17 @@ impl FakeUnit {
     fn active_state(&self) -> &str {
         if self.0.active.load(Ordering::SeqCst) { "active" } else { "inactive" }
     }
+
+    #[zbus(property, name = "InvocationID")]
+    fn invocation_id(&self) -> Vec<u8> { vec![1; 16] }
+}
+
+struct FakeService;
+
+#[zbus_macros::interface(name = "org.freedesktop.systemd1.Service")]
+impl FakeService {
+    #[zbus(property)]
+    fn environment(&self) -> Vec<String> { vec![format!("RSDM_SESSION_GENERATION={GENERATION}")] }
 }
 
 fn install_manager(fixture: &Fixture) -> Arc<ManagerState> {
@@ -53,8 +64,38 @@ fn install_manager(fixture: &Fixture) -> Arc<ManagerState> {
     async_io::block_on(async {
         fixture._server.object_server().at("/org/freedesktop/systemd1", FakeManager(state.clone())).await.unwrap();
         fixture._server.object_server().at("/org/freedesktop/systemd1/unit/anchor", FakeUnit(state.clone())).await.unwrap();
+        fixture._server.object_server().at("/org/freedesktop/systemd1/unit/anchor", FakeService).await.unwrap();
     });
     state
+}
+
+#[test]
+fn a_lost_invocation_read_after_start_does_not_stop_or_restart_the_compositor() {
+    let mut fixture = Fixture::new();
+    let state = install_manager(&fixture);
+    fixture.coordinator.lifecycle.phase = SessionPhase::Starting;
+    fixture.coordinator.ready_once = false;
+    let provider = super::super::super::provider::Provider {
+        kind: ProviderKind::Managed, native_unit: None, logout_command: Vec::new(),
+    };
+    fixture.coordinator.process = Some(crate::session_manager::session_process::SessionProcess::launch(
+        &["true".into()], &[], &fixture.directory, &provider, "example.service".into(),
+    ).unwrap());
+    fixture.coordinator.boot_completed(Err(zbus::Error::from(zbus::fdo::Error::NoReply("reexec".into())).into())).unwrap();
+    assert!(fixture.coordinator.pending_boot);
+    assert!(fixture.coordinator.booting());
+    assert_eq!(fixture.coordinator.exit_code, 0);
+    fixture.coordinator.verify_boot().unwrap();
+    assert!(fixture.coordinator.pending_boot);
+    assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Starting);
+
+    state.unavailable.store(false, Ordering::SeqCst);
+    fixture.coordinator.verify_boot().unwrap();
+    assert!(!fixture.coordinator.pending_boot);
+    assert!(!fixture.coordinator.booting());
+    assert_eq!(fixture.coordinator.record.compositor_invocation, vec![1; 16]);
+    assert_eq!(state.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.coordinator.workers, 0);
 }
 
 #[test]

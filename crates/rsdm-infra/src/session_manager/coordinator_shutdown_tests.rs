@@ -58,6 +58,7 @@ impl Fixture {
             finalize_replies: Vec::new(), stop_replies: Vec::new(), stopping: Arc::default(),
             shutdown: None, action: String::new(), ready_busy: false, ready_once: true,
             pending_ready: false,
+            pending_boot: false,
             preparing: false, forced_units: Vec::new(), exit_code: 0, replies_pending: 0, workers: 0,
             xsmp, control_bus: crate::session_manager::control::ControlServer::with_connection(
                 connection, crate::session_manager::control::Endpoint { requests: sender, uid },
