@@ -7,7 +7,7 @@ use zbus::fdo::RequestNameFlags;
 use super::{
     SessionError, app_stop::{self, ShutdownControl}, apps, bus::UserManager,
     control::BUS_NAME, deadline::Deadline, env, identity::GENERATION_ENV,
-    runtime::Runtime, units,
+    runtime::{Runtime, SessionRecord}, units,
 };
 
 pub fn cleanup(generation: &str) -> Result<(), SessionError> {
@@ -39,28 +39,25 @@ pub(super) fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), Se
     if let Err(error) = app_stop::prepare_apps(&manager, &runtime, runtime.apps()?, control) {
         failure = Some(error);
     }
+    let mut cleanup_manager = manager.clone();
+    cleanup_manager.deadline = manager.deadline.reserving(Duration::from_secs(1))?;
     for app in runtime.apps()? {
-        if let Err(error) = apps::finish(&manager, &runtime, &app) { failure.get_or_insert(error); }
+        if let Err(error) = apps::finish(&cleanup_manager, &runtime, &app) { failure.get_or_insert(error); }
     }
-    let owns_environment = manager.environment()?.contains(&format!("{GENERATION_ENV}={}", runtime.generation));
+    let owns_environment = match cleanup_manager.environment() {
+        Ok(environment) => environment.contains(&format!("{GENERATION_ENV}={}", runtime.generation)),
+        Err(error) => { failure.get_or_insert(error); false }
+    };
     if record.owns_targets && owns_environment {
         for target in [units::AUTOSTART_TARGET, units::SESSION_TARGET, units::PRE_TARGET] {
-            if let Err(error) = manager.stop(target, Duration::from_secs(15)) { failure.get_or_insert(error); }
+            if let Err(error) = cleanup_manager.stop(target, Duration::from_secs(15)) { failure.get_or_insert(error); }
         }
     }
-    if let Err(error) = manager.stop(&record.anchor_unit, Duration::from_secs(15)) { failure.get_or_insert(error); }
-    let _ = manager.unref(&record.anchor_unit);
-    if let Some(unit) = &record.compositor_unit {
-        let stopped = (|| {
-            if record.compositor_invocation.is_empty() && record.provider == "managed" {
-                if let Some(id) = super::processes::generation_invocation(manager, unit, &runtime.generation)? {
-                    record.compositor_invocation = id;
-                } else { return Ok(()); }
-            }
-            super::processes::stop_invocation(manager, unit, &record.compositor_invocation)
-        })();
-        if let Err(error) = stopped { failure.get_or_insert(error); }
-        if record.provider == "managed" { let _ = manager.unref(unit); }
+    if let Err(error) = cleanup_manager.stop(&record.anchor_unit, Duration::from_secs(15)) { failure.get_or_insert(error); }
+    let _ = cleanup_manager.unref(&record.anchor_unit);
+    if let Some(unit) = record.compositor_unit.clone() {
+        if let Err(error) = stop_compositor(manager, &runtime.generation, &mut record, &unit) { failure.get_or_insert(error); }
+        if record.provider == "managed" { let _ = manager.unref(&unit); }
     }
     if owns_environment {
         if let Err(error) = env::clear_owned(&manager, &record.exported_environment) { failure.get_or_insert(error); }
@@ -69,6 +66,14 @@ pub(super) fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), Se
     if let Some(error) = failure { return Err(error); }
     record.phase = rsdm_core::domain::SessionPhase::Closed;
     runtime.save_session(&record)
+}
+
+fn stop_compositor(manager: &UserManager, generation: &str, record: &mut SessionRecord, unit: &str) -> Result<(), SessionError> {
+    if record.compositor_invocation.is_empty() && record.provider == "managed" {
+        let Some(id) = super::processes::generation_invocation(manager, unit, generation)? else { return Ok(()); };
+        record.compositor_invocation = id;
+    }
+    super::processes::stop_invocation(manager, unit, &record.compositor_invocation)
 }
 
 pub(super) fn recovery_deadline(saved: Option<u64>, current: u64) -> Result<u64, SessionError> {

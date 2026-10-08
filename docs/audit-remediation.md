@@ -41,7 +41,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 23 | Recover generation-owned quit/logout helpers | fixed |
 | 24 | Bound shutdown concurrency and polling | pending |
 | 25 | Linear process snapshot/pidfd signaling | fixed |
-| 26 | One recovery deadline across all teardown phases | in progress; setup and bus teardown bounded |
+| 26 | One recovery deadline across all teardown phases | fixed |
 | 27 | Establish shutdown backstop before child startup | pending |
 | 28 | Recover console log level after greeter crashes | fixed |
 | 29 | Establish sane terminal baseline after crashes | fixed |
@@ -85,6 +85,19 @@ compatibility/documentation findings. Dependencies may require changing this
 order. Mark a row fixed only after its behavior has been checked.
 
 ## Completed checks
+
+- 26: recovery retains one absolute budget across connection setup, name
+  acquisition, worker drain, application preparation, and every teardown call.
+  Application/target/anchor cleanup uses an earlier view to leave time for the
+  recorded compositor invocation. Failure to query activation-environment
+  ownership now skips shared-target cleanup and preserves the failure while
+  still attempting the generation-owned compositor, instead of returning
+  before that attempt. An unconfirmed teardown never marks the generation
+  closed or extends the saved deadline. Recovery deadline/name-lease regressions
+  and the session-lifecycle crash-recovery VM passed, together with all 496
+  workspace tests (four child-only fixtures are ignored in parent runs).
+  Workspace/all-target checks on Rust 1.88.0 and `git diff --check` passed.
+  The changed recovery file and its functions remain below the size limits.
 
 - 1: graceful app preparation, escalation, quit-helper release, and final
   app/logout/target cleanup use earlier views of the same absolute deadline.
