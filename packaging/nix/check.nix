@@ -17,11 +17,11 @@ let
             fsType = "tmpfs";
           };
           system.stateVersion = "26.05";
-          services.rsdm = {
+          services.rsdm = nixpkgs.lib.recursiveUpdate {
             enable = true;
             lock.enable = true;
             idle.enable = true;
-          } // settings;
+          } settings;
           nix.settings.extra-substituters = [ "https://cache.example.org" ];
           nix.settings.extra-trusted-public-keys = [ "example-key" ];
         }
