@@ -37,5 +37,12 @@ fn disabled_dm_exits_with_the_packaged_services_clean_stop_status() {
     assert!(unit.lines().any(|line| line == format!("SuccessExitStatus={code}")));
     assert!(unit.lines().any(|line| line == format!("RestartPreventExitStatus={code}")));
     assert!(unit.lines().any(|line| line == "Restart=always"));
+    assert!(unit.lines().any(|line| line == "Conflicts=getty@tty1.service autovt@tty1.service"));
+    assert!(unit.lines().any(|line| line == "ExecStartPre=/usr/bin/systemctl mask --runtime autovt@tty1.service getty@tty1.service"));
+    assert!(unit.lines().any(|line| line == "ExecStopPost=-/usr/bin/systemctl unmask --runtime autovt@tty1.service getty@tty1.service"));
+    let template = include_str!("../../../packaging/systemd/rsdm@.service");
+    assert!(template.lines().any(|line| line == "TTYPath=/dev/%i"));
+    assert!(template.lines().any(|line| line == "Conflicts=getty@%i.service autovt@%i.service"));
+    assert!(template.lines().any(|line| line == "ExecStartPre=/usr/bin/systemctl mask --runtime autovt@%i.service getty@%i.service"));
     assert!(config.command("validate-config").output().unwrap().status.success());
 }

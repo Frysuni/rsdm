@@ -26,6 +26,8 @@ sudo install -Dm644 packaging/pam/debian/rsdm /etc/pam.d/rsdm
 sudo install -Dm644 packaging/pam/debian/rsdm-lock /etc/pam.d/rsdm-lock
 sudo install -Dm644 packaging/systemd/rsdm.service \
   /etc/systemd/system/rsdm.service
+sudo install -Dm644 packaging/systemd/rsdm@.service \
+  /etc/systemd/system/rsdm@.service
 sudo install -Dm644 packaging/systemd/rsdm-idle.service \
   /usr/lib/systemd/user/rsdm-idle.service
 sudo systemctl daemon-reload
@@ -33,7 +35,8 @@ systemctl --user daemon-reload
 ```
 
 Review PAM and `/etc/rsdm.toml`, run `rsdm validate-config`, disable any
-other display manager, then enable `rsdm.service`. Do not enable an unreviewed
+other display manager, then enable `rsdm.service` (or the matching
+`rsdm@ttyN.service` template instance for a non-default VT). Do not enable an unreviewed
 PAM/display-manager configuration on a remote-only machine.
 
 For idle locking, set `[idle].enable = true`, then run

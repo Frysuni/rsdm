@@ -46,11 +46,16 @@ Both paths install:
    `[dm.tty].path` is the VT you want the greeter to own. See
    [configuration.md](../configuration.md).
 
-2. Enable the service (this conflicts with `getty@tty1`):
+2. Enable the service (the default owns `tty1` and masks its `getty` and
+   `autovt` units while active):
 
    ```sh
 sudo systemctl enable --now rsdm.service
 ```
+
+For another VT, set `[dm.tty].path` to the matching `/dev/ttyN`, install
+`packaging/systemd/rsdm@.service` as `rsdm@.service`, and enable
+`rsdm@ttyN.service` instead.
 
 For built-in idle locking, set `[idle].enable = true` and enable its user unit
 inside the desktop session:

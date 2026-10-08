@@ -48,6 +48,7 @@ impl OutputPower {
         }
     }
 
+    #[cfg(test)]
     fn with_command(
         command: impl FnMut(&str, &str, Instant) -> io::Result<()> + Send + 'static,
     ) -> io::Result<Self> {

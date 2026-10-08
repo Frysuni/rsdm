@@ -45,8 +45,8 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 27 | Establish shutdown backstop before child startup | fixed |
 | 28 | Recover console log level after greeter crashes | fixed |
 | 29 | Establish sane terminal baseline after crashes | fixed |
-| 30 | Generic autovt ownership | pending |
-| 31 | Synchronize generic service and configured VT | pending |
+| 30 | Generic autovt ownership | fixed |
+| 31 | Synchronize generic service and configured VT | fixed |
 | 32 | Avoid disabled-DM service restart loops | fixed |
 | 33 | Reuse render buffers and avoid unnecessary frames | fixed |
 | 34 | Cache scaled wallpaper | fixed |
@@ -844,6 +844,14 @@ verification separate from private-peer and unit-test evidence.
   create-new temporary file, rename, and directory sync. Existing worker tests
   cover removed outputs, uncertain commands, retries, coalescing, and final
   cleanup without contacting a compositor.
+
+- 30/31: Generic systemd packaging now includes a `rsdm@.service` template.
+  Its `%i` instance drives `TTYPath`, `getty`/`autovt` conflicts, and temporary
+  runtime masks from one VT name; the default `rsdm.service` applies the same
+  ownership rules to `tty1`. Runtime masks are removed by `ExecStopPost`, while
+  the configuration and installation guides require `[dm.tty].path` to match
+  the enabled instance. The DM service regression checks disabled-exit status,
+  default masking, template interpolation, and matching ownership directives.
 
 - 50: Session discovery decodes the desktop string escape layer, validates whole
   double-quoted arguments, and expands Exec field codes after tokenization.

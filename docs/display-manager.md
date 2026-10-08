@@ -61,7 +61,10 @@ The shipped unit:
 
 ```ini
 ExecStart=/usr/bin/rsdm dm --config /etc/rsdm.toml
-Conflicts=getty@tty1.service
+ExecStartPre=/usr/bin/systemctl mask --runtime autovt@tty1.service getty@tty1.service
+ExecStopPost=-/usr/bin/systemctl unmask --runtime autovt@tty1.service getty@tty1.service
+Conflicts=getty@tty1.service autovt@tty1.service
+TTYPath=/dev/tty1
 StandardInput=tty
 StandardOutput=journal
 StandardError=journal
@@ -78,6 +81,13 @@ systemd applies those both before and *after* the unit runs, and after a login
 the VT belongs to the user's compositor, whose logind session outlives
 `rsdm.service` - the stop-time teardown would vhangup the live session's VT.
 The greeter claims and resets the VT itself.
+
+The default unit owns `tty1` and temporarily masks both its static getty and
+logind's `autovt` alias while active. To use another VT, set `[dm.tty].path` to
+the matching `/dev/ttyN`, install `packaging/systemd/rsdm@.service`, and enable
+`rsdm@ttyN.service` instead of `rsdm.service`. The template derives
+`TTYPath`, getty conflicts, and runtime masks from the same instance. Stop the
+instance before removing the package so runtime masks are released.
 
 While Greeter is visible, RSDM suppresses kernel console messages and systemd
 status output. It saves the original kernel log levels in a protected runtime

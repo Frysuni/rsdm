@@ -1,0 +1,29 @@
+[Unit]
+Description=rsdm display manager on %I
+Documentation=https://github.com/Frysuni/rsdm
+Conflicts=getty@%i.service autovt@%i.service
+After=systemd-user-sessions.service getty@%i.service autovt@%i.service
+
+[Service]
+ExecStart=/usr/bin/rsdm dm --config /etc/rsdm.toml
+ExecStartPre=/usr/bin/systemctl mask --runtime autovt@%i.service getty@%i.service
+ExecStopPost=-/usr/bin/systemctl unmask --runtime autovt@%i.service getty@%i.service
+Restart=always
+# Disabled configuration exits cleanly without entering a restart loop.
+SuccessExitStatus=78
+RestartPreventExitStatus=78
+RestartSec=1
+TTYPath=/dev/%i
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+# Deliberately NO TTYReset/TTYVHangup/TTYVTDisallocate: systemd applies them
+# before AND after the unit runs, and after a login the same VT belongs to the
+# user's compositor. The greeter claims and resets the VT itself.
+CacheDirectory=rsdm
+CacheDirectoryMode=0700
+LogsDirectory=rsdm
+LogsDirectoryMode=0750
+
+[Install]
+WantedBy=graphical.target

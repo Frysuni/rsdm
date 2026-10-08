@@ -22,6 +22,8 @@ sudo install -Dm644 packaging/pam/fedora/rsdm /etc/pam.d/rsdm
 sudo install -Dm644 packaging/pam/fedora/rsdm-lock /etc/pam.d/rsdm-lock
 sudo install -Dm644 packaging/systemd/rsdm.service \
   /etc/systemd/system/rsdm.service
+sudo install -Dm644 packaging/systemd/rsdm@.service \
+  /etc/systemd/system/rsdm@.service
 sudo install -Dm644 packaging/systemd/rsdm-idle.service \
   /usr/lib/systemd/user/rsdm-idle.service
 sudo systemctl daemon-reload
@@ -33,7 +35,8 @@ authselect, pam_systemd, limits, and configured keyring hooks. The locker uses
 only `system-auth` authentication/account checks and opens no session.
 
 Review `/etc/rsdm.toml`, run `rsdm validate-config`, disable any other
-display manager, then enable `rsdm.service`. Do not enable an unreviewed
+display manager, then enable `rsdm.service` (or the matching `rsdm@ttyN.service`
+template instance for a non-default VT). Do not enable an unreviewed
 PAM/display-manager configuration on a remote-only machine.
 
 For idle locking, set `[idle].enable = true`, then run
