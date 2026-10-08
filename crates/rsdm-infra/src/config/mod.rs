@@ -40,6 +40,7 @@ pub(crate) struct LockRuntimeFile {
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct LockRuntimeSettings {
     pub(crate) size: Option<u8>,
+    pub(crate) size_reset: bool,
     pub(crate) secondary_output: Option<SecondaryOutput>,
     pub(crate) design: LockRuntimeDesign,
 }
@@ -93,7 +94,9 @@ fn apply_lock_runtime_overlay(config: &mut AppConfig) -> Result<(), ConfigLoadEr
 
 fn apply_lock_runtime_settings(config: &mut AppConfig, overlay: LockRuntimeFile) {
     let lock = overlay.lock;
-    if let Some(size) = lock.size {
+    if lock.size_reset {
+        config.lock.size = None;
+    } else if let Some(size) = lock.size {
         config.lock.size = Some(size);
     }
     if let Some(output) = lock.secondary_output {

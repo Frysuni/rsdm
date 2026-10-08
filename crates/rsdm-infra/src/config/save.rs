@@ -44,6 +44,7 @@ fn save_to_path(
     let file = LockRuntimeFile {
         lock: LockRuntimeSettings {
             size,
+            size_reset: size.is_none(),
             secondary_output: Some(secondary_output),
             design: LockRuntimeDesign {
                 theme: Some(design.theme),
@@ -153,6 +154,7 @@ mod tests {
         let overlay = LockRuntimeFile {
             lock: LockRuntimeSettings {
                 size: Some(2),
+                size_reset: false,
                 secondary_output: Some(SecondaryOutput::Black),
                 design: LockRuntimeDesign {
                     theme: Some(ThemePreset::Nord),
@@ -165,5 +167,20 @@ mod tests {
         assert_eq!(config.lock.pam_service, "admin-policy");
         assert_eq!(config.lock.size, Some(2));
         assert_eq!(config.lock.design.theme, ThemePreset::Nord);
+    }
+
+    #[test]
+    fn runtime_overlay_can_reset_system_lock_size() {
+        let mut config = rsdm_core::domain::AppConfig::default();
+        config.lock.size = Some(7);
+        let overlay = LockRuntimeFile {
+            lock: LockRuntimeSettings {
+                size: None,
+                size_reset: true,
+                ..Default::default()
+            },
+        };
+        super::super::apply_lock_runtime_settings(&mut config, overlay);
+        assert_eq!(config.lock.size, None);
     }
 }
