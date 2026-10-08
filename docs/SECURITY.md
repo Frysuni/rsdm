@@ -43,6 +43,13 @@ unsupported PAM message type, or cancelled response fails authentication.
 
 ## Attempt limits
 
+Greeter keeps counters in its parent process across PAM attempts. It checks
+both submitted identities and the directory/PAM account names reported by the
+helper, including failed attempts; aliases that map to one account share that
+account's budget. Mapping is checked before opening a PAM session. Unknown
+aliases can require PAM work to discover their account; an exhausted mapped
+account still cannot authorize a session.
+
 DM and Lock track at most 1024 account names per process. Input is limited to
 256 bytes for a username and 4096 bytes for each credential. Partial failure
 counters expire after 15 minutes without a failure, or after

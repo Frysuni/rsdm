@@ -4,7 +4,7 @@ use std::{
     ptr,
 };
 
-use rsdm_core::ports::{AuthConversation, AuthError};
+use rsdm_core::ports::{AuthConversation, AuthError, MAX_USERNAME_BYTES, UserResolver};
 use zeroize::Zeroizing;
 
 use super::conversation::{ConversationData, PamConv};
@@ -65,7 +65,10 @@ impl PamHandle {
     }
 
     pub fn authenticate(&mut self) -> Result<(), AuthError> {
-        self.run(pam_authenticate, 0, AuthError::InvalidCredentials)
+        self.report_account()?;
+        let result = self.run(pam_authenticate, 0, AuthError::InvalidCredentials);
+        let account = self.report_account();
+        result.and(account)
     }
 
     pub fn clear_password(&mut self) {
@@ -91,7 +94,29 @@ impl PamHandle {
     }
 
     pub fn account_mgmt(&mut self) -> Result<(), AuthError> {
-        self.run(pam_acct_mgmt, 0, AuthError::AccountDenied)
+        let result = self.run(pam_acct_mgmt, 0, AuthError::AccountDenied);
+        let account = self.report_account();
+        result.and(account)
+    }
+
+    fn report_account(&mut self) -> Result<(), AuthError> {
+        if self.conversation_data.conversation.is_none() { return Ok(()); }
+        // pam_get_item must not overwrite the authentication status passed to
+        // pam_end, especially while reporting an unsuccessful authentication.
+        let status = self.last_status;
+        let username = self.username();
+        self.last_status = status;
+        let username = username?;
+        // PAM may ask for an account in its conversation before a name exists.
+        if username.is_empty() { return Ok(()); }
+        if username.len() > MAX_USERNAME_BYTES {
+            return Err(AuthError::Backend("PAM returned an invalid account name".into()));
+        }
+        // Keep potentially blocking directory lookups inside the PAM owner,
+        // where authentication already runs, rather than in the Greeter UI.
+        let canonical = crate::unix::UnixUserResolver::default().canonical_username(&username)
+            .unwrap_or(username);
+        self.conversation_data.conversation.as_mut().unwrap().account_name(&canonical)
     }
 
     pub fn establish_credentials(&mut self) -> Result<(), AuthError> {

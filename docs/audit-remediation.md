@@ -691,6 +691,28 @@ verification separate from private-peer and unit-test evidence.
   admission and success events use `alice`. Existing resolver implementations
   retain a default identity method. No live PAM, NSS, user session, or limiter
   state is touched by the test.
+  The actual Greeter's parent limiter now also tracks submitted names plus
+  directory/PAM identities reported through the existing conversation pipe.
+  The child reports its name before authentication and after authentication
+  and account management, including failures; the parent acknowledges the
+  mapping only when its budget allows it. Rejection cannot be bypassed by a
+  later authorization frame or a cancelled conversation. All counters remain
+  in the parent, and repeated reports do not count one failure more than once
+  for the same identity. Directory lookups stay inside the PAM owner. Mappings
+  unavailable before authentication can still require PAM work to discover;
+  an exhausted mapped account cannot open a session. The account payload is
+  bounded before it is read, tracked identities are bounded per attempt, and
+  PAM's failure status is preserved when its account item is inspected.
+  Parent-limiter regressions rotate aliases through failed attempts, check
+  de-duplication and successful reset, and preserve unrelated accounts and
+  failures after a lost helper. Private protocol tests cover both acceptance
+  and rejection, cancellation, failed authentication, and invalid payloads.
+  `nix develop --command cargo test --workspace --locked --quiet` passed all
+  491 tests, with four subprocess fixtures ignored in their parent runs and
+  executed by the corresponding tests. Workspace/all-target checking passed
+  with Rust 1.88.0; `git diff --check` passed. Changed source files stay below
+  300 lines. The existing Greeter submit callback remains above 50 lines; its
+  limiter/conversation state is isolated in the new attempt module.
 
 - 14: PamHandle no longer installs a no-op `PAM_FAIL_DELAY` callback. Linux-PAM
   and its configured modules retain ownership of the requested authentication

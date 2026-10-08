@@ -21,6 +21,10 @@ pub struct AuthMessage {
 
 pub trait AuthConversation: std::fmt::Debug + Send {
     fn respond(&mut self, message: AuthMessage) -> Result<Option<PasswordSecret>, AuthError>;
+
+    /// Report the backend's account mapping, including after a failed attempt.
+    /// The login owner may reject an account whose failure budget is exhausted.
+    fn account_name(&mut self, _username: &str) -> Result<(), AuthError> { Ok(()) }
 }
 
 #[derive(Debug)]

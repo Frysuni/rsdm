@@ -17,6 +17,10 @@ use rsdm_infra::{
     },
 };
 
+mod attempt;
+
+use attempt::AttemptConversation;
+
 pub(super) struct ParkedSession {
     handle: LeaderHandle,
     username: String,
@@ -27,7 +31,7 @@ pub(super) fn begin(
     config: &AppConfig,
     vt: &mut VtGuard,
     wrapper: &[String],
-    limiter: &dyn LoginAttemptLimiter,
+    limiter: &(dyn LoginAttemptLimiter + Sync),
     sessions: &[Session],
     parked: &mut Option<ParkedSession>,
     attempt: LoginAttempt,
@@ -43,7 +47,8 @@ pub(super) fn begin(
         return LoginAttemptOutcome::Failure("Selected session is unavailable".to_string());
     };
 
-    if limiter.check_allowed(&username).is_err() {
+    let mut conversation = AttemptConversation::new(&username, limiter, conversation);
+    if conversation.check_allowed().is_err() {
         tracing::warn!(%username, "login attempt rate limited");
         return LoginAttemptOutcome::Failure("Too many failed attempts; please wait".to_string());
     }
@@ -54,14 +59,14 @@ pub(super) fn begin(
         session_name = %session.name,
         "login submitted"
     );
-    let launch = spawn_session_leader(conversation, |gate| {
+    let launch = spawn_session_leader(&mut conversation, |gate| {
         vt.release_in_session_child();
         child_login(config, wrapper, &username, &mut password, session, gate)
     });
     drop(password);
     match launch {
         LeaderLaunch::Ready(handle) => {
-            limiter.record_success(&username);
+            conversation.record_success();
             *parked = Some(ParkedSession {
                 handle,
                 username,
@@ -69,22 +74,22 @@ pub(super) fn begin(
             });
             LoginAttemptOutcome::SessionReady
         }
-        LeaderLaunch::Denied(report) => denied_outcome(limiter, username, report),
+        LeaderLaunch::Denied(report) => denied_outcome(&conversation, username, report),
     }
 }
 
 fn denied_outcome(
-    limiter: &dyn LoginAttemptLimiter,
+    conversation: &AttemptConversation<'_>,
     username: String,
     report: LeaderReport,
 ) -> LoginAttemptOutcome {
     let message = match report {
         LeaderReport::AuthFailed | LeaderReport::UserDenied => {
-            limiter.record_failure(&username);
+            conversation.record_failure();
             "Authentication failed"
         }
         LeaderReport::SessionLaunchFailed => {
-            limiter.record_success(&username);
+            conversation.record_success();
             "Session launch failed"
         }
         _ => "The login process exited before reporting its result",
