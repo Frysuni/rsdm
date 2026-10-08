@@ -8,6 +8,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+libc.workspace = true
 rsdm-core = { path = "../rsdm-core" }
 rsdm-infra = { path = "../rsdm-infra" }
 tracing.workspace = true

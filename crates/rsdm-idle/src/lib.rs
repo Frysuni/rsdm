@@ -2,6 +2,7 @@
 
 use std::{
     os::unix::process::CommandExt,
+    os::fd::AsRawFd,
     path::{Path, PathBuf},
     process::Command,
     sync::{
@@ -30,6 +31,7 @@ struct IdleApp {
     config: IdleConfig,
     config_path: PathBuf,
     lock_active: Arc<AtomicBool>,
+    retry_requested: Arc<AtomicBool>,
     notifier: ExtIdleNotifierV1,
     timeout_ms: u32,
     seats: Vec<seats::SeatNotification>,
@@ -66,6 +68,7 @@ pub fn run(config: &IdleConfig, config_path: &Path) -> Result<()> {
         config: config.clone(),
         config_path: config_path.to_path_buf(),
         lock_active: Arc::new(AtomicBool::new(false)),
+        retry_requested: Arc::new(AtomicBool::new(false)),
         notifier,
         timeout_ms,
         seats: Vec::new(),
@@ -77,13 +80,38 @@ pub fn run(config: &IdleConfig, config_path: &Path) -> Result<()> {
     }
     anyhow::ensure!(!app.seats.is_empty(), "compositor has no wl_seat for idle monitoring");
     loop {
-        queue
-            .blocking_dispatch(&mut app)
-            .context("idle Wayland dispatch failed")?;
+        queue.dispatch_pending(&mut app).context("idle Wayland dispatch failed")?;
+        app.retry_lock_if_needed();
+        queue.flush().context("flushing idle Wayland requests")?;
+        let Some(read_guard) = queue.prepare_read() else { continue; };
+        let mut poll = libc::pollfd {
+            fd: read_guard.connection_fd().as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let result = unsafe { libc::poll(&mut poll, 1, 1_000) };
+        match result {
+            1 => {
+                read_guard.read().context("reading idle Wayland events")?;
+            }
+            0 => {}
+            -1 if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted => {}
+            -1 => return Err(std::io::Error::last_os_error()).context("polling idle Wayland events"),
+            _ => unreachable!("polling one Wayland descriptor returned an invalid count"),
+        }
     }
 }
 
 impl IdleApp {
+    fn retry_lock_if_needed(&self) {
+        if !self.retry_requested.swap(false, Ordering::AcqRel) {
+            return;
+        }
+        if self.all_seats_idle() {
+            self.start_lock_cycle();
+        }
+    }
+
     fn start_lock_cycle(&self) {
         if rsdm_infra::lock_control::lock_state(rsdm_infra::lock_control::current_uid())
             .ok()
@@ -105,12 +133,14 @@ impl IdleApp {
         let config = self.config.clone();
         let config_path = self.config_path.clone();
         let active = Arc::clone(&self.lock_active);
+        let retry_requested = Arc::clone(&self.retry_requested);
         tracing::info!("idle threshold reached; starting lock screen");
         if let Err(error) = thread::Builder::new()
             .name("rsdm-idle-lock".to_string())
-            .spawn(move || run_lock_cycle(config, config_path, active))
+            .spawn(move || run_lock_cycle(config, config_path, active, retry_requested))
         {
             self.lock_active.store(false, Ordering::Release);
+            self.retry_requested.store(true, Ordering::Release);
             tracing::error!(%error, "failed to start idle lock worker");
         }
     }
@@ -124,7 +154,12 @@ impl Drop for ResetActive {
     }
 }
 
-fn run_lock_cycle(config: IdleConfig, config_path: PathBuf, active: Arc<AtomicBool>) {
+fn run_lock_cycle(
+    config: IdleConfig,
+    config_path: PathBuf,
+    active: Arc<AtomicBool>,
+    retry_requested: Arc<AtomicBool>,
+) {
     let _reset = ResetActive(active);
 
     let built_in = config.lock_command.is_empty();
@@ -138,6 +173,7 @@ fn run_lock_cycle(config: IdleConfig, config_path: PathBuf, active: Arc<AtomicBo
             ],
             Err(error) => {
                 tracing::error!(%error, "cannot resolve rsdm executable for idle lock");
+                retry_requested.store(true, Ordering::Release);
                 return;
             }
         }
@@ -150,6 +186,7 @@ fn run_lock_cycle(config: IdleConfig, config_path: PathBuf, active: Arc<AtomicBo
         Ok(child) => child,
         Err(error) => {
             tracing::error!(%error, command = ?config.lock_command, "failed to start idle locker");
+            retry_requested.store(true, Ordering::Release);
             return;
         }
     };
@@ -163,11 +200,13 @@ fn run_lock_cycle(config: IdleConfig, config_path: PathBuf, active: Arc<AtomicBo
     let lock_confirmed = match ready {
         Ok(Some(status)) => {
             tracing::error!(%status, "idle locker exited before securing the session");
+            retry_requested.store(true, Ordering::Release);
             return;
         }
         Err(error) => {
             tracing::error!(%error, "idle locker did not confirm the session lock");
             readiness::terminate_after_timeout(child, scope.as_deref());
+            retry_requested.store(true, Ordering::Release);
             return;
         }
         Ok(None) => {

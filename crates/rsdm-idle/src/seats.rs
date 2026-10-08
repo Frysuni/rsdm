@@ -20,6 +20,10 @@ pub(super) struct SeatNotification {
 }
 
 impl IdleApp {
+    pub(super) fn all_seats_idle(&self) -> bool {
+        !self.seats.is_empty() && self.seats.iter().all(|seat| seat.idle)
+    }
+
     pub(super) fn add_seat(
         &mut self,
         registry: &wl_registry::WlRegistry,
@@ -53,7 +57,7 @@ impl IdleApp {
     }
 
     fn lock_if_all_seats_idle(&self) {
-        if !self.seats.is_empty() && self.seats.iter().all(|seat| seat.idle) {
+        if self.all_seats_idle() {
             self.start_lock_cycle();
         }
     }

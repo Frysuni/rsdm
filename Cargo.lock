@@ -1722,6 +1722,7 @@ name = "rsdm-idle"
 version = "2.2.2"
 dependencies = [
  "anyhow",
+ "libc",
  "rsdm-core",
  "rsdm-infra",
  "tracing",
