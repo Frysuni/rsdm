@@ -1,6 +1,7 @@
 //! Compositor-driven idle monitoring for rsdm.
 
 use std::{
+    os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::Command,
     sync::{
@@ -115,13 +116,15 @@ impl IdleApp {
     }
 }
 
-fn run_lock_cycle(config: IdleConfig, config_path: PathBuf, active: Arc<AtomicBool>) {
-    struct ResetActive(Arc<AtomicBool>);
-    impl Drop for ResetActive {
-        fn drop(&mut self) {
-            self.0.store(false, Ordering::Release);
-        }
+struct ResetActive(Arc<AtomicBool>);
+
+impl Drop for ResetActive {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
     }
+}
+
+fn run_lock_cycle(config: IdleConfig, config_path: PathBuf, active: Arc<AtomicBool>) {
     let _reset = ResetActive(active);
 
     let built_in = config.lock_command.is_empty();
@@ -192,10 +195,12 @@ fn lock_command(argv: &[std::ffi::OsString]) -> (Command, Option<String>) {
             .arg(&unit)
             .arg("--");
         command.args(argv);
+        command.process_group(0);
         (command, Some(unit))
     } else {
         let mut command = Command::new(&argv[0]);
         command.args(&argv[1..]);
+        command.process_group(0);
         (command, None)
     }
 }
@@ -208,13 +213,7 @@ mod tests {
     fn lock_worker_guard_resets_activity() {
         let active = Arc::new(AtomicBool::new(true));
         {
-            struct Guard(Arc<AtomicBool>);
-            impl Drop for Guard {
-                fn drop(&mut self) {
-                    self.0.store(false, Ordering::Release);
-                }
-            }
-            let _guard = Guard(Arc::clone(&active));
+            let _guard = ResetActive(Arc::clone(&active));
         }
         assert!(!active.load(Ordering::Acquire));
     }

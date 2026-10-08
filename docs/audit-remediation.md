@@ -469,13 +469,22 @@ verification separate from private-peer and unit-test evidence.
 
 - 6: A locker that misses the ten-second readiness handshake is terminated
   before the idle worker returns. Service-managed lockers first receive a
-  bounded `systemctl --user stop` for their private scope, then the launcher
-  process is killed and reaped within a one-second cleanup budget; a background
+  bounded `systemctl --user kill --signal=SIGKILL` for their private scope;
+  the launcher's private process group is then killed and reaped within the
+  shared one-second cleanup budget. A background
   reaper handles an unusual uninterruptible child without holding the idle
-  cycle active. The regression test uses a real sleeping child and verifies the
-  timeout path completes promptly. `nix develop --command cargo test -p
-  rsdm-idle --locked` passed the readiness and hook tests. No host service or
-  compositor was contacted.
+  cycle active. A stopped shell and its sleeping descendant must both close
+  their inherited connection after timeout. Separate fixtures check the scope
+  kill arguments and a hung control command, and the activity-guard test uses
+  the real worker guard. `nix develop --command cargo test -p rsdm-idle -p
+  rsdm-infra --locked --quiet` passed all seven idle tests and the infrastructure
+  tests. No host service or compositor was contacted. Crashing a locker after
+  an unreported protocol lock retains the compositor's fail-secure behavior;
+  cleanup does not send an unlock request.
+  All-target checking of Idle and infrastructure passed with Rust 1.88.0;
+  `git diff --check` passed. Changed source files remain below 300 lines. The
+  existing lock-cycle orchestration remains above 50 lines and now uses the
+  same activity guard as its regression test.
 
 - 34: Each lock surface owns one prepared cover-fit image for the immutable
   wallpaper loaded at startup. Physical buffer-size changes invalidate it;

@@ -12,6 +12,19 @@ pub fn run_command_until(command: &mut Command, deadline: Instant) -> io::Result
     let mut child = command.process_group(0).spawn()?;
     if let Some(status) = wait_for_exit(&mut child, force_at)? { return Ok(status); }
 
+    let reaped = terminate_command_until(&mut child, deadline)?;
+    let message = if reaped.is_some() {
+        "command timed out; its process group was killed"
+    } else {
+        "command timed out; child exit remains unconfirmed after SIGKILL"
+    };
+    Err(io::Error::new(io::ErrorKind::TimedOut, message))
+}
+
+/// Terminate a child launched with `process_group(0)` and wait within the budget.
+pub fn terminate_command_until(child: &mut std::process::Child, deadline: Instant) -> io::Result<Option<ExitStatus>> {
+    if let Some(status) = child.try_wait()? { return Ok(Some(status)); }
+
     // The group leader remains our unreaped child, so this process-group ID
     // cannot be reused before signaling. Kill descendants before reaping it.
     let group = child.id() as libc::pid_t;
@@ -23,15 +36,10 @@ pub fn run_command_until(command: &mut Command, deadline: Instant) -> io::Result
     // Also terminate the owned leader if the command moved itself out of the
     // original group. It is still unreaped, so its PID cannot be replaced.
     let killed = child.kill();
-    let reaped = wait_for_exit(&mut child, deadline)?;
+    let reaped = wait_for_exit(child, deadline)?;
     if let Some(error) = group_error { return Err(error); }
     killed?;
-    let message = if reaped.is_some() {
-        "command timed out; its process group was killed"
-    } else {
-        "command timed out; child exit remains unconfirmed after SIGKILL"
-    };
-    Err(io::Error::new(io::ErrorKind::TimedOut, message))
+    Ok(reaped)
 }
 
 #[cfg(test)]
