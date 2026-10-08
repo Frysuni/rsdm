@@ -50,7 +50,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 32 | Avoid disabled-DM service restart loops | fixed |
 | 33 | Reuse render buffers and avoid unnecessary frames | fixed |
 | 34 | Cache scaled wallpaper | fixed |
-| 35 | Recover output-power changes after locker crashes | pending |
+| 35 | Recover output-power changes after locker crashes | fixed |
 | 36 | Harden remembered-state reads | fixed |
 | 37 | Harden privileged log file opens | fixed |
 | 38 | Avoid console font temporary-file collisions | fixed |
@@ -835,6 +835,15 @@ verification separate from private-peer and unit-test evidence.
   roundtrips for every worker. Existing lease, cancellation, forced-shutdown,
   and quit-helper tests pass; no session or user manager is contacted outside
   the private test peer.
+
+- 35: The niri output worker now persists every connector name it owns before
+  issuing `off` in a private `$XDG_RUNTIME_DIR/rsdm/lock-outputs` record. The
+  next locker loads that bounded, owner-checked record and restores those
+  outputs before applying new policy; successful restoration removes the record,
+  while uncertain failures retain it for a later retry. Writes use a synced
+  create-new temporary file, rename, and directory sync. Existing worker tests
+  cover removed outputs, uncertain commands, retries, coalescing, and final
+  cleanup without contacting a compositor.
 
 - 50: Session discovery decodes the desktop string escape layer, validates whole
   double-quoted arguments, and expands Exec field codes after tokenization.
