@@ -124,10 +124,15 @@
 
     sessionDirs = lib.mkOption {
       type = lib.types.nullOr (lib.types.listOf lib.types.str);
-      default = null;
+      default = [
+        "/run/current-system/sw/share/wayland-sessions"
+        "/usr/local/share/wayland-sessions"
+        "/usr/share/wayland-sessions"
+      ];
       description = ''
         Directories scanned for wayland-sessions `.desktop` files when no fixed
-        session is set. null uses the built-in defaults.
+        session is set. The NixOS default includes the system profile path;
+        set null to use the generic upstream defaults.
       '';
     };
 

@@ -50,9 +50,8 @@ pam_service = "rsdm" # optional | string | default: "rsdm" | values: PAM service
 # fixed_session = "niri-session" # optional | string or unset | default: unset | values: desktop id (preferred), unique session name/Exec, literal command
 # Directories are searched in order when fixed_session is unset.
 session_dirs = [
-  "/run/current-system/sw/share/wayland-sessions",
-  "/usr/share/wayland-sessions",
   "/usr/local/share/wayland-sessions",
+  "/usr/share/wayland-sessions",
 ] # optional | array<string> | default: paths shown above | values: absolute paths
 
 [dm.tty]

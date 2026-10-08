@@ -166,7 +166,7 @@ each look under its own `.design`.
 | `dm.enable`                           | run the greeter (default `true`)                   |
 | `dm.tty` / `dm.seat`                  | VT the greeter owns (e.g. `"tty1"`) and logind seat |
 | `dm.fixedSession`                     | always launch one session, hide the picker (or `null`) |
-| `dm.sessionDirs`                      | dirs scanned for `.desktop` sessions (or `null` = defaults) |
+| `dm.sessionDirs`                      | dirs scanned for `.desktop` sessions (NixOS default includes `/run/current-system/sw/share/wayland-sessions`; set `null` for generic defaults) |
 | `dm.remember.username` / `.session`   | pre-fill last login                                |
 | `dm.fallback.enable` / `.command`     | login program to hand the VT to if the greeter cannot run |
 | `dm.design.*`                         | greeter look: `theme`, `borderStyle`, `background`, `backgroundSpeed`, `titleMode`, `titleText`, `titlePreset`, `titleFont`, `passwordMode`, `menu`, `showClock`, `showHostname` |
