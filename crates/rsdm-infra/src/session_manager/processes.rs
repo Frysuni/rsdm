@@ -58,7 +58,7 @@ pub(super) fn generation_invocation(
 pub(super) fn signal_app(manager: &UserManager, app: &AppRecord, signal: i32) -> Result<(), SessionError> {
     let processes = app_processes(manager, app)?;
     if processes.is_empty() { return Ok(()); }
-    let group: String = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Unit", "ControlGroup")?;
+    let group: String = manager.unit_property(&app.unit, SERVICE, "ControlGroup")?;
     if !group.starts_with('/') || group == "/" {
         return Err(SessionError::State(format!("{} has no dedicated cgroup", app.unit)));
     }

@@ -28,9 +28,6 @@ impl Unit {
 
     #[zbus(property)]
     fn active_state(&self) -> &str { self.state }
-
-    #[zbus(property)]
-    fn control_group(&self) -> &str { "/rsdm-test-app" }
 }
 
 struct Service;
@@ -39,6 +36,9 @@ struct Service;
 impl Service {
     #[zbus(property, name = "ControlPID")]
     fn control_pid(&self) -> u32 { 0 }
+
+    #[zbus(property)]
+    fn control_group(&self) -> &str { "/rsdm-test-app" }
 }
 
 fn manager(invocation: Vec<u8>, state: &'static str, processes: Vec<u32>) -> (UserManager, Connection, Arc<AtomicUsize>) {

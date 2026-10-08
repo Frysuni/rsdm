@@ -86,6 +86,17 @@ order. Mark a row fixed only after its behavior has been checked.
 
 ## Completed checks
 
+- Adjacent shutdown defect: signal escalation reads `ControlGroup` from the
+  systemd Service interface. Reading it from Unit fails against the real user
+  manager with UnknownProperty and prevents both TERM and KILL escalation.
+  The private process fixture now exposes the property only on Service, as
+  systemd does; the process-signaling regressions cover the correct interface
+  while retaining invocation, pidfd, and cgroup membership checks.
+  `nix develop --command cargo test -p rsdm-infra session_manager::processes
+  --locked --quiet` passed nine tests; infrastructure/all-target checking
+  passed on Rust 1.88.0, and `git diff --check` passed. Both changed source
+  files remain below 300 lines, with functions below 50 lines.
+
 - 5, 55: recovery writes reject serialized TOML over the same 1 MiB read limit
   before creating temporary files. Tests round-trip the exact boundary, preserve
   previous state after an oversized update, and reject oversized session state.
