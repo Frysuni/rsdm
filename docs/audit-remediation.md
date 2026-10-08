@@ -16,7 +16,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 
 | Finding | Work | Status |
 | --- | --- | --- |
-| 1 | One shutdown deadline across all teardown phases | in progress; shared bus deadline implemented |
+| 1 | One shutdown deadline across all teardown phases | fixed |
 | 2 | Bound application lease acquisition | fixed |
 | 3 | Release application leases before slow shutdown work | fixed |
 | 4 | Durable recovery record publication | fixed |
@@ -85,6 +85,31 @@ compatibility/documentation findings. Dependencies may require changing this
 order. Mark a row fixed only after its behavior has been checked.
 
 ## Completed checks
+
+- 1: graceful app preparation, escalation, quit-helper release, and final
+  app/logout/target cleanup use earlier views of the same absolute deadline.
+  Preparation leaves up to two seconds for escalation and teardown; forced
+  application shutdown and infrastructure cleanup leave up to one second for
+  the final compositor stop. A phase starting with less time reserves at most
+  half its remaining budget. Installing, shortening, or revoking a logind
+  deadline also affects views created before the shutdown notice. An expired
+  graceful phase leads to escalation while the absolute budget still permits
+  ownership verification and signals, rather than attempting KILL through an
+  already expired manager. New per-app preparation leases use the phase limit.
+  Deadline regressions cover revisions, revocation, late installation, and
+  short budgets; a real contended private flock checks the teardown reserve.
+  The power-lifecycle VM checks actual app/compositor termination and measures
+  inhibitor release on its private logind bus within five seconds, including
+  a stubborn app and a hung logout helper. Session-lifecycle also passed,
+  covering cancellation, XSMP, teardown ordering, and crash recovery.
+  `nix develop --command cargo test --workspace --locked --quiet`, workspace/
+  all-target checks on Rust 1.88.0, and `git diff --check` passed. VM commands:
+  `nix build .#checks.x86_64-linux.power-lifecycle --no-link --print-build-logs`
+  and `nix build .#checks.x86_64-linux.session-lifecycle --no-link --print-build-logs`.
+  Changed source files remain below 300 lines and functions below 50 lines.
+  A bus that cannot confirm teardown before expiry still produces a failure
+  and retains recovery records; the finite budget is never extended to hide
+  that failure. Already accepted systemd jobs can continue after it expires.
 
 - Adjacent shutdown defect: signal escalation reads `ControlGroup` from the
   systemd Service interface. Reading it from Unit fails against the real user

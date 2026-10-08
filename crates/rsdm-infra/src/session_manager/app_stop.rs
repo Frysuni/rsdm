@@ -7,14 +7,17 @@ use std::{
     time::Duration,
 };
 
-use rsdm_core::domain::{ShutdownMethod, TimeoutAction};
+use rsdm_core::domain::ShutdownMethod;
 use zbus::zvariant::Value;
 
 use super::{
     SessionError, bus::UserManager, deadline::Deadline,
-    processes::{app_processes, monotonic_usec, signal_app, terminate_main},
+    processes::{app_processes, monotonic_usec, terminate_main},
     runtime::{AppRecord, Runtime}, units::command_properties,
 };
+
+#[path = "app_stop_wait.rs"]
+mod wait;
 
 #[derive(Default)]
 pub(super) struct ShutdownControl {
@@ -51,8 +54,9 @@ pub(super) enum AppOutcome {
 pub(super) fn prepare_apps(
     manager: &UserManager, runtime: &Runtime, apps: Vec<AppRecord>, control: Arc<ShutdownControl>,
 ) -> Result<Vec<String>, SessionError> {
+    let phase_manager = preparation_manager(manager, &control)?;
     let selected = prepare_xsmp(
-        manager, runtime, &apps.iter().map(|app| app.unit.clone()).collect::<Vec<_>>(), &control,
+        &phase_manager, runtime, &apps.iter().map(|app| app.unit.clone()).collect::<Vec<_>>(), &control,
     )?;
     // Keep one protocol selection for the batch. Reissuing Prepare from each
     // app worker could start a new save after the server already cancelled it.
@@ -90,22 +94,25 @@ pub(super) fn prepare_apps(
 pub(super) fn prepare_app(
     manager: &UserManager, runtime: &Runtime, unit: &str, control: &ShutdownControl,
 ) -> Result<AppOutcome, SessionError> {
-    if !super::apps::pin_pending(manager, runtime, unit)? {
-        return Ok(AppOutcome::Closed);
-    }
-    let app = runtime.app(unit)?;
-    if app_processes(manager, &app)?.is_empty() {
-        return Ok(AppOutcome::Closed);
-    }
-    if control.cancelled() {
-        return Ok(AppOutcome::Cancelled);
-    }
-
-    let (app, claimed) = claim_preparation(runtime, unit, control)?;
-    let quit_unit = if claimed { request_quit(manager, runtime, &app, control)? } else { None };
-    let result = await_exit(manager, &app, app.deadline_usec.expect("prepared deadline"), control);
+    let phase_manager = preparation_manager(manager, control)?;
+    let prepared = begin_preparation(&phase_manager, runtime, unit, control);
+    let (app, quit_unit) = match prepared {
+        Ok(Preparation::Finished(outcome)) => return Ok(outcome),
+        Ok(Preparation::Waiting(app, quit_unit)) => (app, quit_unit),
+        Err(_) if phase_manager.deadline.remaining(Duration::MAX).is_err()
+            && control.noncancelable.load(Ordering::SeqCst) => {
+                let mut force_manager = manager.clone();
+                force_manager.deadline = control.hard_deadline.reserving(Duration::from_secs(1))?;
+                if !super::apps::pin_pending(&force_manager, runtime, unit)? { return Ok(AppOutcome::Closed); }
+                return wait::force_exit(&force_manager, &runtime.app(unit)?, control, &phase_manager.deadline);
+            }
+        Err(error) => return Err(error),
+    };
+    let result = wait::await_exit(&phase_manager, &app, control);
     if let Some(unit) = quit_unit {
-        release_quit(manager, &unit);
+        let mut cleanup_manager = manager.clone();
+        cleanup_manager.deadline = control.hard_deadline.reserving(Duration::from_secs(1))?;
+        release_quit(&cleanup_manager, &unit);
     }
     if matches!(result, Ok(AppOutcome::Cancelled)) {
         reset_preparation(runtime, &app, &control.hard_deadline)?;
@@ -113,8 +120,38 @@ pub(super) fn prepare_app(
     result
 }
 
-fn claim_preparation(runtime: &Runtime, unit: &str, control: &ShutdownControl) -> Result<(AppRecord, bool), SessionError> {
-    let _lease = runtime.app_lease_until(unit, &control.hard_deadline)?;
+enum Preparation {
+    Finished(AppOutcome),
+    Waiting(AppRecord, Option<String>),
+}
+
+fn preparation_manager(manager: &UserManager, control: &ShutdownControl) -> Result<UserManager, SessionError> {
+    let mut manager = manager.clone();
+    manager.deadline = control.hard_deadline.reserving(Duration::from_secs(2))?;
+    Ok(manager)
+}
+
+fn begin_preparation(
+    manager: &UserManager, runtime: &Runtime, unit: &str, control: &ShutdownControl,
+) -> Result<Preparation, SessionError> {
+    if !super::apps::pin_pending(manager, runtime, unit)? {
+        return Ok(Preparation::Finished(AppOutcome::Closed));
+    }
+    let app = runtime.app(unit)?;
+    if app_processes(manager, &app)?.is_empty() {
+        return Ok(Preparation::Finished(AppOutcome::Closed));
+    }
+    if control.cancelled() {
+        return Ok(Preparation::Finished(AppOutcome::Cancelled));
+    }
+
+    let (app, claimed) = claim_preparation(runtime, unit, control, &manager.deadline)?;
+    let quit_unit = if claimed { request_quit(manager, runtime, &app, control)? } else { None };
+    Ok(Preparation::Waiting(app, quit_unit))
+}
+
+fn claim_preparation(runtime: &Runtime, unit: &str, control: &ShutdownControl, phase_deadline: &Deadline) -> Result<(AppRecord, bool), SessionError> {
+    let _lease = runtime.app_lease_until(unit, phase_deadline)?;
     let mut app = runtime.app(unit)?;
     let deadline = app.deadline_usec.get_or_insert(
         monotonic_usec()?.checked_add(app.policy.timeout_secs * 1_000_000)
@@ -183,64 +220,6 @@ fn prepare_xsmp(
         }
         other => other,
     }
-}
-
-fn await_exit(
-    manager: &UserManager, app: &AppRecord, deadline: u64, control: &ShutdownControl,
-) -> Result<AppOutcome, SessionError> {
-    loop {
-        if app_processes(manager, app)?.is_empty() {
-            return Ok(AppOutcome::Closed);
-        }
-        if control.cancelled() {
-            return Ok(AppOutcome::Cancelled);
-        }
-        let hard = control.hard_deadline.get();
-        let effective_deadline = if hard == 0 { deadline } else { deadline.min(hard) };
-        if monotonic_usec()? >= effective_deadline {
-            break;
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    if app.policy.on_timeout == TimeoutAction::Cancel && !control.noncancelable.load(Ordering::SeqCst) {
-        control.cancelled.store(true, Ordering::SeqCst);
-        return Ok(AppOutcome::Cancelled);
-    }
-    force_exit(manager, app, control)
-}
-
-fn force_exit(manager: &UserManager, app: &AppRecord, control: &ShutdownControl) -> Result<AppOutcome, SessionError> {
-    if control.cancelled() {
-        return Ok(AppOutcome::Cancelled);
-    }
-    if app_processes(manager, app)?.is_empty() {
-        return Ok(AppOutcome::Closed);
-    }
-    signal_app(manager, app, libc::SIGTERM)?;
-    let hard = control.hard_deadline.get();
-    let grace = monotonic_usec()?.saturating_add(5_000_000);
-    let deadline = if hard == 0 { grace } else { grace.min(hard) };
-    while monotonic_usec()? < deadline {
-        if app_processes(manager, app)?.is_empty() {
-            return Ok(AppOutcome::Forced);
-        }
-        if control.cancelled() {
-            return Ok(AppOutcome::Cancelled);
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    if control.cancelled() {
-        return Ok(AppOutcome::Cancelled);
-    }
-    signal_app(manager, app, libc::SIGKILL)?;
-    let deadline = monotonic_usec()?.saturating_add(5_000_000);
-    while !app_processes(manager, app)?.is_empty() {
-        if monotonic_usec()? >= deadline {
-            return Err(SessionError::State(format!("{} still has processes after SIGKILL", app.unit)));
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    Ok(AppOutcome::Forced)
 }
 
 fn launch_quit(manager: &UserManager, app: &AppRecord, generation: &str) -> Result<String, SessionError> {

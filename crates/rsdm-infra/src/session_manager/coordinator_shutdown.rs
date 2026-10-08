@@ -177,19 +177,21 @@ fn finish(
     manager: &UserManager, runtime: &Runtime, record: &SessionRecord, provider: &Provider, mut process: SessionProcess, directory: PathBuf,
 ) -> Result<(), SessionError> {
     let mut failure = None;
+    let mut cleanup_manager = manager.clone();
+    cleanup_manager.deadline = manager.deadline.reserving(Duration::from_secs(1))?;
     for app in runtime.apps()? {
-        if let Err(error) = apps::finish(manager, runtime, &app) { failure.get_or_insert(error); }
+        if let Err(error) = apps::finish(&cleanup_manager, runtime, &app) { failure.get_or_insert(error); }
     }
     if !provider.logout_command.is_empty() {
-        if let Err(error) = run_logout_command(manager, record, provider, &directory) { failure.get_or_insert(error); }
+        if let Err(error) = run_logout_command(&cleanup_manager, record, provider, &directory) { failure.get_or_insert(error); }
     }
     if record.owns_targets {
         for target in [units::AUTOSTART_TARGET, units::SESSION_TARGET, units::PRE_TARGET] {
-            if let Err(error) = manager.stop(target, Duration::from_secs(15)) { failure.get_or_insert(error); }
+            if let Err(error) = cleanup_manager.stop(target, Duration::from_secs(15)) { failure.get_or_insert(error); }
         }
     }
-    if let Err(error) = manager.stop(&record.anchor_unit, Duration::from_secs(15)) { failure.get_or_insert(error); }
-    let _ = manager.unref(&record.anchor_unit);
+    if let Err(error) = cleanup_manager.stop(&record.anchor_unit, Duration::from_secs(15)) { failure.get_or_insert(error); }
+    let _ = cleanup_manager.unref(&record.anchor_unit);
     if let Err(error) = process.stop(manager, provider, &runtime.generation) { failure.get_or_insert(error); }
     if let Err(error) = env::clear_owned(manager, &record.exported_environment) { failure.get_or_insert(error); }
     if let Err(error) = runtime.reap_closed_app_locks() { failure.get_or_insert(error); }

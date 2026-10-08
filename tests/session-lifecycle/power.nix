@@ -20,6 +20,11 @@ let
     touch "$XDG_RUNTIME_DIR/app-ready"
     while :; do sleep 1; done
   '';
+  logout = pkgs.writeShellScript "test-power-logout" ''
+    trap "" TERM INT
+    touch "$XDG_RUNTIME_DIR/logout-ready"
+    while :; do sleep 1; done
+  '';
 in
 pkgs.testers.runNixOSTest {
   name = "rsdm-power-lifecycle";
@@ -50,11 +55,12 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_file(runtime + "/power-manager-ready")
     prepare = private + "busctl --address=unix:path=" + runtime + "/power-bus call org.freedesktop.login1 /org/freedesktop/login1 org.rsdm.TestPower Prepare b "
     released = private + "busctl --address=unix:path=" + runtime + "/power-bus call org.freedesktop.login1 /org/freedesktop/login1 org.rsdm.TestPower ReleasedGuards"
+    release_time = private + "busctl --address=unix:path=" + runtime + "/power-bus call org.freedesktop.login1 /org/freedesktop/login1 org.rsdm.TestPower LastShutdownReleaseUsec"
 
-    def start_session():
+    def start_session(options=""):
         machine.wait_until_succeeds("test \"$(systemctl show --property=LoadState --value rsdm-test-session.service)\" = not-found", timeout=30)
         machine.succeed("rm -f " + runtime + "/app-* " + runtime + "/display-alive " + runtime + "/power-deny-*")
-        machine.succeed("systemd-run --unit=rsdm-test-session --collect --uid=alice --property=PAMName=login --property=TTYPath=/dev/tty1 --setenv=XDG_RUNTIME_DIR=" + runtime + " --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus --setenv=DBUS_SYSTEM_BUS_ADDRESS=unix:path=" + runtime + "/power-bus -- rsdm session start -- ${compositor}")
+        machine.succeed("systemd-run --unit=rsdm-test-session --collect --uid=alice --property=PAMName=login --property=TTYPath=/dev/tty1 --setenv=XDG_RUNTIME_DIR=" + runtime + " --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus --setenv=DBUS_SYSTEM_BUS_ADDRESS=unix:path=" + runtime + "/power-bus -- rsdm session start " + options + " -- ${compositor}")
         try:
             machine.wait_until_succeeds(user + "rsdm session status | grep ': running '", timeout=30)
         except Exception:
@@ -109,6 +115,8 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_fails("systemctl is-active --quiet rsdm-test-session", timeout=10)
         assert time.monotonic() - started < 7
         machine.fail("test -e " + runtime + "/display-alive")
+        machine.fail(user + "systemctl --user is-active --quiet 'app-rsdm-*service'")
+        machine.wait_until_succeeds(release_time + " | awk '$2 > 0 && $2 < 5000000 { found=1 } END { exit !found }'")
         machine.succeed(prepare + "false")
 
     with subtest("accepted user power releases the inhibitor after actual app and session teardown"):
@@ -120,5 +128,15 @@ pkgs.testers.runNixOSTest {
         machine.fail("test -e " + runtime + "/display-alive")
         assert machine.succeed("cat " + runtime + "/power-requests") == "1000\n1000\n"
         machine.wait_until_succeeds(released + " | grep '^u 5$'")
+
+    with subtest("a stuck logout helper leaves time to stop the compositor"):
+        machine.succeed(prepare + "false")
+        session = start_session("--mode managed --logout-command ${logout}")
+        machine.succeed(prepare + "true")
+        machine.wait_for_file(runtime + "/logout-ready")
+        machine.wait_until_fails("systemctl is-active --quiet rsdm-test-session", timeout=10)
+        machine.fail("test -e " + runtime + "/display-alive")
+        machine.wait_until_succeeds(release_time + " | awk '$2 > 0 && $2 < 5000000 { found=1 } END { exit !found }'")
+        machine.succeed(prepare + "false")
   '';
 }

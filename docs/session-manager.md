@@ -272,6 +272,14 @@ removes the shared limit while preparation is still cancellable. After expiry,
 new calls fail without sending a mutation. Already accepted systemd operations
 can continue and remain represented by recovery records.
 
+Within a finite budget, application preparation ends early: up to two seconds
+are reserved for escalation and teardown, capped at half the remaining budget
+when the phase starts. Forced application shutdown and helper/target cleanup
+each leave up to one second for the final compositor stop, with the same cap.
+These phases share the original deadline and its revisions; they never create
+a new budget after expiry. An exhausted graceful phase escalates using the
+remaining time, while normal cancellable logout retains each app's policy.
+
 Per-app metadata leases normally wait at most 250 ms for contention. During
 shutdown/recovery their retries and sleeps also obey the shared deadline;
 revisions or revocation affect an already waiting lease. The lease is released

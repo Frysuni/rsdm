@@ -75,9 +75,9 @@ fn completed_and_dropped_operations_release_their_deadline_watchers() {
         let mut operation = Box::pin(deadline.bound(std::future::pending::<zbus::Result<()>>()));
         assert!(async_io::block_on(future::poll_once(Pin::as_mut(&mut operation))).is_none());
         drop(operation);
-        assert_eq!(deadline.0.lock().unwrap().changed.1.receiver_count(), 1);
+        assert_eq!(deadline.state.lock().unwrap().changed.1.receiver_count(), 1);
         assert!(async_io::block_on(deadline.bound(async { Ok::<_, zbus::Error>(()) })).is_ok());
-        assert_eq!(deadline.0.lock().unwrap().changed.1.receiver_count(), 1);
+        assert_eq!(deadline.state.lock().unwrap().changed.1.receiver_count(), 1);
     }
 }
 
@@ -91,4 +91,62 @@ fn remaining_time_is_shared_and_cannot_exceed_the_local_limit() {
     assert!(clone.remaining(Duration::from_secs(5)).unwrap() <= Duration::from_secs(1));
     deadline.set(1);
     assert!(clone.remaining(Duration::from_secs(5)).is_err());
+}
+
+#[test]
+fn a_phase_reserves_time_without_changing_the_absolute_deadline() {
+    let deadline = Deadline::default();
+    let hard = monotonic_usec().unwrap() + 10_000_000;
+    deadline.set(hard);
+    let phase = deadline.reserving(Duration::from_secs(2)).unwrap();
+    assert_eq!(phase.get(), hard - 2_000_000);
+    assert_eq!(deadline.get(), hard);
+    deadline.set(monotonic_usec().unwrap() + 1_000_000);
+    assert!(async_io::block_on(phase.bound(async { Ok::<_, zbus::Error>(()) })).is_err());
+    assert!(deadline.remaining(Duration::MAX).is_ok());
+}
+
+#[test]
+fn a_short_budget_keeps_time_for_both_phases() {
+    let deadline = Deadline::default();
+    let now = monotonic_usec().unwrap();
+    deadline.set(now + 1_000_000);
+    let phase = deadline.reserving(Duration::from_secs(2)).unwrap();
+    assert!(phase.get() >= now + 500_000);
+    assert!(phase.get() < deadline.get());
+    assert!(phase.remaining(Duration::MAX).is_ok());
+}
+
+#[test]
+fn a_phase_created_before_shutdown_tracks_installation_and_revocation() {
+    let deadline = Deadline::default();
+    let phase = deadline.reserving(Duration::from_secs(2)).unwrap();
+    assert_eq!(phase.get(), 0);
+    let mut operation = Box::pin(phase.bound(std::future::pending::<zbus::Result<()>>()));
+    assert!(async_io::block_on(future::poll_once(operation.as_mut())).is_none());
+    deadline.set(monotonic_usec().unwrap() + 1_000_000);
+    assert!(async_io::block_on(operation).is_err());
+    deadline.set(0);
+    assert_eq!(phase.get(), 0);
+    assert!(async_io::block_on(phase.bound(async { Ok::<_, zbus::Error>(()) })).is_ok());
+}
+
+#[test]
+fn revising_a_phase_interrupts_its_wait_and_revocation_removes_its_timer() {
+    let deadline = Deadline::default();
+    deadline.set(monotonic_usec().unwrap() + 10_000_000);
+    let phase = deadline.reserving(Duration::from_secs(2)).unwrap();
+    let mut operation = Box::pin(phase.bound(std::future::pending::<zbus::Result<()>>()));
+    assert!(async_io::block_on(future::poll_once(operation.as_mut())).is_none());
+    deadline.set(monotonic_usec().unwrap() + 1_000_000);
+    assert!(async_io::block_on(operation).is_err());
+
+    deadline.set(monotonic_usec().unwrap() + 2_050_000);
+    let mut operation = Box::pin(phase.bound(async {
+        async_io::Timer::after(Duration::from_millis(100)).await;
+        Ok::<_, zbus::Error>(())
+    }));
+    assert!(async_io::block_on(future::poll_once(operation.as_mut())).is_none());
+    deadline.set(0);
+    assert!(async_io::block_on(operation).is_ok());
 }

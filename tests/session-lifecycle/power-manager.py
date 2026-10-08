@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import socket
+import time
 
 import dbus
 import dbus.service
@@ -21,6 +22,10 @@ class Manager(dbus.service.Object):
         self.name = dbus.service.BusName("org.freedesktop.login1", bus)
         self.preparing = False
         self.guards = []
+        self.released = set()
+        self.shutdown_guards = set()
+        self.shutdown_started = None
+        self.last_release_usec = 0
         super().__init__(bus, "/org/freedesktop/login1")
 
     @dbus.service.method(MANAGER, in_signature="u", out_signature="o")
@@ -49,9 +54,18 @@ class Manager(dbus.service.Object):
         assert (what, who, mode) == ("shutdown", "RSDM", "delay")
         guard, peer = socket.socketpair()
         self.guards.append(peer)
+        GLib.io_add_watch(peer.fileno(), GLib.IO_IN | GLib.IO_HUP, self.guard_released, peer)
         result = dbus.types.UnixFd(guard.fileno())
         guard.close()
         return result
+
+    def guard_released(self, source, condition, peer):
+        if peer.recv(1, socket.MSG_PEEK) != b"":
+            return True
+        self.released.add(peer.fileno())
+        if peer.fileno() in self.shutdown_guards and self.shutdown_started is not None:
+            self.last_release_usec = int((time.monotonic() - self.shutdown_started) * 1_000_000)
+        return False
 
     @dbus.service.method(MANAGER, in_signature="", out_signature="s")
     def CanPowerOff(self):
@@ -72,6 +86,10 @@ class Manager(dbus.service.Object):
     @dbus.service.signal(MANAGER, signature="b")
     def PrepareForShutdown(self, preparing):
         self.preparing = preparing
+        if preparing:
+            self.shutdown_started = time.monotonic()
+            self.shutdown_guards = {peer.fileno() for peer in self.guards} - self.released
+            self.last_release_usec = 0
 
     @dbus.service.method("org.rsdm.TestPower", in_signature="b", out_signature="")
     def Prepare(self, preparing):
@@ -88,6 +106,10 @@ class Manager(dbus.service.Object):
             except BlockingIOError:
                 pass
         return dbus.UInt32(released)
+
+    @dbus.service.method("org.rsdm.TestPower", in_signature="", out_signature="t")
+    def LastShutdownReleaseUsec(self):
+        return dbus.UInt64(self.last_release_usec)
 
 
 class Session(dbus.service.Object):

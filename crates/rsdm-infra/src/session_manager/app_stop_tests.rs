@@ -121,17 +121,31 @@ fn waiting_for_an_app_does_not_hold_its_record_lease() {
 fn competing_preparations_claim_quit_once_and_preserve_the_deadline() {
     let fixture = Fixture::new();
     let control = ShutdownControl::default();
-    let (first, claimed) = claim_preparation(&fixture.runtime, &fixture.app.unit, &control).unwrap();
+    let (first, claimed) = claim_preparation(&fixture.runtime, &fixture.app.unit, &control, &control.hard_deadline).unwrap();
     assert!(claimed);
-    let (second, claimed) = claim_preparation(&fixture.runtime, &fixture.app.unit, &control).unwrap();
+    let (second, claimed) = claim_preparation(&fixture.runtime, &fixture.app.unit, &control, &control.hard_deadline).unwrap();
     assert!(!claimed);
     assert_eq!(first.deadline_usec, second.deadline_usec);
 }
 
 #[test]
+fn a_contended_preparation_lease_preserves_the_teardown_budget() {
+    let fixture = Fixture::new();
+    let _lease = fixture.runtime.app_lease(&fixture.app.unit).unwrap();
+    let control = ShutdownControl::for_manager(&fixture.manager);
+    control.force(monotonic_usec().unwrap() + 200_000);
+    let manager = preparation_manager(&fixture.manager, &control).unwrap();
+    assert!(claim_preparation(&fixture.runtime, &fixture.app.unit, &control, &manager.deadline).is_err());
+    assert!(control.hard_deadline.remaining(Duration::MAX).is_ok());
+    let saved = fixture.runtime.app(&fixture.app.unit).unwrap();
+    assert!(!saved.quit_started);
+    assert_eq!(saved.deadline_usec, None);
+}
+
+#[test]
 fn cancellation_does_not_reset_a_replacement_invocation() {
     let fixture = Fixture::new();
-    let (prepared, _) = claim_preparation(&fixture.runtime, &fixture.app.unit, &ShutdownControl::default()).unwrap();
+    let (prepared, _) = claim_preparation(&fixture.runtime, &fixture.app.unit, &ShutdownControl::default(), &Deadline::default()).unwrap();
     let mut replacement = prepared.clone();
     replacement.invocation_id = vec![2; 16];
     fixture.runtime.save_app(&replacement).unwrap();

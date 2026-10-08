@@ -6,7 +6,10 @@ use async_channel::{Receiver, Sender};
 use futures_lite::future;
 
 #[derive(Clone, Default)]
-pub(super) struct Deadline(Arc<Mutex<State>>);
+pub(super) struct Deadline {
+    state: Arc<Mutex<State>>,
+    reserve_usec: u64,
+}
 
 struct State {
     usec: u64,
@@ -19,12 +22,26 @@ impl Default for State {
 
 impl Deadline {
     pub fn get(&self) -> u64 {
-        self.0.lock().unwrap_or_else(|error| error.into_inner()).usec
+        self.effective(self.state.lock().unwrap_or_else(|error| error.into_inner()).usec)
+    }
+
+    // A phase shares revisions and revocation with the absolute deadline, but
+    // stops earlier so later teardown still has time to make progress.
+    pub fn reserving(&self, maximum: Duration) -> zbus::Result<Self> {
+        let reserve = if self.get() == 0 { maximum } else {
+            maximum.min(self.remaining(Duration::MAX)? / 2)
+        };
+        let reserve_usec = u64::try_from(reserve.as_micros()).unwrap_or(u64::MAX);
+        Ok(Self { state: self.state.clone(), reserve_usec: self.reserve_usec.saturating_add(reserve_usec) })
+    }
+
+    fn effective(&self, usec: u64) -> u64 {
+        if usec == 0 { 0 } else { usec.saturating_sub(self.reserve_usec).max(1) }
     }
 
     pub fn set(&self, usec: u64) {
         let old = {
-            let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
             if state.usec == usec { return; }
             state.usec = usec;
             std::mem::replace(&mut state.changed, async_channel::bounded(1))
@@ -49,8 +66,8 @@ impl Deadline {
     async fn expired(&self) -> zbus::Error {
         loop {
             let (usec, changed) = {
-                let state = self.0.lock().unwrap_or_else(|error| error.into_inner());
-                (state.usec, state.changed.1.clone())
+                let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+                (self.effective(state.usec), state.changed.1.clone())
             };
             if usec == 0 {
                 let _ = changed.recv().await;
