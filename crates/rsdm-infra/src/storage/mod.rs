@@ -1,9 +1,6 @@
 use std::{
-    fs::{self, File, OpenOptions},
-    io::Write,
+    fs,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use rsdm_core::ports::{StorageError, UserStore};
@@ -12,8 +9,6 @@ use serde::{Deserialize, Serialize};
 mod state_file;
 
 const REMEMBERED_FILE: &str = "remembered.toml";
-static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
-
 #[derive(Debug, Clone)]
 pub struct FileUserStore {
     path: PathBuf,
@@ -50,13 +45,17 @@ impl FileUserStore {
         })?;
         ensure_private_parent_dir(parent)?;
 
-        let tmp = write_private_temp_file(&self.path, parent, text.as_bytes())?;
-        if let Err(error) = fs::rename(&tmp, &self.path) {
-            let _ = fs::remove_file(&tmp);
-            return Err(io_error(error));
-        }
+        crate::atomic_file::write(
+            &self.path,
+            text.as_bytes(),
+            crate::atomic_file::AtomicWriteOptions {
+                mode: 0o600,
+                sync_file: true,
+                sync_parent: true,
+            },
+        )
+        .map_err(io_error)?;
         set_private_permissions(&self.path)?;
-        sync_parent_dir(parent)?;
         Ok(())
     }
 }
@@ -131,70 +130,6 @@ fn ensure_private_parent_dir(parent: &Path) -> Result<(), StorageError> {
     set_private_dir_permissions(parent)
 }
 
-fn write_private_temp_file(
-    final_path: &Path,
-    parent: &Path,
-    bytes: &[u8],
-) -> Result<PathBuf, StorageError> {
-    for _ in 0..16 {
-        let tmp = parent.join(temp_file_name(final_path)?);
-        match open_private_new_file(&tmp) {
-            Ok(mut file) => {
-                if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
-                    let _ = fs::remove_file(&tmp);
-                    return Err(io_error(error));
-                }
-                return Ok(tmp);
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(io_error(error)),
-        }
-    }
-    Err(StorageError::Io(
-        "could not create a unique temporary remembered state file".to_string(),
-    ))
-}
-
-fn open_private_new_file(path: &Path) -> Result<File, std::io::Error> {
-    let mut options = OpenOptions::new();
-    options.create_new(true).write(true);
-    set_open_options_mode(&mut options);
-    options.open(path)
-}
-
-fn temp_file_name(final_path: &Path) -> Result<String, StorageError> {
-    let file_name = final_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| StorageError::Invalid("remembered state path has no file name".into()))?;
-    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    Ok(format!(
-        ".{file_name}.tmp.{}.{}.{}",
-        std::process::id(),
-        nanos,
-        counter
-    ))
-}
-
-fn sync_parent_dir(parent: &Path) -> Result<(), StorageError> {
-    File::open(parent)
-        .and_then(|dir| dir.sync_all())
-        .map_err(io_error)
-}
-
-#[cfg(unix)]
-fn set_open_options_mode(options: &mut OpenOptions) {
-    use std::os::unix::fs::OpenOptionsExt;
-    options.mode(0o600);
-}
-
-#[cfg(not(unix))]
-fn set_open_options_mode(_options: &mut OpenOptions) {}
-
 #[cfg(unix)]
 fn set_private_permissions(path: &Path) -> Result<(), StorageError> {
     use std::os::unix::fs::PermissionsExt;
@@ -223,13 +158,17 @@ fn io_error(source: std::io::Error) -> StorageError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use super::*;
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn temp_dir() -> PathBuf {
         std::env::temp_dir().join(format!(
             "rsdm-store-test-{}-{}",
             std::process::id(),
-            TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+            TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
         ))
     }
 

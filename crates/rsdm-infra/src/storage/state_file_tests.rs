@@ -3,13 +3,15 @@ use std::{
     fs,
     os::unix::fs::{PermissionsExt, symlink},
     path::PathBuf,
-    sync::atomic::Ordering,
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use rsdm_core::ports::UserStore;
 
 use super::*;
-use super::super::{FileUserStore, TEMP_COUNTER};
+use super::super::FileUserStore;
+
+static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 struct Directory(PathBuf);
 
@@ -17,7 +19,7 @@ impl Directory {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
             "rsdm-state-read-test-{}-{}", std::process::id(),
-            TEMP_COUNTER.fetch_add(1, Ordering::Relaxed),
+            TEST_COUNTER.fetch_add(1, Ordering::Relaxed),
         ));
         fs::create_dir(&path).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();

@@ -2,11 +2,13 @@
 
 use std::{
     collections::BTreeMap,
-    fs::{self, File, OpenOptions},
-    io::{self, Read, Write},
-    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    fs::{self, File},
+    io::{self, Read},
     path::{Path, PathBuf},
 };
+
+#[cfg(test)]
+use std::{io::Write, os::unix::fs::PermissionsExt};
 
 use super::{ConsoleFont, capture, invalid_font};
 
@@ -22,39 +24,20 @@ pub fn publish(tty: &str) -> io::Result<()> {
 fn write_snapshot(path: &Path, font: &ConsoleFont) -> io::Result<()> {
     let parent = path.parent().ok_or_else(invalid_font)?;
     fs::create_dir_all(parent)?;
-    let (temp, mut file) = create_snapshot_temp(path)?;
-    let result = (|| {
-        file.set_permissions(fs::Permissions::from_mode(0o644))?;
-        file.write_all(&encode(font))?;
-        file.sync_all()?;
-        fs::rename(&temp, path)?;
-        OpenOptions::new().read(true)
-            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(parent)?.sync_all()
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(temp);
-    }
-    result
+    crate::atomic_file::write(
+        path,
+        &encode(font),
+        crate::atomic_file::AtomicWriteOptions {
+            mode: 0o644,
+            sync_file: true,
+            sync_parent: true,
+        },
+    )
 }
 
-fn create_snapshot_temp(path: &Path) -> io::Result<(PathBuf, File)> {
-    let mut random = File::open("/dev/urandom")?;
-    for _ in 0..16 {
-        let mut bytes = [0_u8; 16];
-        random.read_exact(&mut bytes)?;
-        let suffix: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-        let temp = path.with_extension(format!("{suffix}.tmp"));
-        let result = OpenOptions::new().write(true).create_new(true).mode(0o644)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC).open(&temp);
-        match result {
-            Ok(file) => return Ok((temp, file)),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error),
-        }
-    }
-    Err(io::Error::new(io::ErrorKind::AlreadyExists,
-        "could not create a unique console font snapshot file"))
+#[cfg(test)]
+fn create_snapshot_temp(path: &Path) -> io::Result<(std::path::PathBuf, File)> {
+    crate::atomic_file::create_temp(path, 0o644)
 }
 
 pub fn load(tty: &str) -> io::Result<ConsoleFont> {

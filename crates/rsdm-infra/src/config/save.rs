@@ -1,23 +1,18 @@
 //! Comment-preserving, atomic persistence for settings changed by the lock UI.
 
 use std::{
-    fs::{self, File, OpenOptions},
-    io::Write,
+    fs,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 
 use rsdm_core::domain::{DesignConfig, SecondaryOutput};
 use thiserror::Error;
 use toml_edit::{DocumentMut, Item, Table, value};
 
 use super::parse_config;
-
-static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const LIVE_DESIGN_KEYS: &[&str] = &[
     "theme",
@@ -141,56 +136,20 @@ fn resolve_target(config_path: &Path) -> Result<PathBuf, ConfigSaveError> {
 }
 
 fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<(), ConfigSaveError> {
-    let parent = path.parent().ok_or_else(|| ConfigSaveError::Shape {
-        path: path.to_path_buf(),
-        message: "configuration path has no parent directory",
-    })?;
     let metadata = fs::metadata(path).map_err(|source| ConfigSaveError::Read {
         path: path.to_path_buf(),
         source,
     })?;
-
-    let temp = unique_temp_path(path, parent)?;
-    let mut options = OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    options.mode(metadata.permissions().mode() & 0o777);
-    let mut file = options
-        .open(&temp)
-        .map_err(|source| classify_write_error(path, source))?;
-    if let Err(source) = file.write_all(bytes).and_then(|()| file.sync_all()) {
-        let _ = fs::remove_file(&temp);
-        return Err(classify_write_error(path, source));
-    }
-    drop(file);
-
-    if let Err(source) = fs::rename(&temp, path) {
-        let _ = fs::remove_file(&temp);
-        return Err(classify_write_error(path, source));
-    }
-    File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|source| classify_write_error(path, source))?;
-    Ok(())
-}
-
-fn unique_temp_path(path: &Path, parent: &Path) -> Result<PathBuf, ConfigSaveError> {
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| ConfigSaveError::Shape {
-            path: path.to_path_buf(),
-            message: "configuration file name is not valid UTF-8",
-        })?;
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    Ok(parent.join(format!(
-        ".{name}.rsdm-{}-{nanos}-{counter}.tmp",
-        std::process::id()
-    )))
+    crate::atomic_file::write(
+        path,
+        bytes,
+        crate::atomic_file::AtomicWriteOptions {
+            mode: metadata.permissions().mode() & 0o777,
+            sync_file: true,
+            sync_parent: true,
+        },
+    )
+    .map_err(|source| classify_write_error(path, source))
 }
 
 fn classify_write_error(path: &Path, source: std::io::Error) -> ConfigSaveError {
@@ -270,14 +229,18 @@ pub enum ConfigSaveError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use super::*;
     use rsdm_core::domain::{Background, ThemePreset};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn test_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "rsdm-config-save-{}-{}-{name}",
             std::process::id(),
-            TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+            TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
         ))
     }
 

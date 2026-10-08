@@ -1,5 +1,6 @@
 //! Infrastructure adapters for rsdm.
 
+mod atomic_file;
 pub mod audit;
 pub mod config;
 pub mod console_font;
