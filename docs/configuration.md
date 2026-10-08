@@ -143,12 +143,11 @@ Wallpaper dim and Background opacity. The shared Hints toggle hides the normal
 keyboard hints at the bottom until that Greeter or Lock instance exits;
 confirmation prompts remain visible. Greeter changes remain in-memory only.
 
-Save settings updates the persistent lock-menu fields (not Hints), preserves
-TOML comments, validates the result, and replaces the file atomically. It never
-asks for root. A NixOS module config resolves into `/nix/store` and is
-intentionally immutable; rsdm explains that `services.rsdm.lock.*` must be
-changed in the Nix configuration instead. Permission errors and read-only
-filesystems are also reported in the menu and full logs.
+Save settings writes only the persistent lock-menu visual fields (not Hints) to
+`$XDG_CONFIG_HOME/rsdm/lock.toml`, or `$HOME/.config/rsdm/lock.toml` when
+`XDG_CONFIG_HOME` is unset. The file is private to the user and replaced
+atomically; the system DM, PAM, and security configuration stays in the system
+file. The overlay is applied on the next configuration load.
 
 ## Logging (`[logging]`)
 

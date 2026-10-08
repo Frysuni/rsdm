@@ -189,10 +189,11 @@ each look under its own `.design`.
 there are no shared defaults and no overrides. The greeter and locker take the
 same design fields, except the wallpaper fields, which exist on the locker only.
 
-The runtime F1 menu can preview lock size and secondary-output changes. Its Save
-settings action cannot modify this module-generated file because it points into
-the immutable Nix store; set the corresponding options above and run
-`sudo nixos-rebuild switch` to persist them.
+The runtime F1 menu can preview lock size and secondary-output changes. Save
+settings writes the lock visual overlay to the user's
+`$XDG_CONFIG_HOME/rsdm/lock.toml`; administrative and security options remain
+managed by the module. Declarative values in `services.rsdm.lock.*` still take
+effect from the generated system configuration.
 
 ## Keyrings
 

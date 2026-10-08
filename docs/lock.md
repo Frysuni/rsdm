@@ -138,12 +138,10 @@ How the box treats the layer behind it depends on the background:
 
 `wallpaper_dim` and `background_opacity` are also adjustable at runtime via `F1`
 (Wallpaper dim, Background opacity) when a wallpaper is configured. Select Save
-settings to persist every lock-menu change into a writable TOML file while
-preserving its comments. `dim` is accepted as an alias for `wallpaper_dim`.
-
-NixOS generates `/etc/rsdm.toml` as an immutable `/nix/store` target, so
-runtime saving is refused with an explanation instead of attempting a partial or
-privileged write. Persist the same values under `services.rsdm.lock` and rebuild.
+settings to persist the lock visual fields in
+`$XDG_CONFIG_HOME/rsdm/lock.toml` (or `$HOME/.config/rsdm/lock.toml`). The file
+contains no DM, PAM, or security settings and is loaded as a user-owned overlay
+on the next start. `dim` is accepted as an alias for `wallpaper_dim`.
 
 ## Authentication
 
