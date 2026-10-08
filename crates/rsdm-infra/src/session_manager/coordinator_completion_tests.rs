@@ -221,3 +221,34 @@ fn observation_still_detects_a_real_stop_after_resuming() {
     assert_eq!(fixture.coordinator.action, "external-stop");
     assert!(fixture.coordinator.stopping.load(Ordering::SeqCst));
 }
+
+#[test]
+fn explicit_finalize_retries_activation_after_observation_returns_the_process() {
+    let mut fixture = Fixture::new();
+    let state = install_manager(&fixture);
+    state.unavailable.store(false, Ordering::SeqCst);
+    fixture.coordinator.provider.kind = ProviderKind::Managed;
+    fixture.coordinator.environment = vec![("PATH".into(), std::env::var("PATH").unwrap())];
+    fixture.coordinator.lifecycle.phase = SessionPhase::Starting;
+    fixture.coordinator.ready_once = false;
+    // No published display or automatic readiness: only finalize can activate.
+    fixture.coordinator.ready_deadline = Instant::now();
+    fixture.coordinator.start_observation();
+    assert!(fixture.coordinator.observation_busy);
+    let (reply, response) = async_channel::bounded(1);
+    fixture.coordinator.environment_reply = Some(Reply::for_test(reply));
+    fixture.coordinator.environment_published(Ok(())).unwrap();
+    assert!(!fixture.coordinator.ready_busy);
+    assert_eq!(fixture.coordinator.finalize_replies.len(), 1);
+
+    let observation = fixture.coordinator.work.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(matches!(observation, Work::Observed(_)));
+    fixture.coordinator.completed(observation).unwrap();
+    assert!(fixture.coordinator.ready_busy);
+    let activation = fixture.coordinator.work.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(matches!(activation, Work::Ready(Err(_))));
+    assert_eq!(state.starts.load(Ordering::SeqCst), 1);
+    fixture.coordinator.completed(activation).unwrap();
+    assert!(response.try_recv().unwrap().is_err());
+    assert_eq!(fixture.coordinator.workers, 0);
+}
