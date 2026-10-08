@@ -52,7 +52,7 @@ The lock file records the revision automatically when you update the input.
               enable = true;
               timeout = 300;
               ignoreInhibitors = false;
-              onLock = [ "notify-send 'screen locked'" ];
+              onLock = [ [ "notify-send" "screen locked" ] ];
               onUnlock = [ ];
             };
           };
@@ -178,7 +178,7 @@ each look under its own `.design`.
 | `idle.enable` / `idle.timeout`        | enable compositor-driven idle lock; inactivity seconds |
 | `idle.ignoreInhibitors`               | consider input only, ignoring application inhibitors |
 | `idle.lockCommand`                    | optional alternate locker argv (`[]` = built-in)   |
-| `idle.onLock` / `idle.onUnlock`       | shell hooks around an idle-started lock             |
+| `idle.onLock` / `idle.onUnlock`       | argv hooks around an idle-started lock              |
 | `keyring`                             | `auto` selects one detected keyring (GNOME before KWallet); `gnome` / `kwallet` / `none` override it |
 | `sessionManager`                      | wrap the compositor in the systemd `--user` session manager (bool) |
 | `disableGetty`                        | free the greeter VT from getty                     |

@@ -113,8 +113,8 @@ mod tests {
                 timeout = 90
                 ignore_inhibitors = true
                 lock_command = []
-                on_lock = ["notify-send locked"]
-                on_unlock = ["notify-send unlocked"]
+                on_lock = [["notify-send", "locked"]]
+                on_unlock = [["notify-send", "unlocked"]]
             "#,
             None,
         )
@@ -123,8 +123,8 @@ mod tests {
         assert!(config.idle.enable);
         assert_eq!(config.idle.timeout, 90);
         assert!(config.idle.ignore_inhibitors);
-        assert_eq!(config.idle.on_lock, ["notify-send locked"]);
-        assert_eq!(config.idle.on_unlock, ["notify-send unlocked"]);
+        assert_eq!(config.idle.on_lock, [["notify-send", "locked"]]);
+        assert_eq!(config.idle.on_unlock, [["notify-send", "unlocked"]]);
     }
 
     #[test]

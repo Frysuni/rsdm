@@ -15,8 +15,8 @@ enable = true
 timeout = 300
 ignore_inhibitors = false
 lock_command = []
-on_lock = ["notify-send 'rsdm lock active'"]
-on_unlock = ["notify-send 'rsdm unlocked'"]
+on_lock = [["notify-send", "rsdm lock active"]]
+on_unlock = [["notify-send", "rsdm unlocked"]]
 ```
 
 - `timeout` is measured in seconds.
@@ -31,8 +31,8 @@ on_unlock = ["notify-send 'rsdm unlocked'"]
   It must stay in the foreground until unlock; daemonizing commands make it
   impossible for rsdm to know when the lock ends. rsdm cannot observe another
   locker's protocol state, so `on_lock` runs after the foreground process starts.
-- `on_lock` and `on_unlock` are shell commands, run in order as the desktop
-  user. `on_unlock` runs only for a lock cycle whose activation reached the
+- `on_lock` and `on_unlock` are argv commands, run in order as the desktop
+  user. They never invoke a shell. `on_unlock` runs only for a lock cycle whose activation reached the
   configured readiness point and whose locker exited successfully. It also runs
   after a privileged emergency unlock, but never after a crash, signal, nonzero
   exit, or wait failure. Do not put untrusted config text in these fields.

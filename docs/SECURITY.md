@@ -86,10 +86,10 @@ of other names.
 
 ## Idle hooks
 
-`idle.on_lock` and `idle.on_unlock` are intentionally shell commands executed
-as the desktop user. The system configuration is therefore trusted input. With
-the built-in locker, `on_lock` is delayed until compositor lock confirmation;
-user activity never causes an automatic unlock.
+`idle.on_lock` and `idle.on_unlock` are argv commands executed as the desktop
+user. They never invoke a shell. With the built-in locker, `on_lock` is delayed
+until compositor lock confirmation; user activity never causes an automatic
+unlock.
 
 ## Session coordination
 

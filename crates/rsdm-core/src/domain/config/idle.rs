@@ -16,10 +16,10 @@ pub struct IdleConfig {
     pub ignore_inhibitors: bool,
     /// Optional locker argv. Empty means the current rsdm binary plus `lock`.
     pub lock_command: Vec<String>,
-    /// Shell commands run after the built-in locker is confirmed active.
-    pub on_lock: Vec<String>,
-    /// Shell commands run after the locker exits, including emergency unlock.
-    pub on_unlock: Vec<String>,
+    /// Commands run after the built-in locker is confirmed active.
+    pub on_lock: Vec<Vec<String>>,
+    /// Commands run after the locker exits, including emergency unlock.
+    pub on_unlock: Vec<Vec<String>>,
 }
 
 impl Default for IdleConfig {

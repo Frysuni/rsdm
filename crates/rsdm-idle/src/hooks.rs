@@ -9,7 +9,7 @@ use std::{
 pub(super) fn finish_lock_cycle(
     result: io::Result<ExitStatus>,
     lock_confirmed: bool,
-    on_unlock: &[String],
+    on_unlock: &[Vec<String>],
 ) {
     match result {
         Ok(status) if status.success() && lock_confirmed => {
@@ -26,24 +26,28 @@ pub(super) fn finish_lock_cycle(
     }
 }
 
-pub(super) fn run_hooks(phase: &str, hooks: &[String]) {
+pub(super) fn run_hooks(phase: &str, hooks: &[Vec<String>]) {
     run_hooks_until(phase, hooks, Instant::now() + Duration::from_secs(30));
 }
 
-fn run_hooks_until(phase: &str, hooks: &[String], deadline: Instant) {
+fn run_hooks_until(phase: &str, hooks: &[Vec<String>], deadline: Instant) {
     for hook in hooks {
         if Instant::now() >= deadline {
             tracing::warn!(%phase, "idle hook budget exhausted; skipping remaining hooks");
             break;
         }
-        tracing::info!(%phase, command = %hook, "running idle hook");
-        let mut command = Command::new("sh");
-        command.arg("-c").arg(hook);
+        let Some(program) = hook.first() else {
+            tracing::warn!(%phase, "skipping empty idle hook");
+            continue;
+        };
+        tracing::info!(%phase, command = ?hook, "running idle hook");
+        let mut command = Command::new(program);
+        command.args(&hook[1..]);
         match rsdm_infra::unix::run_command_until(&mut command, deadline) {
             Ok(status) if status.success() => {}
-            Ok(status) => tracing::warn!(%phase, %status, command = %hook, "idle hook failed"),
+            Ok(status) => tracing::warn!(%phase, %status, command = ?hook, "idle hook failed"),
             Err(error) => {
-                tracing::warn!(%phase, %error, command = %hook, "idle hook did not complete");
+                tracing::warn!(%phase, %error, command = ?hook, "idle hook did not complete");
                 if error.kind() == io::ErrorKind::TimedOut { break; }
             }
         }
@@ -58,10 +62,7 @@ mod tests {
     #[test]
     fn unlock_hooks_require_confirmation_and_successful_exit() {
         let marker = std::env::temp_dir().join(format!("rsdm-unlock-hook-{}", std::process::id()));
-        let hooks = [format!(
-            "printf unlocked > '{}'",
-            marker.display().to_string().replace('\'', "'\\''")
-        )];
+        let hooks = [vec!["touch".into(), marker.display().to_string()]];
         for result in [
             Ok(ExitStatus::from_raw(1 << 8)),
             Ok(ExitStatus::from_raw(9)),
@@ -73,34 +74,33 @@ mod tests {
         finish_lock_cycle(Ok(ExitStatus::from_raw(0)), false, &hooks);
         assert!(!marker.exists());
         finish_lock_cycle(Ok(ExitStatus::from_raw(0)), true, &hooks);
-        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "unlocked");
+        assert!(marker.is_file());
         std::fs::remove_file(marker).unwrap();
     }
 
     #[test]
     fn a_timed_out_hook_skips_the_remaining_phase_and_does_not_block_a_later_cycle() {
         let marker = std::env::temp_dir().join(format!("rsdm-hook-timeout-{}", std::process::id()));
-        let write = format!("printf recovered > '{}'", marker.display().to_string().replace('\'', "'\\''"));
-        let hooks = ["kill -STOP $$; exit 0".into(), write.clone()];
+        let hooks = [vec!["sleep".into(), "1".into()], vec!["touch".into(), marker.display().to_string()]];
         let before = Instant::now();
         run_hooks_until("on_lock", &hooks, before + Duration::from_millis(100));
         let elapsed = before.elapsed();
         let skipped = !marker.exists();
-        run_hooks("on_unlock", &[write]);
-        let recovered = std::fs::read_to_string(&marker).unwrap();
+        run_hooks("on_unlock", &[vec!["touch".into(), marker.display().to_string()]]);
+        let recovered = std::fs::metadata(&marker).unwrap();
         std::fs::remove_file(marker).unwrap();
         assert!(elapsed < Duration::from_secs(1));
         assert!(skipped);
-        assert_eq!(recovered, "recovered");
+        assert!(recovered.is_file());
     }
 
     #[test]
     fn ordinary_hook_failures_still_allow_later_hooks_inside_the_budget() {
         let marker = std::env::temp_dir().join(format!("rsdm-hook-failure-{}", std::process::id()));
-        let hooks = ["exit 7".into(), format!("printf next > '{}'", marker.display().to_string().replace('\'', "'\\''"))];
+        let hooks = [vec!["false".into()], vec!["touch".into(), marker.display().to_string()]];
         run_hooks_until("on_lock", &hooks, Instant::now() + Duration::from_secs(1));
-        let result = std::fs::read_to_string(&marker).unwrap();
+        let result = std::fs::metadata(&marker).unwrap();
         std::fs::remove_file(marker).unwrap();
-        assert_eq!(result, "next");
+        assert!(result.is_file());
     }
 }

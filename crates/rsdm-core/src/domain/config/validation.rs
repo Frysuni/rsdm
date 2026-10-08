@@ -202,16 +202,12 @@ fn validate_idle(config: &AppConfig, issues: &mut Vec<ConfigIssue>) {
             "requires lock.enable = true when idle.lock_command uses the built-in locker",
         ));
     }
-    if config
-        .idle
-        .on_lock
-        .iter()
-        .chain(&config.idle.on_unlock)
-        .any(|command| command.trim().is_empty())
+    if config.idle.on_lock.iter().chain(&config.idle.on_unlock)
+        .any(|command| command.is_empty() || has_empty_argument(command))
     {
         issues.push(ConfigIssue::new(
             "idle.on_lock/on_unlock",
-            "must not contain empty shell commands",
+            "must contain non-empty argv commands",
         ));
     }
 }

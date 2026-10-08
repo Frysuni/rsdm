@@ -95,7 +95,7 @@ set the same `title_font`, `title_mode` and title content in both designs.
 honors application idle inhibitors. `lock_command = []` uses rsdm's own locker;
 an explicit argv array substitutes another locker without shell parsing.
 
-`on_lock` and `on_unlock` are arrays of shell commands. With the built-in
+`on_lock` and `on_unlock` are arrays of argv arrays. With the built-in
 locker, `on_lock` runs only after compositor confirmation and `on_unlock` after
 the locker exits successfully. Each hook phase shares a 30-second budget;
 timeout skips the rest of that phase. See [idle.md](idle.md).

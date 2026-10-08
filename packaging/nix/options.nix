@@ -261,15 +261,15 @@
     };
 
     onLock = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
+      type = lib.types.listOf (lib.types.listOf lib.types.str);
       default = [ ];
-      description = "Shell commands run after the idle lock is confirmed active.";
+      description = "argv commands run after the idle lock is confirmed active.";
     };
 
     onUnlock = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
+      type = lib.types.listOf (lib.types.listOf lib.types.str);
       default = [ ];
-      description = "Shell commands run after the idle-started locker exits.";
+      description = "argv commands run after the idle-started locker exits.";
     };
   };
 

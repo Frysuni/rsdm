@@ -149,7 +149,7 @@ fn idle_timeout_must_fit_the_wayland_protocol() {
 fn idle_commands_must_not_have_empty_entries() {
     let mut config = AppConfig::default();
     config.idle.lock_command = vec!["rsdm".to_string(), " ".to_string()];
-    config.idle.on_lock = vec![String::new()];
+    config.idle.on_lock = vec![Vec::new()];
     let issues = config.validation_errors();
     assert!(
         issues
