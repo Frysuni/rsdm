@@ -11,7 +11,6 @@ const MAX_SNAPSHOT_BYTES: u64 = 128;
 
 pub(super) struct ConsoleLogGuard {
     _printk: Option<PrintkGuard>,
-    restore_systemd_status: bool,
 }
 
 impl ConsoleLogGuard {
@@ -28,21 +27,9 @@ impl ConsoleLogGuard {
             }
         } else { None };
 
-        // A stale snapshot also covers a possible crash after disabling PID 1
-        // status output. Keep its existing enable-on-return behavior.
-        if printk.as_ref().is_some_and(|guard| guard.recovered) {
-            set_systemd_console_status(true);
-        }
-        let restore_systemd_status = printk.is_some() && set_systemd_console_status(false);
-        Self { _printk: printk, restore_systemd_status }
-    }
-}
-
-impl Drop for ConsoleLogGuard {
-    fn drop(&mut self) {
-        if self.restore_systemd_status {
-            set_systemd_console_status(true);
-        }
+        // PID 1 status output has no readback API. Leave its administrator
+        // policy untouched instead of enabling it unconditionally on drop.
+        Self { _printk: printk }
     }
 }
 
@@ -50,6 +37,7 @@ struct PrintkGuard {
     printk: PathBuf,
     snapshot: PathBuf,
     previous: String,
+    #[cfg(test)]
     recovered: bool,
     _lease: File,
 }
@@ -59,6 +47,7 @@ impl PrintkGuard {
         let lease = acquire_lease(directory, uid)?;
         let snapshot = directory.join("console-printk.state");
         let saved = read_snapshot(&snapshot, uid)?;
+        #[cfg(test)]
         let recovered = saved.is_some();
         let previous = match saved {
             Some(previous) => previous,
@@ -71,7 +60,12 @@ impl PrintkGuard {
             }
         };
 
-        let guard = Self { printk: printk.to_path_buf(), snapshot, previous, recovered, _lease: lease };
+        let guard = Self {
+            printk: printk.to_path_buf(), snapshot, previous,
+            #[cfg(test)]
+            recovered,
+            _lease: lease,
+        };
         let mut levels = validate_printk(&guard.previous)?;
         levels[0] = "1";
         fs::write(printk, format!("{}\n", levels.join("\t")))?;
@@ -180,13 +174,6 @@ fn sync_directory(directory: &Path) -> io::Result<()> {
 
 fn unsafe_snapshot() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "unsafe or invalid console logging snapshot")
-}
-
-/// systemd's documented PID 1 signals: SIGRTMIN+20 enables status, +21 disables.
-fn set_systemd_console_status(enabled: bool) -> bool {
-    let signal = libc::SIGRTMIN() + if enabled { 20 } else { 21 };
-    // SAFETY: kill(2) with a valid signal targeting PID 1 has no memory effects.
-    unsafe { libc::kill(1, signal) == 0 }
 }
 
 #[cfg(test)]
