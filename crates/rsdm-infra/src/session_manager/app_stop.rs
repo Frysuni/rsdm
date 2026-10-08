@@ -16,6 +16,8 @@ use super::{
     runtime::{AppRecord, Runtime}, units::command_properties,
 };
 
+const MAX_APP_SHUTDOWN_WORKERS: usize = 4;
+
 #[path = "app_stop_wait.rs"]
 mod wait;
 
@@ -61,27 +63,29 @@ pub(super) fn prepare_apps(
     // Keep one protocol selection for the batch. Reissuing Prepare from each
     // app worker could start a new save after the server already cancelled it.
     let _ = control.xsmp_units.set(selected);
-    let workers: Vec<_> = apps.into_iter().map(|app| {
-        let manager = manager.clone();
-        let runtime = runtime.clone();
-        let control = control.clone();
-        thread::spawn(move || {
-            let result = prepare_app(&manager, &runtime, &app.unit, &control);
-            (app.unit, result)
-        })
-    }).collect();
     let mut forced = Vec::new();
     let mut failure = None;
-    for worker in workers {
-        match worker.join() {
-            Ok((unit, Ok(AppOutcome::Forced))) => forced.push(unit),
-            Ok((_, Ok(_))) => {}
-            Ok((_, Err(error))) => {
-                control.cancelled.store(true, Ordering::SeqCst);
-                failure.get_or_insert(error);
-            }
-            Err(_) => {
-                failure.get_or_insert(SessionError::State("application shutdown worker panicked".into()));
+    for batch in apps.chunks(MAX_APP_SHUTDOWN_WORKERS) {
+        let workers: Vec<_> = batch.iter().cloned().map(|app| {
+            let manager = manager.clone();
+            let runtime = runtime.clone();
+            let control = control.clone();
+            thread::spawn(move || {
+                let result = prepare_app(&manager, &runtime, &app.unit, &control);
+                (app.unit, result)
+            })
+        }).collect();
+        for worker in workers {
+            match worker.join() {
+                Ok((unit, Ok(AppOutcome::Forced))) => forced.push(unit),
+                Ok((_, Ok(_))) => {}
+                Ok((_, Err(error))) => {
+                    control.cancelled.store(true, Ordering::SeqCst);
+                    failure.get_or_insert(error);
+                }
+                Err(_) => {
+                    failure.get_or_insert(SessionError::State("application shutdown worker panicked".into()));
+                }
             }
         }
     }

@@ -39,7 +39,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 21 | Roll back definitely failed app registrations | fixed |
 | 22 | Roll back definitely failed start references | fixed |
 | 23 | Recover generation-owned quit/logout helpers | fixed |
-| 24 | Bound shutdown concurrency and polling | pending |
+| 24 | Bound shutdown concurrency and polling | fixed |
 | 25 | Linear process snapshot/pidfd signaling | fixed |
 | 26 | One recovery deadline across all teardown phases | fixed |
 | 27 | Establish shutdown backstop before child startup | fixed |
@@ -827,6 +827,14 @@ verification separate from private-peer and unit-test evidence.
   while Escape and the existing termination flag still cancel user-driven
   prompts. Infra and TUI tests cover timeout behavior and the existing
   cancellation/account-mapping protocol.
+
+- 24: Application preparation now runs in bounded batches of four workers, so a
+  large registered application set cannot create one OS thread per app during
+  logout. App process checks retain the shared shutdown deadline and use an
+  exponential 20 ms to 250 ms backoff instead of issuing fixed 20 Hz D-Bus
+  roundtrips for every worker. Existing lease, cancellation, forced-shutdown,
+  and quit-helper tests pass; no session or user manager is contacted outside
+  the private test peer.
 
 - 50: Session discovery decodes the desktop string escape layer, validates whole
   double-quoted arguments, and expands Exec field codes after tokenization.
