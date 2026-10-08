@@ -18,6 +18,8 @@ use super::{
     session_process::SessionProcess,
 };
 
+pub(super) const MAX_COORDINATOR_WORKERS: usize = 8;
+
 pub(super) enum Work {
     Boot(Result<Vec<u8>, SessionError>),
     Ready(Result<bool, SessionError>),

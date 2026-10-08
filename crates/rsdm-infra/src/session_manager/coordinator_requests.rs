@@ -7,7 +7,7 @@ use rsdm_core::domain::{SessionPhase, ShutdownMethod};
 use super::{
     SessionError, apps,
     control::{LaunchRequest, Reply, Request, SessionStatus, StopOutcome},
-    coordinator::{Coordinator, Work},
+    coordinator::{Coordinator, Work, MAX_COORDINATOR_WORKERS},
     runtime::AppRecord,
 };
 
@@ -123,6 +123,10 @@ impl Coordinator {
     pub fn launch(&mut self, request: LaunchRequest, reply: Reply<String>) -> Result<(), SessionError> {
         if request.generation != self.runtime.generation || !self.lifecycle.accepts_launch() {
             let _ = reply.try_send(Err("session is shutting down or generation is stale".into()));
+            return Ok(());
+        }
+        if self.workers >= MAX_COORDINATOR_WORKERS {
+            let _ = reply.try_send(Err("session coordinator is busy; retry the launch".into()));
             return Ok(());
         }
         if self.lifecycle.phase == SessionPhase::Starting {
