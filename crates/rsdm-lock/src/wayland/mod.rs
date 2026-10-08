@@ -40,7 +40,6 @@ mod buffers;
 mod handlers;
 mod input;
 mod output;
-mod output_power;
 mod power;
 mod protocol;
 mod render;
@@ -106,7 +105,6 @@ struct App {
     session_lock: Option<SessionLock>,
     surfaces: Vec<LockSurface>,
     primary_output: Option<wl_output::WlOutput>,
-    output_power: Option<output_power::OutputPower>,
     keyboards: Vec<(wl_seat::WlSeat, wl_keyboard::WlKeyboard)>,
     model: LockModel,
     authentication: Option<crate::auth::AuthenticationJob>,
@@ -158,7 +156,6 @@ pub fn run(config: &AppConfig, config_path: &Path) -> Result<()> {
         session_lock: None,
         surfaces: Vec::new(),
         primary_output: None,
-        output_power: output_power::OutputPower::start(),
         keyboards: Vec::new(),
         model: LockModel::new(config.lock.design.password_mode),
         authentication: None,

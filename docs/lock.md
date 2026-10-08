@@ -63,16 +63,8 @@ secondary_output = "background" # background | black | off
 ```
 
 `background` keeps only `[lock.design]` wallpaper/effects. `black` paints opaque
-black. `off` temporarily runs niri's supported `output off` IPC operation and
-restores the outputs with `output on` after unlock or an ordinary locker error.
-Restoration keeps track of connector names even if switching an output off
-removes its Wayland output object. On other compositors it falls back to black.
-Output IPC runs in one background worker so a hung helper does not block input,
-redraw, or authentication. Each command has a two-second deadline including
-termination and reaping; restoration commands share a five-second budget.
-Policy changes replace pending work and restore an in-flight `off` before
-applying the new topology. Ordinary process exit waits for bounded cleanup;
-SIGKILL or a locker crash still requires separate output recovery.
+black. `off` uses a compositor output-power protocol when available and
+otherwise falls back to opaque black without changing output topology.
 Find niri names with `niri msg outputs`.
 
 Wallpaper scaling is cached separately for each output at its physical buffer

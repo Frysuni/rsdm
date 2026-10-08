@@ -78,23 +78,9 @@ impl App {
         {
             return;
         }
-        let Some(primary) = self.primary_output.clone() else {
-            return;
-        };
-
-        let outputs = self.output_state.outputs()
-            .filter(|output| *output != primary)
-            .map(|output| self.output_name(&output))
-            .collect();
-        if let Some(worker) = &self.output_power {
-            worker.power_off(outputs);
-        }
     }
 
     pub(super) fn restore_secondary_outputs(&mut self) {
-        if let Some(worker) = &self.output_power {
-            worker.restore();
-        }
     }
 
     pub(super) fn apply_secondary_output_policy(&mut self, policy: SecondaryOutput) {
@@ -132,13 +118,6 @@ impl App {
             .map(positive_area)
             .unwrap_or_default()
             .saturating_mul(scale.saturating_mul(scale))
-    }
-}
-
-impl Drop for App {
-    fn drop(&mut self) {
-        // Finish output cleanup before dropping the Wayland lock and surfaces.
-        self.output_power.take();
     }
 }
 
