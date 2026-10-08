@@ -17,6 +17,7 @@ mod logging;
 mod logs;
 mod output;
 mod session;
+mod session_exec;
 mod status;
 mod unlock;
 
@@ -39,6 +40,13 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    #[command(hide = true)]
+    SessionExec {
+        #[arg(long)]
+        request_fd: i32,
+        #[arg(long)]
+        gate_fd: i32,
+    },
     /// Run the display manager greeter on the configured TTY.
     #[command(after_help = "Usage notes:\n  DM starts the Greeter on its configured VT, normally through rsdm.service.\n\nExamples:\n  rsdm validate-config\n  rsdm logs --component dm")]
     Dm,
@@ -102,6 +110,9 @@ fn main() -> ExitCode {
         Ok(cli) => cli,
         Err(error) => return output::usage(error),
     };
+    if let Command::SessionExec { request_fd, gate_fd } = cli.command {
+        return session_exec::run(request_fd, gate_fd);
+    }
     logging::init(&cli.config);
 
     match run(cli) {
@@ -116,6 +127,7 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<ExitCode> {
     let result = match cli.command {
+        Command::SessionExec { request_fd, gate_fd } => return Ok(session_exec::run(request_fd, gate_fd)),
         Command::Dm => return run_dm(&cli.config),
         Command::Lock => run_lock(&cli.config),
         Command::Idle => run_idle(&cli.config),

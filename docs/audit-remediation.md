@@ -26,7 +26,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 8 | Retain restoration state for removed niri outputs | implemented; compositor checks pending |
 | 9 | Move bounded niri IPC off the Wayland loop | fixed |
 | 10 | Cancellable, bounded PAM helper processes | pending |
-| 11 | Remove complex post-PAM fork child work | pending |
+| 11 | Remove complex post-PAM fork child work | fixed |
 | 12 | Pin emergency unlock targets with pidfds | fixed |
 | 13 | Validate lock state through one open descriptor | fixed |
 | 14 | Honor PAM-requested authentication delay | fixed |
@@ -85,6 +85,24 @@ compatibility/documentation findings. Dependencies may require changing this
 order. Mark a row fixed only after its behavior has been checked.
 
 ## Completed checks
+
+- 11: the post-PAM launcher no longer forks a child that runs Rust/libc setup.
+  It serializes the validated session command, user identity, environment, and
+  wrapper into a bounded sealed memfd, then starts a fresh `session-exec`
+  process image. That helper performs the credential, group, environment,
+  directory, and exec operations after a fresh loader has replaced the
+  post-PAM image. The existing start gate remains closed until the PAM-owned
+  shutdown inhibitor attempt completes. Requests require all four memfd seals,
+  reject unknown TOML fields, NUL/invalid environment names, malformed
+  commands, and payloads over 1 MiB. The descriptor handoff is close-on-exec
+  by default and only the two explicitly cleared descriptors reach the helper.
+  Private regressions cover sealed round-trips, mutable-file rejection,
+  request bounds, invalid payloads, gate ordering, and parent-loss behavior.
+  Full workspace tests, Rust 1.88 all-target checking, and the DM lifecycle VM
+  passed; the VM exercises the real DM launcher through Sway, user-manager
+  reexec, user-bus restart, NixOS switch, logout, and PAM/inhibitor cleanup.
+  The helper remains an internal hidden CLI entry and performs no configuration
+  or logging initialization before consuming its validated descriptors.
 
 - 27: the launcher forks its child behind a private close-on-exec start pipe.
   Only close/read/errno operations run at that barrier. The parent establishes

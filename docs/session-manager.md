@@ -319,8 +319,12 @@ saving through hung applications, storage or an unresponsive bus.
 DM forks the session child behind a start gate, then attempts to acquire the
 root delay inhibitor before allowing any user-session setup or execution.
 System-bus connection and inhibitor acquisition share one five-second timeout.
-The child's gate uses only close/read operations and never starts a bus executor
-before fork. Parent failure closes the gate and aborts the waiting child.
+The child is a fresh exec of the installed rsdm image. Its bounded sealed
+memfd request carries only the validated session command, identity, wrapper,
+and environment; the helper then performs groups, credentials, environment,
+directory setup, and exec after the fresh image has loaded. The gate uses only
+close/read operations and never starts a bus executor before fork. Parent
+failure closes the gate and aborts the waiting child.
 If logind cannot grant the root inhibitor, RSDM logs the failure and retains the
 existing fallback behavior; the user coordinator still attempts its own guard.
 DM's detached root owner keeps a granted delay FD through user cleanup, PAM

@@ -7,6 +7,8 @@ mod group;
 mod launcher;
 pub(crate) mod process_handle;
 mod session_environment;
+mod session_exec;
+mod session_exec_request;
 mod session_cleanup;
 mod session_leader;
 mod session_conversation;
@@ -24,6 +26,7 @@ pub use command::split_exec;
 pub use command_timeout::{run_command_until, terminate_command_until};
 pub use getty_query::discover_system_getty;
 pub use launcher::UnixSessionLauncher;
+pub use session_exec::exec_session;
 pub use session_leader::{
     LeaderGate, LeaderHandle, LeaderLaunch, LeaderReport, spawn_session_leader,
 };

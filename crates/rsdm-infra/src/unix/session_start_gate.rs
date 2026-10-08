@@ -5,7 +5,7 @@ use std::{fs::File, io::{self, Write}, os::fd::{FromRawFd, IntoRawFd, OwnedFd}};
 const START: u8 = 1;
 
 pub(super) struct StartGate {
-    reader: OwnedFd,
+    pub(super) reader: OwnedFd,
     writer: OwnedFd,
 }
 
@@ -21,29 +21,31 @@ impl StartGate {
         Ok(unsafe { Self { reader: OwnedFd::from_raw_fd(fds[0]), writer: OwnedFd::from_raw_fd(fds[1]) } })
     }
 
-    /// Called only in the fork child, before credential/environment setup.
-    /// This path uses only close/read and errno; it cannot allocate or lock.
+    #[cfg(test)]
     pub fn wait_child(self) -> bool {
-        let reader = self.reader.into_raw_fd();
-        let writer = self.writer.into_raw_fd();
-        let mut start = 0_u8;
-        // SAFETY: both descriptors belong to this child. Closing its writer
-        // ensures parent failure produces EOF instead of an indefinite wait.
-        unsafe {
-            libc::close(writer);
-            let received = loop {
-                let result = libc::read(reader, (&mut start as *mut u8).cast(), 1);
-                if result < 0 && *libc::__errno_location() == libc::EINTR { continue; }
-                break result == 1 && start == START;
-            };
-            libc::close(reader);
-            received
-        }
+        drop(self.writer);
+        wait_reader(self.reader)
     }
 
     pub fn release(self) -> io::Result<()> {
         drop(self.reader);
         File::from(self.writer).write_all(&[START])
+    }
+}
+
+pub(super) fn wait_reader(reader: OwnedFd) -> bool {
+    let reader = reader.into_raw_fd();
+    let mut start = 0_u8;
+    // SAFETY: reader is owned, and start is writable. The writer closes on
+    // helper exec; parent loss then produces EOF instead of an endless wait.
+    unsafe {
+        let received = loop {
+            let result = libc::read(reader, (&mut start as *mut u8).cast(), 1);
+            if result < 0 && *libc::__errno_location() == libc::EINTR { continue; }
+            break result == 1 && start == START;
+        };
+        libc::close(reader);
+        received
     }
 }
 
