@@ -107,6 +107,7 @@ impl Coordinator {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn verify_boot(&mut self) -> Result<(), SessionError> {
         if !self.pending_boot { return Ok(()); }
         if !self.lifecycle.accepts_finalize() {
@@ -139,7 +140,10 @@ impl Coordinator {
             Ok(owns_targets) => {
                 self.record.owns_targets |= owns_targets;
                 self.pending_ready = true;
+                #[cfg(test)]
                 return self.verify_readiness();
+                #[cfg(not(test))]
+                return Ok(());
             }
             Err(error) => {
                 self.ready_busy = false;
@@ -153,6 +157,7 @@ impl Coordinator {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn verify_readiness(&mut self) -> Result<(), SessionError> {
         if !self.pending_ready {
             return Ok(());
@@ -168,6 +173,10 @@ impl Coordinator {
         } else {
             false
         };
+        self.complete_readiness(ready)
+    }
+
+    pub(super) fn complete_readiness(&mut self, ready: bool) -> Result<(), SessionError> {
         self.pending_ready = false;
         self.ready_busy = false;
         if ready {

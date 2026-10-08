@@ -101,8 +101,6 @@ impl Coordinator {
                 break;
             }
             self.publish_next_environment()?;
-            self.verify_boot()?;
-            self.verify_readiness()?;
             self.start_observation();
             self.advance()?;
         }

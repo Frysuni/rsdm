@@ -23,10 +23,18 @@ pub(super) struct ObservationResult {
 
 pub(super) struct Observation {
     reaped_apps: bool,
+    boot: Option<BootCheck>,
+    readiness_check: Option<Result<bool, SessionError>>,
     process_exit: Option<ProcessExit>,
     anchor_active: Option<bool>,
     session_target_active: Option<bool>,
     readiness: Option<Readiness>,
+}
+
+enum BootCheck {
+    Pending,
+    Discard,
+    Completed(Result<Vec<u8>, SessionError>),
 }
 
 struct ProcessExit {
@@ -56,6 +64,8 @@ impl Coordinator {
             self.ready_once,
             self.ready_busy,
             self.ready_deadline,
+            self.pending_boot,
+            self.pending_ready,
             &self.record.anchor_unit,
         );
         self.observation_completed(result)
@@ -81,6 +91,8 @@ impl Coordinator {
         let ready_once = self.ready_once;
         let ready_busy = self.ready_busy;
         let ready_deadline = self.ready_deadline;
+        let pending_boot = self.pending_boot;
+        let pending_ready = self.pending_ready;
         let anchor_unit = self.record.anchor_unit.clone();
         let events = self.events.clone();
         self.observation_busy = true;
@@ -97,6 +109,8 @@ impl Coordinator {
                 ready_once,
                 ready_busy,
                 ready_deadline,
+                pending_boot,
+                pending_ready,
                 &anchor_unit,
             );
             let _ = events.send(Work::Observed(result));
@@ -117,6 +131,22 @@ impl Coordinator {
             }
             Err(error) => return Err(error),
         };
+
+        if let Some(boot) = observation.boot {
+            match boot {
+                BootCheck::Pending => {}
+                BootCheck::Discard => {
+                    self.pending_boot = false;
+                    if let Some(process) = &mut self.process {
+                        process.booting = false;
+                    }
+                }
+                BootCheck::Completed(result) => self.boot_completed(result)?,
+            }
+        }
+        if let Some(result) = observation.readiness_check {
+            self.complete_readiness(result?)?;
+        }
 
         if observation.reaped_apps {
             self.last_reap = Instant::now();
@@ -192,6 +222,8 @@ fn observe_external(
     ready_once: bool,
     ready_busy: bool,
     ready_deadline: Instant,
+    pending_boot: bool,
+    pending_ready: bool,
     anchor_unit: &str,
 ) -> ObservationResult {
     let mut process = process;
@@ -200,6 +232,20 @@ fn observe_external(
             apps::release_closed(manager, runtime)?;
         }
 
+        let boot = if pending_boot {
+            Some(verify_boot_external(manager, runtime, process.as_ref(), phase)?)
+        } else {
+            None
+        };
+        let readiness_check = if pending_ready {
+            Some(if matches!(phase, SessionPhase::Starting | SessionPhase::Running) {
+                Ok(manager.active(anchor_unit)?)
+            } else {
+                Ok(false)
+            })
+        } else {
+            None
+        };
         let process_exit = observe_process(
             manager,
             provider,
@@ -241,6 +287,8 @@ fn observe_external(
 
         Ok(Observation {
             reaped_apps,
+            boot,
+            readiness_check,
             process_exit,
             anchor_active,
             session_target_active,
@@ -248,6 +296,34 @@ fn observe_external(
         })
     })();
     ObservationResult { process, result }
+}
+
+fn verify_boot_external(
+    manager: &super::bus::UserManager,
+    runtime: &Runtime,
+    process: Option<&SessionProcess>,
+    phase: SessionPhase,
+) -> Result<BootCheck, SessionError> {
+    if !matches!(phase, SessionPhase::Starting | SessionPhase::Running) {
+        return Ok(BootCheck::Discard);
+    }
+    let unit = process
+        .and_then(|process| process.unit.as_deref())
+        .ok_or_else(|| SessionError::State("pending compositor start has no unit".into()))?;
+    let job = manager.unit_property::<(u32, zbus::zvariant::OwnedObjectPath)>(
+        unit,
+        "org.freedesktop.systemd1.Unit",
+        "Job",
+    )?;
+    if job.0 != 0 {
+        return Ok(BootCheck::Pending);
+    }
+    let result = match super::processes::generation_invocation(manager, unit, &runtime.generation)? {
+        Some(id) if id.iter().any(|byte| *byte != 0) => Ok(id),
+        Some(_) => Err(SessionError::State("compositor start did not create an invocation".into())),
+        None => Err(SessionError::State("compositor start unit disappeared".into())),
+    };
+    Ok(BootCheck::Completed(result))
 }
 
 fn observe_process(
