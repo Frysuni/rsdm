@@ -1,6 +1,9 @@
 //! Generated title art and status-line text.
 
-use std::fs;
+use std::{
+    fs,
+    sync::{Mutex, OnceLock},
+};
 
 use figrs::{Figlet, FigletOptions};
 use rsdm_core::domain::{BorderStyle, DEFAULT_TITLE_FONT, TitleSource, logo};
@@ -15,10 +18,42 @@ use crate::design::{Design, normalize_title_font};
 /// [`TitleSource::SessionName`]; pass `None` to fall back to the hostname.
 pub fn title_lines(design: &Design, session_name: Option<&str>) -> Vec<String> {
     let text = resolve_text(design, session_name);
-    if design.title_source == TitleSource::PresetLogo {
-        return logo::logo(design.title_preset, &text);
+    let key = TitleCacheKey {
+        source: design.title_source,
+        text: text.clone(),
+        preset: design.title_preset,
+        font: design.title_font.clone(),
+    };
+    let cache = TITLE_CACHE.get_or_init(|| Mutex::new(None));
+    if let Ok(mut cached) = cache.lock() {
+        if let Some((cached_key, lines)) = cached.as_ref()
+            && *cached_key == key
+        {
+            return lines.clone();
+        }
+        let lines = build_title_lines(design, &text);
+        *cached = Some((key, lines.clone()));
+        return lines;
     }
-    art(&text, &design.title_font)
+    build_title_lines(design, &text)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TitleCacheKey {
+    source: TitleSource,
+    text: String,
+    preset: rsdm_core::domain::LogoPreset,
+    font: String,
+}
+
+static TITLE_CACHE: OnceLock<Mutex<Option<(TitleCacheKey, Vec<String>)>>> = OnceLock::new();
+
+fn build_title_lines(design: &Design, text: &str) -> Vec<String> {
+    if design.title_source == TitleSource::PresetLogo {
+        logo::logo(design.title_preset, text)
+    } else {
+        art(text, &design.title_font)
+    }
 }
 
 /// The plain (single-line) title text for the active design.
@@ -108,30 +143,67 @@ pub fn caption(label: &str, width: usize, border: BorderStyle) -> String {
 
 /// The machine's hostname, or `localhost` when it cannot be read.
 pub fn hostname() -> String {
-    fs::read_to_string("/proc/sys/kernel/hostname")
-        .map(|name| name.trim().to_string())
-        .ok()
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "localhost".to_string())
+    static HOSTNAME: OnceLock<String> = OnceLock::new();
+    HOSTNAME
+        .get_or_init(|| {
+            fs::read_to_string("/proc/sys/kernel/hostname")
+                .map(|name| name.trim().to_string())
+                .ok()
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "localhost".to_string())
+        })
+        .clone()
 }
 
 /// `PRETTY_NAME`/`NAME` from `/etc/os-release`, if present.
 pub fn os_release_name() -> Option<String> {
-    let text = fs::read_to_string("/etc/os-release").ok()?;
-    for key in ["PRETTY_NAME", "NAME"] {
-        if let Some(value) = find_os_release_value(&text, key) {
-            return Some(value);
-        }
-    }
-    None
+    static OS_RELEASE: OnceLock<Option<String>> = OnceLock::new();
+    OS_RELEASE
+        .get_or_init(|| {
+            ["/etc/os-release", "/usr/lib/os-release"]
+                .iter()
+                .find_map(|path| {
+                    let text = fs::read_to_string(path).ok()?;
+                    ["PRETTY_NAME", "NAME"]
+                        .iter()
+                        .find_map(|key| find_os_release_value(&text, key))
+                })
+        })
+        .clone()
 }
 
 fn find_os_release_value(text: &str, key: &str) -> Option<String> {
     let prefix = format!("{key}=");
     text.lines().find_map(|line| {
-        let value = line.strip_prefix(&prefix)?;
-        Some(value.trim_matches('"').to_string())
+        let value = line.strip_prefix(&prefix)?.trim();
+        parse_os_release_value(value)
     })
+}
+
+fn parse_os_release_value(value: &str) -> Option<String> {
+    let Some(first) = value.chars().next() else {
+        return Some(String::new());
+    };
+    if matches!(first, '\'' | '"') {
+        if value.chars().last()? != first {
+            return None;
+        }
+        let inner = &value[first.len_utf8()..value.len() - first.len_utf8()];
+        if first == '\'' {
+            return Some(inner.to_string());
+        }
+        let mut parsed = String::with_capacity(inner.len());
+        let mut chars = inner.chars();
+        while let Some(character) = chars.next() {
+            if character == '\\' {
+                parsed.push(chars.next()?);
+            } else {
+                parsed.push(character);
+            }
+        }
+        return Some(parsed);
+    }
+    Some(value.to_string())
 }
 
 /// The wall clock, formatted for the status line. ASCII only.
@@ -196,5 +268,23 @@ mod tests {
         let lines = title_lines(&design, None);
         // The RSDM preset logo contains box/underscore art.
         assert!(lines.iter().any(|l| l.contains('_')));
+    }
+
+    #[test]
+    fn os_release_values_support_quotes_and_escapes() {
+        assert_eq!(parse_os_release_value("'single quoted'"), Some("single quoted".into()));
+        assert_eq!(
+            parse_os_release_value(r#""quoted \"name\"""#),
+            Some("quoted \"name\"".into())
+        );
+        assert_eq!(parse_os_release_value("plain"), Some("plain".into()));
+    }
+
+    #[test]
+    fn title_cache_reuses_lines_for_the_same_design() {
+        let design = Design::from_config(&DesignConfig::default());
+        let first = title_lines(&design, None);
+        let second = title_lines(&design, None);
+        assert_eq!(first, second);
     }
 }
