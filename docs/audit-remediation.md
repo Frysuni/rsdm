@@ -43,7 +43,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 25 | Linear process snapshot/pidfd signaling | fixed |
 | 26 | One recovery deadline across all teardown phases | in progress; setup and bus teardown bounded |
 | 27 | Establish shutdown backstop before child startup | pending |
-| 28 | Recover console log level after greeter crashes | pending |
+| 28 | Recover console log level after greeter crashes | fixed |
 | 29 | Establish sane terminal baseline after crashes | fixed |
 | 30 | Generic autovt ownership | pending |
 | 31 | Synchronize generic service and configured VT | pending |
@@ -485,6 +485,28 @@ verification separate from private-peer and unit-test evidence.
   `git diff --check` passed. Changed source files remain below 300 lines. The
   existing lock-cycle orchestration remains above 50 lines and now uses the
   same activity guard as its regression test.
+
+- 28: Greeter console logging now has its own module. Before changing printk,
+  it atomically publishes the original four levels in a private, bounded
+  `/run/rsdm/console-printk.state` file and syncs the file and directory. A new
+  Greeter reuses that baseline after a crash rather than remembering the quiet
+  level. Normal exit restores the exact original values before removing the
+  snapshot; failed restoration retains it for another attempt. Unsafe files,
+  symlinks, shared ownership, and unavailable persistence prevent quieting.
+  A nonblocking process-associated lease serializes Greeters without leaking
+  ownership to the detached PAM/session process across fork. PID 1 status
+  output retains its existing enable-on-return behavior; a recovered snapshot
+  also triggers that compensation before the new Greeter quiets it again.
+  A real SIGKILL subprocess regression verifies crash recovery, separate
+  process fixtures cover contention and fork inheritance, and file fixtures
+  cover normal exit, unsafe state, malformed/oversized records, and failed
+  restoration. `nix develop --command cargo test -p rsdm-tui --locked --quiet`
+  passed all 17 tests; three isolated fixtures are invoked by their parent
+  tests. No kernel setting or PID 1 was touched by these checks. Recovery runs
+  at the next Greeter entry; an intentionally stopped service needs a later
+  entry or manual restoration. All changed source files stay below 300 lines
+  and new functions below 50 lines. TUI/all-target checking passed with Rust
+  1.88.0; `git diff --check` passed.
 
 - 34: Each lock surface owns one prepared cover-fit image for the immutable
   wallpaper loaded at startup. Physical buffer-size changes invalidate it;

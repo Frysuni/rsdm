@@ -79,6 +79,12 @@ the VT belongs to the user's compositor, whose logind session outlives
 `rsdm.service` - the stop-time teardown would vhangup the live session's VT.
 The greeter claims and resets the VT itself.
 
+While Greeter is visible, RSDM suppresses kernel console messages and systemd
+status output. It saves the original kernel log levels in a protected runtime
+file before changing them and restores them when the UI closes. After an
+abrupt crash, the next Greeter entry uses that saved baseline. If the runtime
+file cannot be safely saved or read, console logging is left unchanged.
+
 VT ownership checks include both controlling terminals and open VT descriptors
 held by detached session processes. DM restores a graphics VT to text mode only
 when no foreign holder remains. Unreadable process state is treated as busy.

@@ -1,3 +1,4 @@
+mod console_log;
 mod conversation;
 mod state;
 mod terminal;
