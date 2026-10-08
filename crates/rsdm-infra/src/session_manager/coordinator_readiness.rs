@@ -1,6 +1,9 @@
 //! Activate the session anchor only after compositor readiness is established.
 
-use std::{thread, time::{Duration, Instant}};
+use std::{thread, time::Instant};
+
+#[cfg(test)]
+use std::time::Duration;
 
 use rsdm_core::domain::SessionPhase;
 
@@ -9,6 +12,7 @@ use super::{
 };
 
 impl Coordinator {
+    #[cfg(test)]
     pub fn observe_readiness(&mut self) -> Result<(), SessionError> {
         if self.lifecycle.phase != SessionPhase::Starting || self.ready_busy || self.booting()
             || Instant::now() >= self.ready_deadline

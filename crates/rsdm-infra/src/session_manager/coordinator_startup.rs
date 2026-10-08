@@ -100,6 +100,7 @@ impl Coordinator {
             exit_code: 0,
             replies_pending: 0,
             workers,
+            observation_busy: false,
             control_bus: bus,
             xsmp,
             ready_deadline,

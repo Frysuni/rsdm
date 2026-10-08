@@ -69,7 +69,7 @@ impl Fixture {
             shutdown: None, action: String::new(), ready_busy: false, ready_once: true,
             pending_ready: false,
             pending_boot: false,
-            preparing: false, forced_units: Vec::new(), exit_code: 0, replies_pending: 0, workers: 0,
+            preparing: false, forced_units: Vec::new(), exit_code: 0, replies_pending: 0, workers: 0, observation_busy: false,
             xsmp, control_bus: crate::session_manager::control::ControlServer::with_connection(
                 connection, endpoint,
             ), ready_deadline: Instant::now(), display_since: None,

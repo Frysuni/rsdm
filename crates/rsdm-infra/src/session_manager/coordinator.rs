@@ -21,6 +21,7 @@ use super::{
 pub(super) const MAX_COORDINATOR_WORKERS: usize = 8;
 
 pub(super) enum Work {
+    Observed(super::coordinator_observation::ObservationResult),
     Boot(Result<Vec<u8>, SessionError>),
     Ready(Result<bool, SessionError>),
     EnvironmentPublished(Result<(), SessionError>),
@@ -60,6 +61,7 @@ pub(super) struct Coordinator {
     pub exit_code: i32,
     pub replies_pending: usize,
     pub workers: usize,
+    pub observation_busy: bool,
     pub xsmp: super::xsmp::Handle,
     pub control_bus: super::control::ControlServer,
     pub ready_deadline: Instant,
@@ -101,12 +103,7 @@ impl Coordinator {
             self.publish_next_environment()?;
             self.verify_boot()?;
             self.verify_readiness()?;
-            match self.observe() {
-                Err(SessionError::Bus(error)) if super::bus::retryable_error(&error) => {
-                    tracing::warn!(%error, "deferring session observation while the user manager is unavailable");
-                }
-                other => other?,
-            }
+            self.start_observation();
             self.advance()?;
         }
         self.finish_reply_delivery()?;
@@ -127,7 +124,7 @@ impl Coordinator {
     }
 
     pub fn booting(&self) -> bool {
-        self.process.as_ref().is_some_and(|process| process.booting)
+        self.observation_busy || self.process.as_ref().is_some_and(|process| process.booting)
     }
 
     pub fn save(&mut self) -> Result<(), SessionError> {
@@ -138,6 +135,7 @@ impl Coordinator {
     pub(super) fn completed(&mut self, work: Work) -> Result<(), SessionError> {
         self.workers = self.workers.saturating_sub(1);
         match work {
+            Work::Observed(result) => self.observation_completed(result)?,
             Work::Boot(result) => self.boot_completed(result)?,
             Work::Ready(result) => self.ready_completed(result)?,
             Work::EnvironmentPublished(result) => self.environment_published(result)?,
