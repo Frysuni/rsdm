@@ -27,6 +27,8 @@ package() {
   install -Dm755 rsdm "$pkgdir/usr/bin/rsdm"
   install -Dm644 packaging/systemd/rsdm.service \
     "$pkgdir/usr/lib/systemd/system/rsdm.service"
+  install -Dm644 packaging/systemd/rsdm@.service \
+    "$pkgdir/usr/lib/systemd/system/rsdm@.service"
   install -Dm644 packaging/systemd/rsdm-idle.service \
     "$pkgdir/usr/lib/systemd/user/rsdm-idle.service"
   install -Dm644 packaging/pam/rsdm "$pkgdir/etc/pam.d/rsdm"
