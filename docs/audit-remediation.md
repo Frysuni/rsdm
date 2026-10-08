@@ -42,7 +42,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 24 | Bound shutdown concurrency and polling | pending |
 | 25 | Linear process snapshot/pidfd signaling | fixed |
 | 26 | One recovery deadline across all teardown phases | fixed |
-| 27 | Establish shutdown backstop before child startup | pending |
+| 27 | Establish shutdown backstop before child startup | fixed |
 | 28 | Recover console log level after greeter crashes | fixed |
 | 29 | Establish sane terminal baseline after crashes | fixed |
 | 30 | Generic autovt ownership | pending |
@@ -85,6 +85,28 @@ compatibility/documentation findings. Dependencies may require changing this
 order. Mark a row fixed only after its behavior has been checked.
 
 ## Completed checks
+
+- 27: the launcher forks its child behind a private close-on-exec start pipe.
+  Only close/read/errno operations run at that barrier. The parent establishes
+  its PAM delay guard after fork, then releases the child to set credentials,
+  prepare its environment, and execute the session. This closes the startup
+  window without creating a D-Bus executor before fork. Connection setup and
+  inhibitor acquisition share one five-second timeout. EOF or an invalid start
+  token aborts the child; a failed parent release reaps it before returning.
+  Existing behavior when logind cannot grant the inhibitor is preserved and
+  documented; the user coordinator still attempts its independent guard.
+  Four private fork regressions cover waiting, parent loss, malformed tokens,
+  and close-on-exec descriptors. The DM-lifecycle VM checks the root inhibitor
+  in the first compositor commands and confirms no RSDM inhibitor remains
+  after logout/PAM closure. It also passes NixOS switch, user-manager reexec,
+  user-bus restart, DM restart, and normal app-save/logout checks.
+  `nix develop --command cargo test --workspace --locked --quiet` passed all
+  500 tests (four child-only fixtures are ignored in parent runs).
+  Workspace/all-target checks on Rust 1.88.0, `git diff --check`, and
+  `nix build .#checks.x86_64-linux.dm-lifecycle --no-link --print-build-logs`
+  passed. Changed source files remain below 300 lines and functions below 50.
+  Complex post-PAM credential/environment work is still tracked separately
+  in finding 11; the start barrier does not claim to remove that limitation.
 
 - 26: recovery retains one absolute budget across connection setup, name
   acquisition, worker drain, application preparation, and every teardown call.

@@ -7,6 +7,7 @@ use rsdm_core::{
 
 use super::command::{PreparedCommand, cstring};
 use super::session_environment::session_environment;
+use super::session_start_gate::StartGate;
 
 struct SessionLaunchPlan {
     username: String,
@@ -82,33 +83,43 @@ impl SessionLauncher for UnixSessionLauncher {
             env_names = ?plan.environment.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
             "prepared user session environment"
         );
-        let pid = spawn_child(&plan, request.wrapper)?;
+        let (pid, gate) = spawn_child(&plan, request.wrapper)?;
         tracing::info!(pid, username = %plan.username, desktop_entry_id = %plan.desktop_entry_id, "user session child spawned");
 
-        // Starting a bus executor before the manual fork would leave the child
-        // with locks belonging to threads that no longer exist.
+        // The child waits on its start gate while the parent starts the bus
+        // executor. No session code runs before this guard attempt completes.
         let shutdown_guard = if plan.generation.is_some() {
             match crate::power::pam_shutdown_guard() {
                 Ok(guard) => Some(guard),
                 Err(error) => { tracing::error!(%error, "PAM shutdown delay inhibitor unavailable"); None }
             }
         } else { None };
-        Ok(Box::new(UnixRunningSession { pid, plan, shutdown_guard, reaped: false }))
+        let session = UnixRunningSession { pid, plan, shutdown_guard, reaped: false };
+        gate.release().map_err(|error| SessionLaunchError::Setup(format!("releasing session start gate: {error}")))?;
+        Ok(Box::new(session))
     }
 }
 
-fn spawn_child(plan: &SessionLaunchPlan, wrapper: &[String]) -> Result<libc::pid_t, SessionLaunchError> {
+fn spawn_child(plan: &SessionLaunchPlan, wrapper: &[String]) -> Result<(libc::pid_t, StartGate), SessionLaunchError> {
     let command = PreparedCommand::new_wrapped(wrapper, &plan.command)?;
     let username = cstring("username", &plan.username)?;
     let home = cstring("home", path_to_str(&plan.home)?)?;
     let environment = prepare_environment(&plan.environment)?;
+    let gate = StartGate::new().map_err(|error| SessionLaunchError::Setup(format!("creating session start gate: {error}")))?;
 
     // SAFETY: all command data is prepared before fork. No bus executor has
-    // been started; the child sets credentials and executes the session.
+    // been started; the child first waits for its parent's guard, then sets
+    // credentials and executes the session.
     let pid = unsafe { libc::fork() };
     if pid < 0 { return Err(last_os_error("fork")); }
-    if pid == 0 { child_exec(plan, &command, &username, &home, &environment); }
-    Ok(pid)
+    if pid == 0 {
+        if !gate.wait_child() {
+            // SAFETY: never unwind or run parent destructors after a failed gate.
+            unsafe { libc::_exit(126); }
+        }
+        child_exec(plan, &command, &username, &home, &environment);
+    }
+    Ok((pid, gate))
 }
 
 struct UnixRunningSession {

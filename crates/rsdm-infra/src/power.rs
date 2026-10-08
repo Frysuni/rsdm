@@ -131,12 +131,13 @@ async fn inhibit(connection: &Connection, reason: &str) -> Result<OwnedFd, Sessi
 }
 
 /// The PAM session owner keeps this descriptor until pam_close_session finishes.
-/// Call only after the session child has forked.
+/// Call after fork and before releasing the session child's start gate.
 pub fn pam_shutdown_guard() -> Result<OwnedFd, SessionError> {
-    async_io::block_on(async {
-        let connection = connection(Duration::from_secs(5)).await?;
+    let timeout = Duration::from_secs(5);
+    async_io::block_on(within_timeout(async {
+        let connection = connection(timeout).await?;
         inhibit(&connection, "Closing the graphical PAM session").await
-    })
+    }, timeout))
 }
 
 #[derive(Debug)]

@@ -316,8 +316,15 @@ If a user inhibitor is denied, notifications remain active and RSDM warns that
 it depends on the PAM owner's separate guard. Finite OS delay cannot guarantee
 saving through hung applications, storage or an unresponsive bus.
 
-DM's detached root owner keeps its delay FD through user cleanup, PAM close and
-PAM end. Restarting DM does not terminate that leader's graphical session.
+DM forks the session child behind a start gate, then attempts to acquire the
+root delay inhibitor before allowing any user-session setup or execution.
+System-bus connection and inhibitor acquisition share one five-second timeout.
+The child's gate uses only close/read operations and never starts a bus executor
+before fork. Parent failure closes the gate and aborts the waiting child.
+If logind cannot grant the root inhibitor, RSDM logs the failure and retains the
+existing fallback behavior; the user coordinator still attempts its own guard.
+DM's detached root owner keeps a granted delay FD through user cleanup, PAM
+close and PAM end. Restarting DM does not terminate that leader's graphical session.
 Recovery installs its short shared budget before connecting to the user bus;
 authentication, validation, the coordinator-name lease, app preparation, and
 unit teardown use the same deadline. A saved or active deadline is never

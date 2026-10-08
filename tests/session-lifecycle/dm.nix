@@ -5,6 +5,10 @@ let
     packages.${pkgs.stdenv.hostPlatform.system}.rsdm-stable = rsdm;
   };
   compositor = pkgs.writeShellScript "test-dm-sway" ''
+    set -eu
+    ${pkgs.systemd}/bin/busctl --system --json=short call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager ListInhibitors |
+      ${pkgs.python3}/bin/python3 -c 'import json, sys; rows = json.load(sys.stdin)["data"][0]; assert any(row[:4] == ["shutdown", "RSDM", "Closing the graphical PAM session", "delay"] and row[4] == 0 for row in rows)'
+    touch /tmp/dm-root-guard-ready
     export WLR_RENDERER=pixman
     exec ${pkgs.sway}/bin/sway --config /etc/sway/config
   '';
@@ -64,6 +68,7 @@ pkgs.testers.runNixOSTest {
     except Exception:
         print(machine.succeed("journalctl --no-pager -b -n 100"))
         raise
+    machine.wait_for_file("/tmp/dm-root-guard-ready")
     environment = machine.succeed(user + "systemctl --user show-environment")
     values = dict(line.split("=", 1) for line in environment.splitlines())
     generation = values["RSDM_SESSION_GENERATION"]
@@ -132,6 +137,7 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds("journalctl --no-pager -b | grep 'session finished.*exit=Success'")
         machine.wait_until_succeeds("journalctl --no-pager -b | grep 'pam_unix(rsdm:session): session closed for user alice'")
         machine.wait_until_fails("loginctl show-session " + shlex.quote(session_id))
+        machine.wait_until_succeeds("busctl --system --json=short call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager ListInhibitors | ${pkgs.python3}/bin/python3 -c 'import json, sys; assert all(row[1] != \"RSDM\" for row in json.load(sys.stdin)[\"data\"][0])'")
         machine.wait_until_succeeds("journalctl --no-pager -u rsdm | grep 'display manager initialized' | test $(wc -l) -ge 2")
         machine.wait_for_unit("rsdm.service")
         machine.fail("journalctl --no-pager -b | grep 'session recovery exited with'")
