@@ -216,7 +216,11 @@ fn run_lock_cycle(
         }
     };
 
-    hooks::finish_lock_cycle(child.wait(), lock_confirmed, &config.on_unlock);
+    let result = child.wait();
+    // The locker has already exited; hook completion must not keep the idle
+    // cycle marked active and block a later lock attempt.
+    drop(_reset);
+    hooks::finish_lock_cycle(result, lock_confirmed, &config.on_unlock);
 }
 
 /// A service-managed idle monitor places its locker in a distinct transient
