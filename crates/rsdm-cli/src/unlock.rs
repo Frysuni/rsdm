@@ -1,4 +1,4 @@
-use std::{ffi::CString, io, process::Command, time::Duration};
+use std::{io, process::Command, time::Duration};
 
 use anyhow::{Context, Result};
 
@@ -86,46 +86,9 @@ fn resolve_uid(user: &str) -> Result<u32> {
         return Ok(uid);
     }
 
-    let name = CString::new(user).context("user name contains a NUL byte")?;
-    let initial = passwd_buffer_size();
-    let mut buffer = vec![0_u8; initial];
-    let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
-
-    loop {
-        let mut result = std::ptr::null_mut();
-        // SAFETY: all pointers refer to live writable storage for this call.
-        let code = unsafe {
-            libc::getpwnam_r(
-                name.as_ptr(),
-                passwd.as_mut_ptr(),
-                buffer.as_mut_ptr().cast(),
-                buffer.len(),
-                &mut result,
-            )
-        };
-        if code == libc::ERANGE && buffer.len() < 1024 * 1024 {
-            buffer.resize(buffer.len().saturating_mul(2).min(1024 * 1024), 0);
-            continue;
-        }
-        if code != 0 {
-            return Err(io::Error::from_raw_os_error(code)).context("looking up unlock user");
-        }
-        if result.is_null() {
-            anyhow::bail!("unknown user {user:?}");
-        }
-        // SAFETY: a non-null result means getpwnam_r initialized passwd.
-        return Ok(unsafe { passwd.assume_init() }.pw_uid);
-    }
-}
-
-fn passwd_buffer_size() -> usize {
-    // SAFETY: sysconf has no pointer invariants and is thread-safe.
-    let recommended = unsafe { libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX) };
-    if recommended > 0 {
-        (recommended as usize).clamp(1024, 1024 * 1024)
-    } else {
-        16 * 1024
-    }
+    let uid = rsdm_infra::unix::uid_for_username(user)
+        .map_err(|error| anyhow::anyhow!("looking up unlock user: {error}"))?;
+    uid.ok_or_else(|| anyhow::anyhow!("unknown user {user:?}"))
 }
 
 #[cfg(test)]

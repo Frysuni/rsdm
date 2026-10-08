@@ -5,6 +5,7 @@ mod fallback;
 mod getty_query;
 mod group;
 mod launcher;
+mod nss;
 pub(crate) mod process_handle;
 mod session_environment;
 mod session_exec;
@@ -34,5 +35,5 @@ pub use shutdown::{
     emergency_unlock_requested, install_emergency_unlock_handler, install_terminate_handler,
     terminate_flag, terminate_requested,
 };
-pub use user::UnixUserResolver;
+pub use user::{UnixUserResolver, current_username, uid_for_username};
 pub use vt::{VtError, VtGuard, acquire as acquire_vt};

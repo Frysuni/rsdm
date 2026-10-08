@@ -1,14 +1,7 @@
-use std::{
-    ffi::{CStr, CString},
-    mem::MaybeUninit,
-    ptr,
-};
-
 use rsdm_core::ports::{ResolvedUser, UserResolveError, UserResolver};
 
 use super::group::user_in_any_group;
-
-const MAX_NSS_BUFFER: usize = 1024 * 1024;
+use super::nss;
 
 #[derive(Debug, Clone, Default)]
 pub struct UnixUserResolver {
@@ -48,48 +41,28 @@ impl UserResolver for UnixUserResolver {
 }
 
 fn lookup_user(username: &str) -> Result<ResolvedUser, UserResolveError> {
-    let username_c = CString::new(username)
-        .map_err(|_| UserResolveError::Backend("username contains NUL".into()))?;
-    let mut pwd = MaybeUninit::<libc::passwd>::uninit();
-    let mut buffer = vec![0_u8; passwd_buffer_size()];
-
-    loop {
-        let mut result = ptr::null_mut();
-        // SAFETY: getpwnam_r writes into pwd and buffer, both valid for the call.
-        let status = unsafe {
-            libc::getpwnam_r(
-                username_c.as_ptr(),
-                pwd.as_mut_ptr(),
-                buffer.as_mut_ptr().cast(),
-                buffer.len(),
-                &mut result,
-            )
-        };
-        if status == libc::ERANGE && grow_nss_buffer(&mut buffer) {
-            continue;
-        }
-        if status != 0 {
-            return Err(UserResolveError::Backend(format!(
-                "getpwnam_r failed: {status}"
-            )));
-        }
-        if result.is_null() {
-            return Err(UserResolveError::NotFound(username.to_string()));
-        }
-        break;
-    }
-
-    // SAFETY: result is non-null, so pwd has been initialized by getpwnam_r.
-    let pwd = unsafe { pwd.assume_init() };
+    let user = nss::user_by_name(username)
+        .map_err(|error| UserResolveError::Backend(error.to_string()))?
+        .ok_or_else(|| UserResolveError::NotFound(username.to_string()))?;
     Ok(ResolvedUser {
-        username: cstr_to_string(pwd.pw_name)?,
-        uid: pwd.pw_uid,
-        gid: pwd.pw_gid,
+        username: user.username,
+        uid: user.uid,
+        gid: user.gid,
         // An account may have blank passwd fields; login(1) substitutes / and
         // /bin/sh rather than exporting empty HOME/SHELL into the session.
-        home: default_if_empty(cstr_to_string(pwd.pw_dir)?, "/"),
-        shell: default_if_empty(cstr_to_string(pwd.pw_shell)?, "/bin/sh"),
+        home: default_if_empty(user.home, "/"),
+        shell: default_if_empty(user.shell, "/bin/sh"),
     })
+}
+
+pub fn current_username() -> Option<String> {
+    // SAFETY: geteuid never fails and touches no memory.
+    let uid = unsafe { libc::geteuid() };
+    nss::user_name_by_uid(uid).ok().flatten()
+}
+
+pub fn uid_for_username(username: &str) -> Result<Option<u32>, String> {
+    nss::uid_by_name(username).map_err(|error| error.to_string())
 }
 
 fn default_if_empty(value: String, default: &str) -> String {
@@ -100,37 +73,9 @@ fn default_if_empty(value: String, default: &str) -> String {
     }
 }
 
-fn passwd_buffer_size() -> usize {
-    // SAFETY: sysconf is thread-safe and has no pointer invariants.
-    let value = unsafe { libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX) };
-    if value > 0 {
-        (value as usize).clamp(1024, MAX_NSS_BUFFER)
-    } else {
-        16 * 1024
-    }
-}
-
-fn grow_nss_buffer(buffer: &mut Vec<u8>) -> bool {
-    if buffer.len() >= MAX_NSS_BUFFER {
-        return false;
-    }
-    buffer.resize(buffer.len().saturating_mul(2).min(MAX_NSS_BUFFER), 0);
-    true
-}
-
-fn cstr_to_string(value: *const libc::c_char) -> Result<String, UserResolveError> {
-    if value.is_null() {
-        return Ok(String::new());
-    }
-    // SAFETY: libc passwd fields are NUL-terminated strings while buffer lives.
-    Ok(unsafe { CStr::from_ptr(value) }
-        .to_string_lossy()
-        .into_owned())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{MAX_NSS_BUFFER, default_if_empty, grow_nss_buffer};
+    use super::{default_if_empty, current_username};
 
     #[test]
     fn blank_passwd_fields_fall_back_to_login_defaults() {
@@ -143,12 +88,7 @@ mod tests {
     }
 
     #[test]
-    fn nss_buffer_growth_is_bounded() {
-        let mut buffer = vec![0; 1024];
-        assert!(grow_nss_buffer(&mut buffer));
-        assert_eq!(buffer.len(), 2048);
-
-        buffer.resize(MAX_NSS_BUFFER, 0);
-        assert!(!grow_nss_buffer(&mut buffer));
+    fn resolves_the_effective_uid() {
+        assert!(current_username().is_some());
     }
 }
