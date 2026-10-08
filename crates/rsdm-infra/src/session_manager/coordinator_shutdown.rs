@@ -202,12 +202,19 @@ fn run_logout_command(manager: &UserManager, record: &SessionRecord, provider: &
     let unit = format!("rsdm-logout-{}.service", record.identity.generation);
     let environment: Vec<_> = manager.environment()?.into_iter().filter_map(|entry| entry.split_once('=')
         .map(|(name, value)| (name.to_string(), value.to_string()))).collect();
+    if !environment.iter().any(|(name, value)| {
+        name == super::identity::GENERATION_ENV && value == &record.identity.generation
+    }) {
+        return Err(SessionError::State("logout command belongs to a stale session generation".into()));
+    }
     let mut properties = units::command_properties(&provider.logout_command, &environment, directory)?;
+    // This command may itself stop the graphical target and its anchor. It
+    // must survive that stop long enough to return its actual result. Bound
+    // its lifetime in systemd as well, including if the coordinator crashes.
     properties.extend([
         ("ExitType", zbus::zvariant::Value::from("cgroup")),
+        ("RuntimeMaxUSec", zbus::zvariant::Value::from(15_000_000_u64)),
         ("TimeoutStopUSec", zbus::zvariant::Value::from(1_000_000_u64)),
-        ("PartOf", zbus::zvariant::Value::new(vec![record.anchor_unit.clone()])),
-        ("Requisite", zbus::zvariant::Value::new(vec![record.anchor_unit.clone()])),
     ]);
     let result = (|| {
         manager.start_service(&unit, &properties)?;
