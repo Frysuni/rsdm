@@ -23,7 +23,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 5 | Symmetric record read/write size limits | fixed |
 | 6 | Reap lockers that never confirm readiness | fixed |
 | 7 | Bound idle hooks | fixed |
-| 8 | Retain restoration state for removed niri outputs | implemented; compositor checks pending |
+| 8 | Retain restoration state for removed niri outputs | fixed |
 | 9 | Move bounded niri IPC off the Wayland loop | fixed |
 | 10 | Cancellable, bounded PAM helper processes | fixed |
 | 11 | Remove complex post-PAM fork child work | fixed |
@@ -854,6 +854,15 @@ verification separate from private-peer and unit-test evidence.
   create-new temporary file, rename, and directory sync. Existing worker tests
   cover removed outputs, uncertain commands, retries, coalescing, and final
   cleanup without contacting a compositor.
+
+- 8: Secondary-output restoration is keyed by connector names in the dedicated
+  output worker, so niri removing a `wl_output` global after `off` cannot erase
+  the restoration obligation. Policy changes, unlock, normal exit, startup
+  recovery, and error cleanup all route through the same serialized worker.
+  Private regressions cover removed outputs and late restoration; the native
+  niri lifecycle VM passed through user-manager reexec, NixOS switch, reload,
+  cancellation, app save, and compositor teardown. The worker now also keeps
+  crash-persistent ownership in the runtime record described under finding 35.
 
 - 30/31: Generic systemd packaging now includes a `rsdm@.service` template.
   Its `%i` instance drives `TTYPath`, `getty`/`autovt` conflicts, and temporary
