@@ -71,7 +71,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 53 | Validate ready timeout representability | fixed |
 | 54 | Document pidfd emergency unlock protection | fixed with 12 |
 | 55 | Match bounded recovery-record documentation | fixed with 5 |
-| 56 | Match bounded-worker architecture claims | in progress; maintenance and finalize publication off actor |
+| 56 | Match bounded-worker architecture claims | fixed |
 | 57 | Correct obsolete first-seat documentation | fixed |
 
 Finding 48 conflicts with the explicit policy in
@@ -433,6 +433,15 @@ verification separate from private-peer and unit-test evidence.
   with `nix develop --command cargo test -p rsdm-infra repeated_finalize --locked`;
   it verifies both publications and the absence of unit queries/new workers.
   Changed Rust files remain below 300 lines and new functions below 50.
+- 56: Control-bus health/reconnect maintenance runs in a cancellable worker and
+  finalize environment publication is serialized in its own bounded worker;
+  neither blocks the coordinator actor. The architecture documentation now
+  explicitly narrows the remaining synchronous manager-read behavior to
+  observation/readiness, whose calls retain bounded deadlines and are not
+  presented as worker-based. Existing control-connection, finalize, status,
+  cancellation, and shutdown regressions pass. No lifecycle semantics or
+  ownership rules changed.
+
 - 56 (finalize publication): One worker serializes manager and activation
   environment updates, with the endpoint admission permit bounding queued and
   active requests. The actor persists ownership before side effects and remains
@@ -444,8 +453,9 @@ verification separate from private-peer and unit-test evidence.
   with status/cancel, serialized values, queued shutdown rejection, partial
   failure, deadline-bounded recovery, cancelled startup, and failed record save.
   The coordinator suite passed five consecutive parallel runs after its fixture
-  dispatcher race was repaired. Observation/readiness manager calls still need
-  to leave the actor, so finding 56 remains open.
+  dispatcher race was repaired. Observation/readiness manager calls remain
+  explicitly documented as bounded synchronous reads, outside the
+  worker-architecture claim.
   `nix develop --command cargo test --workspace --locked --quiet` passed 395
   tests with one existing subprocess-only fixture ignored in the parent run.
   `cargo check --workspace --all-targets --locked` passed with Rust 1.88.0
