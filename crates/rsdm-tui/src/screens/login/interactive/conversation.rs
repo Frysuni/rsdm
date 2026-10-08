@@ -1,6 +1,6 @@
 //! Additional PAM credentials requested while the Greeter retains the VT.
 
-use std::{fs::File, sync::atomic::Ordering, time::Duration};
+use std::{fs::File, sync::atomic::Ordering, time::{Duration, Instant}};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -16,12 +16,15 @@ use zeroize::Zeroizing;
 use super::{Status, build_scene, state::FormState};
 use crate::surface::TuiSurface;
 
+const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(90);
+
 pub(super) struct GreeterConversation<'a> {
     pub terminal: &'a mut Terminal<CrosstermBackend<File>>,
     pub model: &'a LoginUiModel<'a>,
     pub form: &'a FormState,
     pub design: &'a Design,
     pub notice: String,
+    pub started: Instant,
 }
 
 impl std::fmt::Debug for GreeterConversation<'_> {
@@ -51,6 +54,9 @@ impl GreeterConversation<'_> {
     fn read_answer(&mut self, message: &AuthMessage) -> Result<Option<PasswordSecret>, AuthError> {
         let mut input = Zeroizing::new(String::new());
         loop {
+            if self.started.elapsed() >= AUTHENTICATION_TIMEOUT {
+                return Err(AuthError::Backend("authentication timed out".to_string()));
+            }
             if self.model.terminate.load(Ordering::SeqCst) {
                 return Err(AuthError::InvalidCredentials);
             }

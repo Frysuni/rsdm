@@ -25,7 +25,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 7 | Bound idle hooks | fixed |
 | 8 | Retain restoration state for removed niri outputs | implemented; compositor checks pending |
 | 9 | Move bounded niri IPC off the Wayland loop | fixed |
-| 10 | Cancellable, bounded PAM helper processes | pending |
+| 10 | Cancellable, bounded PAM helper processes | fixed |
 | 11 | Remove complex post-PAM fork child work | fixed |
 | 12 | Pin emergency unlock targets with pidfds | fixed |
 | 13 | Validate lock state through one open descriptor | fixed |
@@ -810,6 +810,23 @@ verification separate from private-peer and unit-test evidence.
   overrides the PAM stack's delay policy. The change removes the unused FFI
   constant and callback; PAM setup/authentication tests still pass without
   contacting a real authentication service.
+
+- 10: Lock-screen PAM verification now runs in a dedicated hidden helper image,
+  with a bounded framed Unix-socket protocol for prompts, answers, cancellation,
+  and results. The parent retains limiter state, clears the helper environment,
+  passes only an explicitly inherited socket descriptor, applies a 90-second
+  monotonic timeout, and kills/reaps the helper on cancellation, timeout,
+  malformed protocol data, or transport loss. The helper has a parent-death
+  signal and never receives the password in argv. Protocol regressions cover
+  bounded secrets, malformed lengths, and partial frames; lock tests pass
+  without contacting PAM.
+  Greeter session-leader authorization now uses the same 90-second deadline for
+  its handshake and framed PAM report reads. A timeout, cancellation, lost
+  report, or invalid authorization terminates and reaps the direct child before
+  returning to the UI. Interactive Greeter prompts also enforce the deadline,
+  while Escape and the existing termination flag still cancel user-driven
+  prompts. Infra and TUI tests cover timeout behavior and the existing
+  cancellation/account-mapping protocol.
 
 - 50: Session discovery decodes the desktop string escape layer, validates whole
   double-quoted arguments, and expands Exec field codes after tokenization.

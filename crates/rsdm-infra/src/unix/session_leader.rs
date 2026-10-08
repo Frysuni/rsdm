@@ -6,6 +6,7 @@
 use std::{
     io,
     os::{fd::BorrowedFd, raw::c_int},
+    time::{Duration, Instant},
 };
 
 use rsdm_core::ports::{AuthConversation, SessionGate, SessionLaunchError};
@@ -21,6 +22,8 @@ pub enum LeaderLaunch {
     Denied(LeaderReport),
     Ready(LeaderHandle),
 }
+
+const AUTHORIZATION_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// The child's side of the two-phase handshake, handed to the session closure.
 pub struct LeaderGate {
@@ -111,6 +114,7 @@ impl Drop for LeaderHandle {
             libc::close(self.go_fd);
             libc::close(self.report_fd);
         }
+        terminate(self.pid);
         reap(self.pid);
     }
 }
@@ -190,7 +194,8 @@ fn await_authorization(
     go_write: c_int,
     conversation: &mut dyn AuthConversation,
 ) -> LeaderLaunch {
-    match read_auth_report(report_read, go_write, conversation) {
+    let deadline = Instant::now() + AUTHORIZATION_TIMEOUT;
+    match read_auth_report(report_read, go_write, conversation, deadline) {
         Some(frame) if frame[0] == AUTHORIZED_TAG => LeaderLaunch::Ready(LeaderHandle {
             pid,
             report_fd: report_read,
@@ -198,6 +203,9 @@ fn await_authorization(
             finished: false,
         }),
         frame => {
+            if frame.is_none() {
+                tracing::warn!("greeter authorization handshake timed out or lost");
+            }
             let report = frame
                 .map(LeaderReport::decode)
                 .unwrap_or(LeaderReport::Lost);
@@ -206,8 +214,20 @@ fn await_authorization(
                 libc::close(report_read);
                 libc::close(go_write);
             }
+            terminate(pid);
             reap(pid);
             LeaderLaunch::Denied(report)
+        }
+    }
+}
+
+fn terminate(pid: libc::pid_t) {
+    // The process is our unreaped direct child, so its PID cannot be reused
+    // between this signal and waitpid.
+    if unsafe { libc::kill(pid, libc::SIGKILL) } < 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::NotFound {
+            tracing::debug!(%error, pid, "could not terminate session leader");
         }
     }
 }

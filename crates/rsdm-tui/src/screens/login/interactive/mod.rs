@@ -3,7 +3,7 @@ mod conversation;
 mod state;
 mod terminal;
 
-use std::{io, sync::atomic::Ordering, time::Duration};
+use std::{io, sync::atomic::Ordering, time::{Duration, Instant}};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -189,6 +189,7 @@ fn run_prompt(
                             form: &form,
                             design: &design,
                             notice: String::new(),
+                            started: Instant::now(),
                         };
                         match attempt(submitted, &mut conversation) {
                             LoginAttemptOutcome::Failure(message) => {
