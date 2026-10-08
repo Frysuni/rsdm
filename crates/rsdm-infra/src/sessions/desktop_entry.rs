@@ -27,16 +27,18 @@ impl DesktopEntry {
         if name.trim().is_empty() || exec.is_empty() {
             return None;
         }
-        let Some(exec) = desktop_exec::command(exec, name, self.icon.as_deref(), source_path) else {
+        let Some(exec_argv) = desktop_exec::argv(exec, name, self.icon.as_deref(), source_path) else {
             tracing::debug!(source = source_path, "invalid desktop session Exec; skipping");
             return None;
         };
+        let exec = desktop_exec::encode(&exec_argv);
 
         Some(Session {
             id: id.to_string(),
             name: name.to_string(),
             comment: self.comment.clone(),
             exec,
+            exec_argv: Some(exec_argv),
             desktop_names: self.desktop_names.clone(),
             source_path: source_path.to_string(),
         })

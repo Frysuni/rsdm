@@ -17,7 +17,7 @@ pub(super) struct ExecRequest {
     pub uid: u32,
     pub gid: u32,
     pub home: String,
-    pub command: String,
+    pub command: Vec<String>,
     pub wrapper: Vec<String>,
     pub environment: Vec<(String, String)>,
 }
@@ -26,7 +26,7 @@ impl ExecRequest {
     pub fn validate(&self) -> Result<(), SessionLaunchError> {
         cstring("username", &self.username)?;
         cstring("home", &self.home)?;
-        PreparedCommand::new_wrapped(&self.wrapper, &self.command)?;
+        PreparedCommand::new_wrapped_argv(&self.wrapper, &self.command)?;
         for (key, value) in &self.environment {
             if key.is_empty() || key.contains('=') { return Err(setup("invalid environment key")); }
             cstring("env key", key)?;

@@ -19,7 +19,7 @@ pub fn exec_session(request_fd: RawFd, gate_fd: RawFd) -> Result<Infallible, Ses
     }
     if !wait_reader(gate) { return Err(SessionLaunchError::Setup("session start was aborted".into())); }
 
-    let command = PreparedCommand::new_wrapped(&request.wrapper, &request.command)?;
+    let command = PreparedCommand::new_wrapped_argv(&request.wrapper, &request.command)?;
     configure_session(&request)?;
     let argv = command.argv_ptrs();
     // SAFETY: argv and program remain valid terminated strings through exec.

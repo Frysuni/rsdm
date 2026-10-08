@@ -5,7 +5,7 @@ use super::*;
 fn request() -> ExecRequest {
     ExecRequest {
         username: "alice".into(), uid: 1000, gid: 100,
-        home: "/home/alice".into(), command: "niri-session --session".into(),
+        home: "/home/alice".into(), command: vec!["niri-session".into(), "--session".into()],
         wrapper: vec!["/usr/bin/rsdm".into(), "session".into(), "start".into(), "--".into()],
         environment: vec![("HOME".into(), "/home/alice".into()), ("PATH".into(), "/usr/bin".into())],
     }
@@ -34,7 +34,7 @@ fn invalid_environment_and_commands_are_rejected_before_sealing() {
     invalid.environment.push(("BAD=KEY".into(), "value".into()));
     assert!(invalid.seal().is_err());
     let mut invalid = request();
-    invalid.command = "".into();
+    invalid.command = Vec::new();
     assert!(invalid.seal().is_err());
 }
 

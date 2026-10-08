@@ -12,10 +12,17 @@ impl PreparedCommand {
     /// `program` is the first element of the combined argv, so an empty prefix
     /// runs the session directly while a prefix like `[rsdm, session, start,
     /// --]` wraps it in the session manager.
+    #[cfg(test)]
     pub fn new_wrapped(prefix: &[String], exec: &str) -> Result<Self, SessionLaunchError> {
-        let session_argv = split_exec(exec)?;
-        let mut args = if is_session_manager_command(&session_argv) { Vec::new() } else { prefix.to_vec() };
-        args.extend(session_argv);
+        Self::new_wrapped_argv(prefix, &split_exec(exec)?)
+    }
+
+    pub fn new_wrapped_argv(prefix: &[String], session_argv: &[String]) -> Result<Self, SessionLaunchError> {
+        if session_argv.is_empty() {
+            return Err(SessionLaunchError::Setup("session command is empty".to_string()));
+        }
+        let mut args = if is_session_manager_command(session_argv) { Vec::new() } else { prefix.to_vec() };
+        args.extend_from_slice(session_argv);
         let argv = args
             .iter()
             .enumerate()

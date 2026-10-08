@@ -16,7 +16,12 @@ pub(super) fn decode(value: &str) -> Option<String> {
     Some(output)
 }
 
+#[cfg(test)]
 pub(super) fn command(value: &str, name: &str, icon: Option<&str>, source: &str) -> Option<String> {
+    argv(value, name, icon, source).map(|args| encode(&args))
+}
+
+pub(super) fn argv(value: &str, name: &str, icon: Option<&str>, source: &str) -> Option<Vec<String>> {
     let mut args = Vec::new();
     let mut file_codes = 0;
     for token in tokens(value)? {
@@ -31,7 +36,7 @@ pub(super) fn command(value: &str, name: &str, icon: Option<&str>, source: &str)
     }
     if args.first().is_none_or(|program| program.is_empty() || program.contains('=')) { return None; }
     if args.iter().any(|argument| argument.contains('\0')) { return None; }
-    Some(encode(&args))
+    Some(args)
 }
 
 fn tokens(value: &str) -> Option<Vec<String>> {
@@ -104,7 +109,7 @@ fn expand(token: &str, name: &str, source: &str, file_codes: &mut usize) -> Opti
     Some(output)
 }
 
-fn encode(args: &[String]) -> String {
+pub(super) fn encode(args: &[String]) -> String {
     // Session.exec carries the existing launcher's syntax. Field replacements
     // must survive its later argv decoding without being split or expanded again.
     args.iter().map(|arg| {

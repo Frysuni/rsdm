@@ -6,6 +6,8 @@ pub struct Session {
     pub comment: Option<String>,
     /// Command in launcher syntax, after Desktop Entry field expansion.
     pub exec: String,
+    /// Validated argv produced from a desktop entry, when available.
+    pub exec_argv: Option<Vec<String>>,
     pub desktop_names: Vec<String>,
     pub source_path: String,
 }
@@ -22,6 +24,7 @@ impl Session {
             name: name.into(),
             comment: None,
             exec: exec.into(),
+            exec_argv: None,
             desktop_names: Vec::new(),
             source_path: source_path.into(),
         }

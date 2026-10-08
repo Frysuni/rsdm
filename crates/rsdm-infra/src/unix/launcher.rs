@@ -15,7 +15,7 @@ struct SessionLaunchPlan {
     gid: u32,
     home: PathBuf,
     desktop_entry_id: String,
-    command: String,
+    command: Vec<String>,
     environment: Vec<(String, String)>,
     generation: Option<String>,
 }
@@ -37,7 +37,8 @@ impl UnixSessionLauncher {
         );
         environment.retain(|(name, _)| name != "RSDM_DESKTOP_ENTRY_ID");
         environment.push(("RSDM_DESKTOP_ENTRY_ID".into(), session.id.clone()));
-        let coordinated = !wrapper.is_empty() || super::command::is_session_manager_command(&super::command::split_exec(&session.exec)?);
+        let command = session.exec_argv.clone().unwrap_or(super::command::split_exec(&session.exec)?);
+        let coordinated = !wrapper.is_empty() || super::command::is_session_manager_command(&command);
         let generation = if coordinated {
             Some(crate::session_manager::new_generation().map_err(|error| SessionLaunchError::Setup(error.to_string()))?)
         } else { None };
@@ -49,7 +50,7 @@ impl UnixSessionLauncher {
             gid: user.gid,
             home: PathBuf::from(&user.home),
             desktop_entry_id: session.id.clone(),
-            command: session.exec.clone(),
+            command,
             environment,
             generation,
         })
@@ -73,7 +74,7 @@ impl SessionLauncher for UnixSessionLauncher {
             uid = plan.uid,
             gid = plan.gid,
             desktop_entry_id = %plan.desktop_entry_id,
-            command = %plan.command,
+            command = ?plan.command,
             wrapper = ?request.wrapper,
             "launching user session"
         );
