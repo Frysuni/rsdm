@@ -21,7 +21,7 @@ use super::{
 pub(super) const MAX_COORDINATOR_WORKERS: usize = 8;
 
 pub(super) enum Work {
-    Observed(super::coordinator_observation::ObservationResult),
+    Observed(super::coordinator_probe::ObservationResult),
     Boot(Result<Vec<u8>, SessionError>),
     Ready(Result<bool, SessionError>),
     EnvironmentPublished(Result<(), SessionError>),

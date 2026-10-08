@@ -12,6 +12,7 @@ mod coordinator;
 mod coordinator_environment;
 mod coordinator_notifications;
 mod coordinator_observation;
+mod coordinator_probe;
 mod coordinator_readiness;
 mod coordinator_requests;
 mod coordinator_recovery;

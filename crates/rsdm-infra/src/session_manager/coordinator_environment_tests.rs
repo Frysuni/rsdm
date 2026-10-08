@@ -184,6 +184,9 @@ fn cancelling_logout_preserves_an_accepted_startup_finalize_until_readiness() {
     assert_eq!(fixture.coordinator.finalize_replies.len(), 1);
     state.ready.store(true, Ordering::SeqCst);
     fixture.coordinator.completed(Work::Ready(Ok(false))).unwrap();
+    fixture.coordinator.start_observation();
+    let work = fixture.coordinator.work.recv_timeout(Duration::from_secs(2)).unwrap();
+    fixture.coordinator.completed(work).unwrap();
     assert!(response.try_recv().unwrap().is_ok());
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Running);
     assert_eq!(fixture.coordinator.workers, 0);

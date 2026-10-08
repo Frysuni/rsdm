@@ -9,8 +9,8 @@ use crate::session_manager::control::Reply;
 use super::*;
 
 #[derive(Default)]
-struct ManagerState {
-    unavailable: AtomicBool,
+pub(super) struct ManagerState {
+    pub(super) unavailable: AtomicBool,
     active: AtomicBool,
     reads: AtomicUsize,
     starts: AtomicUsize,
@@ -65,7 +65,7 @@ impl FakeService {
     fn environment(&self) -> Vec<String> { vec![format!("RSDM_SESSION_GENERATION={GENERATION}")] }
 }
 
-fn install_manager(fixture: &Fixture) -> Arc<ManagerState> {
+pub(super) fn install_manager(fixture: &Fixture) -> Arc<ManagerState> {
     let state = Arc::new(ManagerState::default());
     state.unavailable.store(true, Ordering::SeqCst);
     state.active.store(true, Ordering::SeqCst);
@@ -75,6 +75,13 @@ fn install_manager(fixture: &Fixture) -> Arc<ManagerState> {
         fixture._server.object_server().at("/org/freedesktop/systemd1/unit/anchor", FakeService).await.unwrap();
     });
     state
+}
+
+fn complete_observation(fixture: &mut Fixture) {
+    fixture.coordinator.start_observation();
+    let work = fixture.coordinator.work.recv_timeout(Duration::from_secs(8)).unwrap();
+    assert!(matches!(work, Work::Observed(_)));
+    fixture.coordinator.completed(work).unwrap();
 }
 
 #[test]
@@ -93,17 +100,17 @@ fn a_lost_invocation_read_after_start_does_not_stop_or_restart_the_compositor() 
     assert!(fixture.coordinator.pending_boot);
     assert!(fixture.coordinator.booting());
     assert_eq!(fixture.coordinator.exit_code, 0);
-    fixture.coordinator.verify_boot().unwrap();
+    complete_observation(&mut fixture);
     assert!(fixture.coordinator.pending_boot);
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Starting);
 
     state.unavailable.store(false, Ordering::SeqCst);
     state.pending.store(true, Ordering::SeqCst);
-    fixture.coordinator.verify_boot().unwrap();
+    complete_observation(&mut fixture);
     assert!(fixture.coordinator.pending_boot);
     assert!(fixture.coordinator.booting());
     state.pending.store(false, Ordering::SeqCst);
-    fixture.coordinator.verify_boot().unwrap();
+    complete_observation(&mut fixture);
     assert!(!fixture.coordinator.pending_boot);
     assert!(!fixture.coordinator.booting());
     assert_eq!(fixture.coordinator.record.compositor_invocation, vec![1; 16]);
@@ -114,7 +121,7 @@ fn a_lost_invocation_read_after_start_does_not_stop_or_restart_the_compositor() 
     fixture.coordinator.process.as_mut().unwrap().booting = true;
     state.reads.store(0, Ordering::SeqCst);
     fixture.coordinator.begin_stop("logout", None).unwrap();
-    fixture.coordinator.verify_boot().unwrap();
+    complete_observation(&mut fixture);
     assert!(!fixture.coordinator.booting());
     assert_eq!(state.reads.load(Ordering::SeqCst), 0);
 }
@@ -135,11 +142,11 @@ fn readiness_completion_waits_for_reads_without_repeating_activation() {
     assert!(fixture.coordinator.record.owns_targets);
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Starting);
     assert!(received.try_recv().is_err());
-    fixture.coordinator.observe_readiness().unwrap();
+    complete_observation(&mut fixture);
     assert_eq!(state.starts.load(Ordering::SeqCst), 0);
 
     state.unavailable.store(false, Ordering::SeqCst);
-    fixture.coordinator.verify_readiness().unwrap();
+    complete_observation(&mut fixture);
     assert!(!fixture.coordinator.pending_ready);
     assert!(!fixture.coordinator.ready_busy);
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Running);
@@ -160,7 +167,7 @@ fn shutdown_releases_pending_readiness_even_during_an_outage() {
     fixture.coordinator.finalize_replies.push(Reply::for_test(reply));
 
     fixture.coordinator.begin_stop("logout", None).unwrap();
-    fixture.coordinator.verify_readiness().unwrap();
+    complete_observation(&mut fixture);
     assert!(received.try_recv().unwrap().is_err());
     assert!(!fixture.coordinator.ready_busy);
     assert!(!fixture.coordinator.pending_ready);

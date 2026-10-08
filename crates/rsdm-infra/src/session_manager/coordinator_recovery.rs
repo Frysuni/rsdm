@@ -64,6 +64,10 @@ impl Coordinator {
             if let Ok(work) = self.work.recv_timeout(wait) {
                 self.workers = self.workers.saturating_sub(1);
                 match work {
+                    Work::Observed(result) => {
+                        self.observation_busy = false;
+                        self.process = result.process;
+                    }
                     Work::Boot(Ok(id)) => self.record.compositor_invocation = id,
                     Work::Ready(Ok(owns)) => self.record.owns_targets |= owns,
                     Work::Launched(_, reply, _) => {
