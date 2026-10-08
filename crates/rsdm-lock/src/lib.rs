@@ -1,6 +1,8 @@
 //! Wayland session locker using the shared rsdm UI.
 
 mod auth;
+mod auth_helper;
+mod auth_protocol;
 mod model;
 mod render;
 mod util;
@@ -16,6 +18,11 @@ use crate::{
     model::LockModel,
     render::{Canvas, FbSurface, Font, Wallpaper, resolve_zoom, tint},
 };
+
+/// Run the hidden lock authentication helper inherited by the parent lock process.
+pub fn run_auth_helper(fd: i32) -> std::process::ExitCode {
+    auth_helper::run(fd)
+}
 
 /// Lock every output until the seated user authenticates.
 pub fn run(config: &AppConfig, config_path: &Path) -> anyhow::Result<()> {

@@ -85,8 +85,7 @@ impl App {
             return;
         };
         if event.keysym == Keysym::Escape {
-            job.cancelled = true;
-            let _ = job.responses.try_send(Err(AuthError::InvalidCredentials));
+            job.cancel();
             self.model.finish_prompt();
             self.model.set_info("Cancelling authentication...");
         } else if job.waiting && !job.cancelled {
