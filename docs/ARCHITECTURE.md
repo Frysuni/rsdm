@@ -83,6 +83,10 @@ Greeter (`dm`) runtime path:
    configured command first, then a built-in `agetty`/`login` chain) instead
    of dying
 
+Greeter power actions execute `rsdm logind-request` in a separate process.
+Its bus executor exits with the helper, so a denied request leaves no runtime
+threads in the Greeter before another PAM owner is forked.
+
 When `session_manager.enabled` is set, step 8 wraps the original command in
 `rsdm session start`, with the selected config and desktop metadata. Its user
 coordinator owns one generation, separate from logind and desktop-entry IDs.

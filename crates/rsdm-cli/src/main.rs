@@ -52,6 +52,11 @@ enum Command {
         #[arg(long)]
         fd: i32,
     },
+    #[command(hide = true)]
+    LogindRequest {
+        #[arg(value_enum)]
+        action: session::PowerAction,
+    },
     /// Run the display manager greeter on the configured TTY.
     #[command(after_help = "Usage notes:\n  DM starts the Greeter on its configured VT, normally through rsdm.service.\n\nExamples:\n  rsdm validate-config\n  rsdm logs --component dm")]
     Dm,
@@ -137,6 +142,10 @@ fn run(cli: Cli) -> Result<ExitCode> {
     let result = match cli.command {
         Command::SessionExec { request_fd, gate_fd } => return Ok(session_exec::run(request_fd, gate_fd)),
         Command::LockAuthHelper { fd } => return Ok(rsdm_lock::run_auth_helper(fd)),
+        Command::LogindRequest { action } => {
+            let action = match action { session::PowerAction::Reboot => "reboot", session::PowerAction::Poweroff => "poweroff" };
+            rsdm_system::logind::request_direct(action).map_err(Into::into)
+        }
         Command::Dm => return run_dm(&cli.config),
         Command::Lock => run_lock(&cli.config),
         Command::Idle => run_idle(&cli.config),

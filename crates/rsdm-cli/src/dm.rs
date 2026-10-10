@@ -1,8 +1,9 @@
 use std::{
     fmt,
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, bail};
@@ -122,8 +123,14 @@ fn run_greeter_loop(
 
 fn request_power_action(action: &str) -> Result<Option<String>> {
     tracing::warn!(action, "power action requested from greeter");
-    match rsdm_infra::power::request_direct(action) {
-        Ok(()) => {}
+    // The Greeter may fork another PAM owner after a denied request. Keep
+    // the bus executor and its threads inside a fresh process.
+    let mut command = Command::new("/proc/self/exe");
+    command.args(["logind-request", action]).stdin(Stdio::null()).stdout(Stdio::null());
+    let deadline = Instant::now() + Duration::from_secs(65);
+    match rsdm_infra::unix::run_command_until(&mut command, deadline) {
+        Ok(status) if status.success() => {}
+        Ok(status) => return Ok(Some(format!("failed to request {action}: helper exited with {status}"))),
         Err(error) => return Ok(Some(format!("failed to request {action}: {error}"))),
     }
 

@@ -18,12 +18,23 @@ const GENERATION: &str = "0123456789abcdef0123456789abcdef";
 type Calls = Arc<Mutex<Vec<String>>>;
 type Launch = (String, Vec<String>, Vec<(String, String)>, String, u64, String, String, Vec<String>);
 
-struct Login;
+struct Login { calls: Calls }
 
 #[zbus_macros::interface(name = "org.freedesktop.login1.Manager")]
 impl Login {
     fn get_session(&self, _id: &str) -> OwnedObjectPath {
         OwnedObjectPath::try_from("/org/freedesktop/login1/session/test").unwrap()
+    }
+
+    fn reboot(&self, interactive: bool) {
+        assert!(interactive);
+        self.calls.lock().unwrap().push("logind reboot".into());
+    }
+
+    fn power_off(&self, interactive: bool) -> zbus::fdo::Result<()> {
+        assert!(interactive);
+        self.calls.lock().unwrap().push("logind poweroff".into());
+        Err(zbus::fdo::Error::AccessDenied("poweroff denied".into()))
     }
 }
 
@@ -93,7 +104,7 @@ impl SessionTools {
         let address = address.trim().to_string();
         let calls = Calls::default();
         let connection = zbus::blocking::connection::Builder::address(address.as_str()).unwrap()
-            .serve_at("/org/freedesktop/login1", Login).unwrap()
+            .serve_at("/org/freedesktop/login1", Login { calls: calls.clone() }).unwrap()
             .serve_at("/org/freedesktop/login1/session/test", LoginSession).unwrap()
             .serve_at("/org/rsdm/Session1", Session { calls: calls.clone(), finalize_fails }).unwrap()
             .name("org.freedesktop.login1").unwrap().name("org.rsdm.Session1").unwrap().build().unwrap();
@@ -122,6 +133,19 @@ impl Drop for SessionTools {
         let _ = self.bus.kill();
         let _ = self.bus.wait();
         let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+#[test]
+fn greeter_helper_uses_logind_once_and_returns_authorization_errors() {
+    for (action, accepted) in [("reboot", true), ("poweroff", false)] {
+        let tools = SessionTools::new(false);
+        let output = tools.run(&["logind-request", action]);
+        assert_eq!(output.status.success(), accepted, "{output:?}");
+        assert_eq!(*tools.calls.lock().unwrap(), [format!("logind {action}")]);
+        if !accepted {
+            assert!(String::from_utf8_lossy(&output.stderr).contains("poweroff denied"));
+        }
     }
 }
 
