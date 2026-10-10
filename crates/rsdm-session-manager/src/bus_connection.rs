@@ -138,10 +138,7 @@ impl Transport {
         let values: BTreeMap<&str, &str> = pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
         tokio::select! {
             biased;
-            result = async {
-                let bus = Proxy::new(&connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").await?;
-                bus.call::<_, _, ()>("UpdateActivationEnvironment", &(values,)).await
-            } => result,
+            result = activation::update(&connection, values) => result,
             _ = tokio::time::sleep_until(deadline.into()) => {
                 Err(zbus::fdo::Error::TimedOut("activation environment update timed out".into()).into())
             },
@@ -237,8 +234,7 @@ async fn restore_activation(connection: &Connection, pairs: BTreeMap<String, Str
     let owned: BTreeMap<String, String> = pairs.into_iter()
         .filter(|(name, value)| current.contains(&format!("{name}={value}"))).collect();
     if owned.is_empty() { return Ok(()); }
-    let bus = Proxy::new(connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").await?;
-    bus.call::<_, _, ()>("UpdateActivationEnvironment", &(owned,)).await
+    activation::update(connection, owned.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect()).await
 }
 
 async fn restore_reference(connection: &Connection, unit: &str, reference: &Reference) -> zbus::Result<()> {

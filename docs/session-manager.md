@@ -258,6 +258,11 @@ coordinator or recovery helper from replacing the live session while its D-Bus
 name is unavailable. Applications and native desktop services still need to
 handle their own disconnected D-Bus connections; RSDM cannot reconnect them.
 
+For dbus-broker, activation uses the user manager's environment. RSDM identifies
+the bus executable through its D-Bus PID and updates that environment directly,
+awaiting the reply before logout removes owned variables. Other bus implementations
+receive the standard `UpdateActivationEnvironment` call.
+
 Each unit start/stop call has one timeout covering its preflight reads, signal
 subscription, method reply, and completion checks. A lost reply or job signal is
 reconciled against owned unit state inside the same budget, without repeating

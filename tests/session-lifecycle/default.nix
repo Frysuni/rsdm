@@ -106,7 +106,12 @@ pkgs.testers.runNixOSTest {
             ] + options + ["--", "/nonexistent-rsdm-test-compositor"]
             machine.fail(shlex.join(command))
             machine.succeed(user + "rsdm session cleanup --generation " + generation)
-            machine.fail(user + "systemctl --user show-environment | grep '^RSDM_SESSION_GENERATION='")
+            try:
+                machine.fail(user + "systemctl --user show-environment | grep '^RSDM_SESSION_GENERATION='")
+            except Exception:
+                print(machine.succeed(user + "systemctl --user show-environment"))
+                print(machine.succeed("cat " + runtime + "/rsdm/sessions/" + generation + "/session.toml"))
+                raise
             machine.fail(user + "systemctl --user is-active --quiet graphical-session.target")
             machine.wait_until_succeeds("test \"$(systemctl show --property=LoadState --value rsdm-test-startup.service)\" = not-found")
 
