@@ -39,7 +39,7 @@ pub(super) async fn run(
         biased;
         _ = interrupt.stopped() => Ok(()),
         result = async {
-            let mut server = match Server::create(manager, runtime, messages, notices.clone(), interrupt.clone()) {
+            let mut server = match Server::create(manager, runtime, messages, notices.clone(), interrupt.clone()).await {
                 Ok(server) => server,
                 Err(error) => { let _ = ready.send(Err(error)); return Ok(()); }
             };
@@ -57,7 +57,7 @@ pub(super) async fn run(
 }
 
 impl Server {
-    fn create(
+    async fn create(
         manager: UserManager, runtime: Runtime, messages: UnboundedReceiver<Message>, notices: UnboundedSender<Notice>,
         interrupt: Arc<Interrupt>,
     ) -> Result<Self, SessionError> {
@@ -75,7 +75,7 @@ impl Server {
         if listeners.count() > 32 { return Err(SessionError::State("too many local ICE transports".into())); }
         let listener_sockets = (0..listeners.count()).map(|index| interrupt.register(listeners.fd(index)))
             .collect::<Result<Vec<_>, _>>()?;
-        let authority = Authority::create(&runtime.path, &listeners.networks)?;
+        let authority = Authority::create(&runtime.path, &listeners.networks).await?;
         let admission = Box::new(Admission { peer: Cell::new(ptr::null_mut()) });
         let mut error: [libc::c_char; 256] = [0; 256];
         // SAFETY: the boxed callback context remains stable until every peer is
@@ -92,7 +92,7 @@ impl Server {
         let mut tick = tokio::time::interval(Duration::from_millis(25));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
-            self.advance()?;
+            self.advance().await?;
             let descriptors: Vec<_> = (0..self.listeners.count()).map(|index| self.listeners.fd(index))
                 .chain(self.peers.iter().map(|peer| peer.fd())).collect();
             let event = tokio::select! {

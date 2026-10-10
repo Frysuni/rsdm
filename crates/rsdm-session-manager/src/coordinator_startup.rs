@@ -48,11 +48,11 @@ impl Coordinator {
             environment.retain(|(existing, _)| existing != name);
             environment.push((name.clone(), value.clone()));
         }
-        let directory = std::env::current_dir()?;
+        let directory = super::runtime::blocking(|| Ok(std::env::current_dir()?)).await?;
         let managed_unit = format!("{}.service", unique_unit_name(ManagedUnitKind::Session, program));
         let record = initial_record(identity, &provider, &managed_unit, &xsmp.environment);
         let properties = if provider.kind == ProviderKind::Managed {
-            Some(units::compositor_properties(argv, &environment, &directory, &record.anchor_unit)?)
+            Some(units::compositor_properties(argv, &environment, &directory, &record.anchor_unit).await?)
         } else {
             None
         };

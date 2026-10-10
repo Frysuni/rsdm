@@ -249,7 +249,7 @@ async fn launch_quit(manager: &UserManager, app: &AppRecord, generation: &str) -
     let environment: Vec<_> = environment.iter().filter_map(|entry| entry.split_once('=')
         .map(|(name, value)| (name.to_string(), value.to_string()))).collect();
     let directory: String = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Service", "WorkingDirectory").await?;
-    let mut properties = command_properties(&app.policy.quit_command, &environment, Path::new(&directory))?;
+    let mut properties = command_properties(&app.policy.quit_command, &environment, Path::new(&directory)).await?;
     properties.extend([
         ("Slice", Value::from(super::units::APP_SLICE)),
         ("TimeoutStopUSec", Value::from(1_000_000_u64)),

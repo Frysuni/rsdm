@@ -1,6 +1,6 @@
 //! CLI requests and the basic launch path outside an RSDM-coordinated login.
 
-use std::{path::Path, time::{Duration, Instant}};
+use std::time::{Duration, Instant};
 
 use rsdm_core::domain::{SessionManagerConfig, ShutdownPolicy};
 
@@ -22,9 +22,10 @@ pub async fn run_app(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, Se
         return basic_launch(argv, policy).await;
     }
     let generation = generation().await?;
+    let directory = super::runtime::blocking(|| Ok(std::env::current_dir()?)).await?;
     let request = LaunchRequest {
         generation, argv: argv.to_vec(), environment: env::command_environment(),
-        directory: std::env::current_dir()?.to_string_lossy().into_owned(),
+        directory: directory.to_string_lossy().into_owned(),
         timeout_secs: policy.timeout_secs, on_timeout: policy.on_timeout.to_string(),
         method: policy.method.to_string(), quit_command: policy.quit_command.clone(),
     };
@@ -77,7 +78,8 @@ async fn basic_launch(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, S
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
     let unit = format!("{}.service", unique_unit_name(ManagedUnitKind::App, program));
-    let mut properties = units::app_properties(argv, &env::command_environment(), Path::new(&std::env::current_dir()?), None)?;
+    let directory = super::runtime::blocking(|| Ok(std::env::current_dir()?)).await?;
+    let mut properties = units::app_properties(argv, &env::command_environment(), &directory, None).await?;
     properties.retain(|(name, _)| *name != "AddRef");
     manager.start_service(&unit, &properties).await?;
     Ok(0)

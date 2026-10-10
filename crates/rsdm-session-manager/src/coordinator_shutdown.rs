@@ -210,7 +210,7 @@ async fn run_logout_command(manager: &UserManager, record: &SessionRecord, provi
     }) {
         return Err(SessionError::State("logout command belongs to a stale session generation".into()));
     }
-    let mut properties = units::command_properties(&provider.logout_command, &environment, directory)?;
+    let mut properties = units::command_properties(&provider.logout_command, &environment, directory).await?;
     // This command may itself stop the graphical target and its anchor. It
     // must survive that stop long enough to return its actual result. Bound
     // its lifetime in systemd as well, including if the coordinator crashes.

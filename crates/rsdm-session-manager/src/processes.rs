@@ -62,6 +62,7 @@ pub(super) async fn signal_app(manager: &UserManager, app: &AppRecord, signal: i
     if !group.starts_with('/') || group == "/" {
         return Err(SessionError::State(format!("{} has no dedicated cgroup", app.unit)));
     }
+
     // Bound live descriptors even for large browser cgroups. Each batch is
     // pinned before checking InvocationID, and membership uses procfs directly.
     for batch in processes.chunks(32) {
@@ -70,14 +71,18 @@ pub(super) async fn signal_app(manager: &UserManager, app: &AppRecord, signal: i
             if let Some(handle) = ProcessHandle::open(pid)? { pinned.push((pid, handle)); }
         }
         if !verify_invocation(manager, app).await? { return Ok(()); }
-        for (pid, handle) in pinned {
-            let membership = match std::fs::read_to_string(format!("/proc/{pid}/cgroup")) {
-                Ok(membership) => membership,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error.into()),
-            };
-            if belongs_to_cgroup(&membership, &group) { handle.signal(signal)?; }
-        }
+        let group = group.clone();
+        super::runtime::blocking(move || {
+            for (pid, handle) in pinned {
+                let membership = match std::fs::read_to_string(format!("/proc/{pid}/cgroup")) {
+                    Ok(membership) => membership,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error.into()),
+                };
+                if belongs_to_cgroup(&membership, &group) { handle.signal(signal)?; }
+            }
+            Ok(())
+        }).await?;
     }
     Ok(())
 }

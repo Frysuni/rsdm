@@ -26,7 +26,7 @@ impl SessionIdentity {
         let generation = match std::env::var(GENERATION_ENV) {
             Ok(generation) if valid_generation(&generation) => generation,
             Ok(_) => return Err(SessionError::State("invalid session generation".into())),
-            Err(_) => new_generation()?,
+            Err(_) => super::runtime::blocking(|| Ok(new_generation()?)).await?,
         };
         // SAFETY: geteuid has no preconditions.
         let uid = unsafe { libc::geteuid() };

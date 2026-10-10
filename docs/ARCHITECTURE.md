@@ -132,6 +132,9 @@ workers; the actor checks the current lifecycle and records ownership before
 allowing anchor activation. Pending reads leave status, stop and cancel available.
 Registration and recovery records precede side effects. InvocationID and pidfd
 checks keep cleanup/signals attached to the recorded processes.
+Executable lookup, procfs membership checks and XSMP record/credential files also
+use blocking filesystem tasks. Cookie registration stays on the libICE thread;
+unclaimed credential files are removed when a cancelled startup job completes.
 
 Bare compositors use a transient service and a per-generation anchor. The
 official `niri-session` runs unchanged outside that service and owns its real

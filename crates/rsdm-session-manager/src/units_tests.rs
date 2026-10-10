@@ -33,11 +33,11 @@ fn property(properties: &UnitProperties, name: &str) -> OwnedValue {
     properties.iter().find(|(key, _)| *key == name).unwrap().1.try_to_owned().unwrap()
 }
 
-#[test]
-fn exec_properties_keep_literal_arguments_and_use_the_callers_path() {
+#[tokio::test]
+async fn exec_properties_keep_literal_arguments_and_use_the_callers_path() {
     let programs = Programs::new();
     let argv = vec!["example".into(), "$HOME".into(), "two words".into(), "".into()];
-    let properties = command_properties(&argv, &programs.environment(), &programs.0).unwrap();
+    let properties = command_properties(&argv, &programs.environment(), &programs.0).await.unwrap();
     let commands: Vec<(String, Vec<String>, Vec<String>)> = property(&properties, "ExecStartEx").try_into().unwrap();
 
     assert_eq!(commands[0].0, programs.0.join("example").to_string_lossy());
@@ -54,10 +54,10 @@ fn relative_search_paths_are_resolved_against_the_callers_directory() {
     assert_eq!(resolve_executable("example", &environment, &programs.0).unwrap(), programs.0.join(".").join("example"));
 }
 
-#[test]
-fn anchor_does_not_create_an_ordering_cycle_through_autostart_apps() {
+#[tokio::test]
+async fn anchor_does_not_create_an_ordering_cycle_through_autostart_apps() {
     let programs = Programs::new();
-    let properties = anchor_properties(Some("example-compositor.service"), &programs.environment(), &programs.0).unwrap();
+    let properties = anchor_properties(Some("example-compositor.service"), &programs.environment(), &programs.0).await.unwrap();
     let after: Vec<String> = property(&properties, "After").try_into().unwrap();
     assert!(!after.contains(&AUTOSTART_TARGET.to_string()));
     assert!(after.contains(&SESSION_TARGET.to_string()));

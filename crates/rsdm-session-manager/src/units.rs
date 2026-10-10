@@ -11,13 +11,18 @@ pub(super) const PRE_TARGET: &str = "graphical-session-pre.target";
 pub(super) const SESSION_TARGET: &str = "graphical-session.target";
 pub(super) const AUTOSTART_TARGET: &str = "xdg-desktop-autostart.target";
 
-pub(super) fn command_properties(
+pub(super) async fn command_properties(
     argv: &[String],
     environment: &[(String, String)],
     directory: &Path,
 ) -> Result<UnitProperties, SessionError> {
-    let program = argv.first().ok_or(SessionError::EmptyCommand)?;
-    let executable = resolve_executable(program, environment, directory)?;
+    let program = argv.first().ok_or(SessionError::EmptyCommand)?.clone();
+    let search_environment = environment.to_vec();
+    let search_directory = directory.to_path_buf();
+    let executable = super::runtime::blocking(move || {
+        resolve_executable(&program, &search_environment, &search_directory)
+    }).await?;
+
     let command = vec![(executable.to_string_lossy().into_owned(), argv.to_vec(), vec!["no-env-expand".to_string()])];
     let values: Vec<String> = environment.iter().map(|(name, value)| format!("{name}={value}")).collect();
     let absent: Vec<String> = DISPLAY_VARS.iter()
@@ -36,10 +41,10 @@ pub(super) fn command_properties(
     ])
 }
 
-pub(super) fn compositor_properties(
+pub(super) async fn compositor_properties(
     argv: &[String], environment: &[(String, String)], directory: &Path, anchor: &str,
 ) -> Result<UnitProperties, SessionError> {
-    let mut properties = command_properties(argv, environment, directory)?;
+    let mut properties = command_properties(argv, environment, directory).await?;
     properties.extend([
         ("Slice", Value::from("session.slice")),
         ("ExitType", Value::from("main")),
@@ -51,10 +56,10 @@ pub(super) fn compositor_properties(
     Ok(properties)
 }
 
-pub(super) fn app_properties(
+pub(super) async fn app_properties(
     argv: &[String], environment: &[(String, String)], directory: &Path, anchor: Option<&str>,
 ) -> Result<UnitProperties, SessionError> {
-    let mut properties = command_properties(argv, environment, directory)?;
+    let mut properties = command_properties(argv, environment, directory).await?;
     let mut lifetime = vec![SESSION_TARGET.to_string()];
     if let Some(anchor) = anchor {
         lifetime.push(anchor.to_string());
@@ -69,10 +74,10 @@ pub(super) fn app_properties(
     Ok(properties)
 }
 
-pub(super) fn anchor_properties(
+pub(super) async fn anchor_properties(
     compositor: Option<&str>, environment: &[(String, String)], directory: &Path,
 ) -> Result<UnitProperties, SessionError> {
-    let mut properties = command_properties(&["true".into()], environment, directory)?;
+    let mut properties = command_properties(&["true".into()], environment, directory).await?;
     properties.retain(|(name, _)| *name != "Type");
     let mut after = vec![SESSION_TARGET.to_string()];
     let mut part_of = vec![SESSION_TARGET.to_string()];

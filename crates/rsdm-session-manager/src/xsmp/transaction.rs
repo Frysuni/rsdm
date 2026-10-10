@@ -9,10 +9,14 @@ impl Server {
     pub async fn prepare(&mut self, units: &[String], cancellable: bool) -> Result<Vec<String>, SessionError> {
         let mut selected = Vec::new();
         for unit in units {
-            let mut app = self.runtime.app(unit)?;
+            let records = self.runtime.clone();
+            let app_unit = unit.clone();
+            let mut app = crate::runtime::blocking(move || records.app(&app_unit)).await?;
             if app.invocation_id.is_empty() {
                 if !apps::pin_pending(&self.manager, &self.runtime, unit).await? { continue; }
-                app = self.runtime.app(unit)?;
+                let records = self.runtime.clone();
+                let app_unit = unit.clone();
+                app = crate::runtime::blocking(move || records.app(&app_unit)).await?;
             }
             if !app.policy.quit_command.is_empty() || app.policy.method == ShutdownMethod::Term
                 || app_processes(&self.manager, &app).await?.is_empty()
@@ -27,8 +31,9 @@ impl Server {
             if !peers.is_empty() { selected.push((app, peers)); }
         }
         self.cancellable = if self.peers.iter().any(|peer| peer.selected) { self.cancellable && cancellable } else { cancellable };
+        let records = self.runtime.clone();
+        let hard = crate::runtime::blocking(move || Ok(records.session()?.shutdown_deadline_usec)).await?;
         let now = monotonic_usec()?;
-        let hard = self.runtime.session()?.shutdown_deadline_usec;
         for (app, peers) in &selected {
             let deadline = app.deadline_usec.unwrap_or_else(|| now.saturating_add(app.policy.timeout_secs * 1_000_000));
             for index in peers {
@@ -40,7 +45,7 @@ impl Server {
                 }
             }
         }
-        self.advance()?;
+        self.advance().await?;
         Ok(selected.into_iter().map(|(app, _)| app.unit).collect())
     }
 
@@ -67,7 +72,7 @@ impl Server {
         self.cancellable = true;
     }
 
-    pub fn advance(&mut self) -> Result<(), SessionError> {
+    pub async fn advance(&mut self) -> Result<(), SessionError> {
         self.start_pending_saves();
         if self.peers.iter().any(|peer| peer.selected && (peer.cancellation_requested || peer.phase == Phase::Failed)) {
             let failure = self.peers.iter().find(|peer| peer.selected && peer.phase == Phase::Failed).map(|peer| peer.unit.clone());
@@ -81,7 +86,7 @@ impl Server {
                 if peer.phase == Phase::Failed { peer.phase = Phase::TimedOut; }
             }
         }
-        if self.expire_saves()? { return Ok(()); }
+        if self.expire_saves().await? { return Ok(()); }
         self.grant_interaction();
         let phases: Vec<_> = self.peers.iter().filter(|peer| peer.selected).map(|peer| peer.phase).collect();
         if protocol::phase2_ready(&phases) {
@@ -119,10 +124,11 @@ impl Server {
         }
     }
 
-    fn expire_saves(&mut self) -> Result<bool, SessionError> {
+    async fn expire_saves(&mut self) -> Result<bool, SessionError> {
         if !self.peers.iter().any(|peer| peer.selected) { return Ok(false); }
+        let records = self.runtime.clone();
+        let hard = crate::runtime::blocking(move || Ok(records.session()?.shutdown_deadline_usec)).await?;
         let now = monotonic_usec()?;
-        let hard = self.runtime.session()?.shutdown_deadline_usec;
         for peer in &mut self.peers {
             if !peer.selected || matches!(peer.phase, Phase::Dying | Phase::TimedOut | Phase::Closed) { continue; }
             let deadline = hard.map_or(peer.deadline, |hard| peer.deadline.min(hard));

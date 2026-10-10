@@ -56,7 +56,7 @@ pub(super) async fn register(
 pub(super) async fn launch(
     manager: &UserManager, runtime: &Runtime, anchor: &str, request: &LaunchRequest, mut app: AppRecord,
 ) -> Result<String, SessionError> {
-    let properties = match launch_properties(runtime, anchor, request, &app) {
+    let properties = match launch_properties(runtime, anchor, request, &app).await {
         Ok(properties) => properties,
         Err(error) => return Err(rollback_launch(manager, runtime, &app, error).await),
     };
@@ -89,14 +89,14 @@ pub(super) async fn launch(
     Ok(app.unit)
 }
 
-fn launch_properties(
+async fn launch_properties(
     runtime: &Runtime, anchor: &str, request: &LaunchRequest, app: &AppRecord,
 ) -> Result<UnitProperties, SessionError> {
     let mut environment = request.environment.clone();
     environment.retain(|(name, _)| name != GENERATION_ENV);
     environment.push((GENERATION_ENV.into(), runtime.generation.clone()));
-    let mut properties = app_properties(&request.argv, &environment, Path::new(&request.directory), Some(anchor))?;
-    let executable = std::env::current_exe()?.to_string_lossy().into_owned();
+    let mut properties = app_properties(&request.argv, &environment, Path::new(&request.directory), Some(anchor)).await?;
+    let executable = blocking(|| Ok(std::env::current_exe()?)).await?.to_string_lossy().into_owned();
     let stop_command = vec![(executable.clone(), vec![executable, "session".into(), "app-stop".into(),
         "--generation".into(), runtime.generation.clone(), "--unit".into(), app.unit.clone()], vec!["no-env-expand".to_string()])];
     properties.extend([

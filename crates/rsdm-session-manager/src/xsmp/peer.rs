@@ -50,10 +50,14 @@ impl Peer {
         let pid = credentials.pid as u32;
         let process = ProcessHandle::open(pid)?.ok_or_else(|| SessionError::State("ICE peer process exited".into()))?;
         let unit = manager.unit_for_pid(pid).await?;
-        let mut app = runtime.app(&unit)?;
+        let records = runtime.clone();
+        let app_unit = unit.clone();
+        let mut app = crate::runtime::blocking(move || records.app(&app_unit)).await?;
         if app.invocation_id.is_empty() {
             apps::pin_pending(manager, runtime, &unit).await?;
-            app = runtime.app(&unit)?;
+            let records = runtime.clone();
+            let app_unit = unit.clone();
+            app = crate::runtime::blocking(move || records.app(&app_unit)).await?;
         }
         if !process.alive()? || !app_processes(manager, &app).await?.contains(&pid) {
             return Err(SessionError::State("ICE peer is not a registered application process".into()));
@@ -68,7 +72,9 @@ impl Peer {
 
     pub async fn verified(&self, manager: &UserManager, runtime: &Runtime) -> Result<bool, SessionError> {
         if self.phase == Phase::Closed || self.sms.is_null() || !self.process.alive()? { return Ok(false); }
-        let app = runtime.app(&self.unit)?;
+        let records = runtime.clone();
+        let unit = self.unit.clone();
+        let app = crate::runtime::blocking(move || records.app(&unit)).await?;
         Ok(app.invocation_id == self.invocation && app_processes(manager, &app).await?.contains(&self.pid))
     }
 

@@ -13,7 +13,7 @@ pub(super) async fn activate(
     if provider.kind != ProviderKind::Managed && (!external_target || !provider.ready(manager).await?) {
         return Err(SessionError::State("native session manager is not ready".into()));
     }
-    let mut properties = units::anchor_properties(compositor, environment, directory)?;
+    let mut properties = units::anchor_properties(compositor, environment, directory).await?;
     if provider.kind != ProviderKind::Managed {
         // A native target can stop between readiness and the anchor start job.
         // Requisite refuses that race; Wants would restart someone else's session.
