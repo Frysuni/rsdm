@@ -1,7 +1,8 @@
 //! Ambiguous job replies are reconciled through reads, never replayed.
 
 use super::*;
-use futures_lite::StreamExt;
+use std::{future::poll_fn, pin::Pin, task::Poll};
+use zbus::export::futures_core::Stream;
 
 enum Operation {
     Start { new_unit: bool, generation: Option<String> },
@@ -87,10 +88,11 @@ async fn within_deadline<T>(
     unit: &str, deadline: Instant, operation: impl Future<Output = Result<T, SessionError>>,
 ) -> Result<T, SessionError> {
     if Instant::now() >= deadline { return Err(job_timeout(unit)); }
-    future::or(operation, async {
-        async_io::Timer::at(deadline).await;
-        Err(job_timeout(unit))
-    }).await
+    tokio::select! {
+        biased;
+        result = operation => result,
+        _ = tokio::time::sleep_until(deadline.into()) => Err(job_timeout(unit)),
+    }
 }
 
 fn job_timeout(unit: &str) -> SessionError {
@@ -135,7 +137,7 @@ async fn complete(
             Err(error) if job.is_some() && missing_unit(&error) => {},
             Err(error) => return Err(error.into()),
         }
-        async_io::Timer::at((Instant::now() + Duration::from_millis(50)).min(deadline)).await;
+        tokio::time::sleep_until((Instant::now() + Duration::from_millis(50)).min(deadline).into()).await;
     }
 }
 
@@ -202,7 +204,7 @@ fn job_message(message: zbus::Message, job: &OwnedObjectPath) -> Result<bool, Se
 }
 
 async fn drain_job(signals: &mut zbus::proxy::SignalStream<'_>, job: &OwnedObjectPath) -> Result<bool, SessionError> {
-    while let Some(Some(message)) = future::poll_once(signals.next()).await {
+    while let Poll::Ready(Some(message)) = poll_fn(|cx| Poll::Ready(Pin::new(&mut *signals).poll_next(cx))).await {
         if job_message(message, job)? { return Ok(true); }
     }
     Ok(false)

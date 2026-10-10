@@ -2,8 +2,6 @@
 
 use std::{collections::BTreeMap, future::Future, pin::Pin, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}};
 
-use futures_lite::future;
-
 use super::*;
 
 #[derive(Clone)]
@@ -138,13 +136,16 @@ impl Transport {
         }
         let connection = self.connection();
         let values: BTreeMap<&str, &str> = pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
-        future::or(async {
-            let bus = Proxy::new(&connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").await?;
-            bus.call::<_, _, ()>("UpdateActivationEnvironment", &(values,)).await
-        }, async {
-            async_io::Timer::at(deadline).await;
-            Err(zbus::fdo::Error::TimedOut("activation environment update timed out".into()).into())
-        }).await
+        tokio::select! {
+            biased;
+            result = async {
+                let bus = Proxy::new(&connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").await?;
+                bus.call::<_, _, ()>("UpdateActivationEnvironment", &(values,)).await
+            } => result,
+            _ = tokio::time::sleep_until(deadline.into()) => {
+                Err(zbus::fdo::Error::TimedOut("activation environment update timed out".into()).into())
+            },
+        }
     }
 
     pub async fn reconnect(&self, observed_epoch: u64) -> zbus::Result<()> {
@@ -152,16 +153,22 @@ impl Transport {
         let deadline = Instant::now() + Duration::from_secs(5);
         let _guard = self.acquire_connection_guard(deadline).await?;
         while self.epoch() == observed_epoch {
-            let connection = future::or(async {
-                zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await
-            }, async {
-                async_io::Timer::at(deadline).await;
-                Err(zbus::fdo::Error::TimedOut("connecting the user bus timed out".into()).into())
-            }).await?;
-            let restored = future::or(self.restore_candidate(&connection, observed_epoch), async {
-                async_io::Timer::at(deadline).await;
-                Err(zbus::fdo::Error::TimedOut("restoring the user bus timed out".into()).into())
-            }).await;
+            let connection = tokio::select! {
+                biased;
+                result = async {
+                    zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await
+                } => result,
+                _ = tokio::time::sleep_until(deadline.into()) => {
+                    Err(zbus::fdo::Error::TimedOut("connecting the user bus timed out".into()).into())
+                },
+            }?;
+            let restored = tokio::select! {
+                biased;
+                result = self.restore_candidate(&connection, observed_epoch) => result,
+                _ = tokio::time::sleep_until(deadline.into()) => {
+                    Err(zbus::fdo::Error::TimedOut("restoring the user bus timed out".into()).into())
+                },
+            };
             if matches!(restored, Ok(true)) {
                 tracing::info!("restored user manager connection");
                 return Ok(());
@@ -182,7 +189,7 @@ impl Transport {
             if self.1.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
                 return Ok(ConnectionGuard(self.1.clone()));
             }
-            async_io::Timer::at((Instant::now() + Duration::from_millis(10)).min(deadline)).await;
+            tokio::time::sleep_until((Instant::now() + Duration::from_millis(10)).min(deadline).into()).await;
         }
     }
 
@@ -216,7 +223,7 @@ async fn restore_reference_batch(
         let unit = (*unit).clone();
         let reference = (*reference).clone();
         combined = Box::pin(async move {
-            let ((), ()) = future::try_zip(combined, restore_reference(&connection, &unit, &reference)).await?;
+            let ((), ()) = tokio::try_join!(combined, restore_reference(&connection, &unit, &reference))?;
             Ok(())
         });
     }

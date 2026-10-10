@@ -89,15 +89,18 @@ async fn acquire_lease(manager: &UserManager) -> Result<(), SessionError> {
             loop {
                 match manager.connection().request_name_with_flags(BUS_NAME, RequestNameFlags::DoNotQueue.into()).await {
                     Ok(_) => return Ok(()),
-                    Err(zbus::Error::NameTaken) => { async_io::Timer::after(Duration::from_millis(50)).await; }
+                    Err(zbus::Error::NameTaken) => { tokio::time::sleep(Duration::from_millis(50)).await; }
                     Err(error) => return Err(error.into()),
                 }
             }
         };
-        futures_lite::future::or(lease, async {
-            async_io::Timer::after(Duration::from_secs(2)).await;
-            Err(zbus::Error::from(zbus::fdo::Error::TimedOut("acquiring the recovery bus name timed out".into())).into())
-        }).await
+        tokio::select! {
+            biased;
+            result = lease => result,
+            _ = tokio::time::sleep(Duration::from_secs(2)) => {
+                Err(zbus::Error::from(zbus::fdo::Error::TimedOut("acquiring the recovery bus name timed out".into())).into())
+            },
+        }
     }).await
 }
 

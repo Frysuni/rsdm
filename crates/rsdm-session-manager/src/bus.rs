@@ -2,7 +2,6 @@
 
 use std::{future::Future, sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
 
-use futures_lite::future;
 use zbus::{Connection, Proxy, zvariant::{OwnedObjectPath, OwnedValue, Value}};
 
 use super::{SessionError, deadline::Deadline};
@@ -44,10 +43,15 @@ impl UserManager {
             validate_connection(&connection).await?;
             Ok(Self { transport: transport::Transport::new(connection), deadline: deadline.clone() })
         };
-        deadline.bound(future::or(setup, async {
-            async_io::Timer::after(Duration::from_secs(5)).await;
-            Err(zbus::Error::from(zbus::fdo::Error::TimedOut("connecting to the user manager timed out".into())).into())
-        })).await
+        deadline.bound(async {
+            tokio::select! {
+                biased;
+                result = setup => result,
+                _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                    Err(zbus::Error::from(zbus::fdo::Error::TimedOut("connecting to the user manager timed out".into())).into())
+                },
+            }
+        }).await
     }
 
     #[cfg(test)]
@@ -208,10 +212,13 @@ where
     let deadline = Instant::now() + timeout;
     let mut interrupted = false;
     loop {
-        let result = future::or(query(), async {
-            async_io::Timer::at(deadline).await;
-            Err(zbus::fdo::Error::TimedOut("user manager read timed out".into()).into())
-        }).await;
+        let result = tokio::select! {
+            biased;
+            result = query() => result,
+            _ = tokio::time::sleep_until(deadline.into()) => {
+                Err(zbus::fdo::Error::TimedOut("user manager read timed out".into()).into())
+            },
+        };
         match result {
             Err(error) if retryable_error(&error) && Instant::now() < deadline => {
                 if !interrupted {
@@ -221,7 +228,7 @@ where
             }
             other => return other,
         }
-        async_io::Timer::at((Instant::now() + Duration::from_millis(50)).min(deadline)).await;
+        tokio::time::sleep_until((Instant::now() + Duration::from_millis(50)).min(deadline).into()).await;
     }
 }
 
