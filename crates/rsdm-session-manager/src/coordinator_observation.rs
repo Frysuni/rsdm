@@ -34,12 +34,12 @@ impl Coordinator {
         self.observation_completed(result).await
     }
 
-    pub fn start_observation(&mut self) {
+    pub async fn start_observation(&mut self) {
         if self.observation_busy {
             return;
         }
         if super::signals::requested() && self.lifecycle.accepts_launch() {
-            if let Err(error) = self.begin_stop("logout", None) {
+            if let Err(error) = self.begin_stop("logout", None).await {
                 tracing::error!(%error, "cannot begin signal-triggered session stop");
             }
         }
@@ -119,7 +119,7 @@ impl Coordinator {
             }
         }
         if let Some(result) = observation.readiness_check {
-            self.complete_readiness(result?)?;
+            self.complete_readiness(result?).await?;
         }
 
         if observation.reaped_apps {
@@ -129,7 +129,7 @@ impl Coordinator {
             && self.record.compositor_invocation != process.invocation
         {
             self.record.compositor_invocation = process.invocation.clone();
-            self.save()?;
+            self.save().await?;
         }
         if let Some(exit) = observation.process_exit
             && !exit.native_running
@@ -140,7 +140,7 @@ impl Coordinator {
                 self.begin_stop(
                     "compositor-exited",
                     Some(monotonic_usec()?.saturating_add(5_000_000)),
-                )?;
+                ).await?;
             }
         }
         if self.ready_once
@@ -154,7 +154,7 @@ impl Coordinator {
             self.begin_stop(
                 "external-stop",
                 Some(monotonic_usec()?.saturating_add(5_000_000)),
-            )?;
+            ).await?;
         }
         if let Some(readiness) = observation.readiness
             && self.lifecycle.phase == SessionPhase::Starting

@@ -11,7 +11,7 @@ use super::{
     runtime::{blocking, AppRecord, Runtime}, unit_name::app_unit_name, units::app_properties,
 };
 
-pub(super) fn register(
+pub(super) async fn register(
     runtime: &Runtime, provider: &Provider, request: &LaunchRequest,
 ) -> Result<AppRecord, SessionError> {
     super::control::validate_launch(request).map_err(SessionError::State)?;
@@ -46,8 +46,11 @@ pub(super) fn register(
         unit: app_unit_name(program, &runtime.generation), invocation_id: Vec::new(),
         policy, deadline_usec: None, quit_started: false,
     };
-    runtime.save_app(&app)?;
-    Ok(app)
+    let runtime = runtime.clone();
+    blocking(move || {
+        runtime.save_app(&app)?;
+        Ok(app)
+    }).await
 }
 
 pub(super) async fn launch(
@@ -148,15 +151,18 @@ pub(super) async fn release_closed(manager: &UserManager, runtime: &Runtime) -> 
     Ok(())
 }
 
-pub(super) fn reset_preparation(runtime: &Runtime) -> Result<(), SessionError> {
-    for record in runtime.apps()? {
-        let _lease = runtime.app_lease(&record.unit)?;
-        let mut app = runtime.app(&record.unit)?;
-        app.deadline_usec = None;
-        app.quit_started = false;
-        runtime.save_app(&app)?;
-    }
-    Ok(())
+pub(super) async fn reset_preparation(runtime: &Runtime) -> Result<(), SessionError> {
+    let runtime = runtime.clone();
+    blocking(move || {
+        for record in runtime.apps()? {
+            let _lease = runtime.app_lease(&record.unit)?;
+            let mut app = runtime.app(&record.unit)?;
+            app.deadline_usec = None;
+            app.quit_started = false;
+            runtime.save_app(&app)?;
+        }
+        Ok(())
+    }).await
 }
 
 pub async fn stop_hook(generation: &str, unit: &str) -> Result<(), SessionError> {

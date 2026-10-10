@@ -12,7 +12,7 @@ use super::{
 };
 
 impl Coordinator {
-    pub fn begin_stop(&mut self, action: &str, hard_deadline: Option<u64>) -> Result<(), SessionError> {
+    pub async fn begin_stop(&mut self, action: &str, hard_deadline: Option<u64>) -> Result<(), SessionError> {
         if self.lifecycle.phase == SessionPhase::StoppingSession { return Ok(()); }
         // Only logind may revise its shutdown budget or revoke its request.
         if self.action == "external-shutdown" && action != "external-shutdown" { return Ok(()); }
@@ -36,7 +36,7 @@ impl Coordinator {
         if !self.ready_busy && !self.booting() {
             for reply in self.finalize_replies.drain(..) { let _ = reply.try_send(Err("session shutdown started".into())); }
         }
-        self.save()
+        self.save().await
     }
 
     pub fn advance(&mut self) -> Result<(), SessionError> {
@@ -46,10 +46,6 @@ impl Coordinator {
         self.preparing = true;
         let manager = self.manager.clone();
         let runtime = self.runtime.clone();
-        let mut apps = runtime.apps()?;
-        if self.provider.native_desktop() && !self.shutdown.as_ref().expect("shutdown control").noncancelable.load(Ordering::SeqCst) {
-            apps.retain(|app| app.policy.method != ShutdownMethod::Auto || !app.policy.quit_command.is_empty());
-        }
         let control = self.shutdown.as_ref().expect("shutdown control").clone();
         let events = self.events.clone();
         let action = self.action.clone();
@@ -57,6 +53,11 @@ impl Coordinator {
         self.workers += 1;
         tokio::spawn(async move {
             let result = async {
+                let records = runtime.clone();
+                let mut apps = super::runtime::blocking(move || records.apps()).await?;
+                if native && !control.noncancelable.load(Ordering::SeqCst) {
+                    apps.retain(|app| app.policy.method != ShutdownMethod::Auto || !app.policy.quit_command.is_empty());
+                }
                 if !native && matches!(action.as_str(), "poweroff" | "reboot") {
                     manager.deadline.bound(rsdm_system::logind::check(&action)).await?;
                 }
@@ -67,19 +68,19 @@ impl Coordinator {
         Ok(())
     }
 
-    pub fn prepared(&mut self, result: Result<Vec<String>, SessionError>) -> Result<(), SessionError> {
+    pub async fn prepared(&mut self, result: Result<Vec<String>, SessionError>) -> Result<(), SessionError> {
         let control = self.shutdown.as_ref().expect("shutdown control");
         match result {
             Ok(forced) => self.forced_units = forced,
             Err(error) => {
                 tracing::error!(%error, "application preflight failed");
                 if !control.noncancelable.load(Ordering::SeqCst) {
-                    self.resume("failed", &error.to_string())?;
+                    self.resume("failed", &error.to_string()).await?;
                     return Ok(());
                 }
             }
         }
-        if self.resume_if_cancelled()? { return Ok(()); }
+        if self.resume_if_cancelled().await? { return Ok(()); }
         if self.provider.native_desktop() && matches!(self.action.as_str(), "logout" | "reboot" | "poweroff") {
             self.lifecycle.phase = SessionPhase::StoppingSession;
             let provider = self.provider.clone();
@@ -102,31 +103,31 @@ impl Coordinator {
             });
             return Ok(());
         }
-        self.begin_finish()
+        self.begin_finish().await
     }
 
-    pub fn delegated(&mut self, result: Result<(), SessionError>) -> Result<(), SessionError> {
-        if self.record.shutdown_deadline_usec.is_some() { return self.begin_finish(); }
+    pub async fn delegated(&mut self, result: Result<(), SessionError>) -> Result<(), SessionError> {
+        if self.record.shutdown_deadline_usec.is_some() { return self.begin_finish().await; }
         match result {
-            Ok(()) => self.resume("delegated", "native desktop manager owns its shutdown dialogs and completion"),
-            Err(error) => self.resume("failed", &error.to_string()),
+            Ok(()) => self.resume("delegated", "native desktop manager owns its shutdown dialogs and completion").await,
+            Err(error) => self.resume("failed", &error.to_string()).await,
         }
     }
 
-    pub fn power_requested(&mut self, result: Result<(), SessionError>) -> Result<(), SessionError> {
+    pub async fn power_requested(&mut self, result: Result<(), SessionError>) -> Result<(), SessionError> {
         match result {
-            Ok(()) => self.begin_finish(),
+            Ok(()) => self.begin_finish().await,
             Err(error) if self.record.shutdown_deadline_usec.is_some() => {
                 tracing::warn!(%error, "power request failed while external shutdown is in progress");
-                self.begin_finish()
+                self.begin_finish().await
             }
-            Err(error) => self.resume("failed", &error.to_string()),
+            Err(error) => self.resume("failed", &error.to_string()).await,
         }
     }
 
-    fn begin_finish(&mut self) -> Result<(), SessionError> {
+    async fn begin_finish(&mut self) -> Result<(), SessionError> {
         self.lifecycle.phase = SessionPhase::StoppingSession;
-        self.save()?;
+        self.save().await?;
         let manager = self.manager.clone();
         let runtime = self.runtime.clone();
         let record = self.record.clone();
@@ -139,7 +140,7 @@ impl Coordinator {
         Ok(())
     }
 
-    fn resume(&mut self, result: &str, message: &str) -> Result<(), SessionError> {
+    async fn resume(&mut self, result: &str, message: &str) -> Result<(), SessionError> {
         self.xsmp.cancel();
         self.respond_stop(result, message);
         // Restore the last verified phase. Observation will confirm any real
@@ -151,16 +152,16 @@ impl Coordinator {
         self.action.clear();
         self.preparing = false;
         self.stopping.store(false, Ordering::SeqCst);
-        apps::reset_preparation(&self.runtime)?;
-        self.save()
+        apps::reset_preparation(&self.runtime).await?;
+        self.save().await
     }
 
-    pub(super) fn resume_if_cancelled(&mut self) -> Result<bool, SessionError> {
+    pub(super) async fn resume_if_cancelled(&mut self) -> Result<bool, SessionError> {
         let cancelled = self.shutdown.as_ref().is_some_and(|control| {
             control.cancelled.load(Ordering::SeqCst) && !control.noncancelable.load(Ordering::SeqCst)
         });
         if self.lifecycle.phase != SessionPhase::Preparing || !cancelled { return Ok(false); }
-        self.resume("cancelled", "shutdown cancelled; applications already closed cannot be restored")?;
+        self.resume("cancelled", "shutdown cancelled; applications already closed cannot be restored").await?;
         Ok(true)
     }
 
@@ -179,7 +180,8 @@ async fn finish(
     let mut failure = None;
     let mut cleanup_manager = manager.clone();
     cleanup_manager.deadline = manager.deadline.reserving(Duration::from_secs(1))?;
-    for app in runtime.apps()? {
+    let records = runtime.clone();
+    for app in super::runtime::blocking(move || records.apps()).await? {
         if let Err(error) = apps::finish(&cleanup_manager, runtime, &app).await { failure.get_or_insert(error); }
     }
     if !provider.logout_command.is_empty() {
@@ -194,7 +196,8 @@ async fn finish(
     let _ = cleanup_manager.unref(&record.anchor_unit).await;
     if let Err(error) = process.stop(manager, provider, &runtime.generation).await { failure.get_or_insert(error); }
     if let Err(error) = env::clear_owned(manager, &record.exported_environment).await { failure.get_or_insert(error); }
-    if let Err(error) = runtime.reap_closed_app_locks() { failure.get_or_insert(error); }
+    let records = runtime.clone();
+    if let Err(error) = super::runtime::blocking(move || records.reap_closed_app_locks()).await { failure.get_or_insert(error); }
     match failure { Some(error) => Err(error), None => Ok(()) }
 }
 

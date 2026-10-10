@@ -137,7 +137,7 @@ impl Fixture {
         };
         let provider = Provider { kind: crate::provider::ProviderKind::Managed,
             native_unit: None, logout_command: Vec::new() };
-        let app = register(&runtime, &provider, &request).unwrap();
+        let app = register(&runtime, &provider, &request).await.unwrap();
         let state = Arc::new(State { unit: app.unit.clone(), mode, exists: AtomicBool::new(false),
             starts: AtomicUsize::new(0), invocation_reads: AtomicUsize::new(0), unrefs: AtomicUsize::new(0) });
         let shared = Arc::clone(&state);

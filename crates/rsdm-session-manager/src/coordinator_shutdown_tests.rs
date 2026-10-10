@@ -78,9 +78,9 @@ impl Fixture {
         Self { coordinator, notices, _server: server.await.unwrap(), directory }
     }
 
-    fn notify(&mut self, preparing: bool, budget_usec: u64) {
+    async fn notify(&mut self, preparing: bool, budget_usec: u64) {
         self.notices.send(ShutdownNotice::new(preparing, budget_usec)).unwrap();
-        self.coordinator.notifications().unwrap();
+        self.coordinator.notifications().await.unwrap();
     }
 
     fn deadline(&self) -> u64 {
@@ -98,7 +98,7 @@ use crate::processes::monotonic_usec;
 async fn logind_shutdown_uses_the_full_delay_budget() {
     let mut fixture = Fixture::new().await;
     let before = monotonic_usec().unwrap();
-    fixture.notify(true, 30_000_000);
+    fixture.notify(true, 30_000_000).await;
     let after = monotonic_usec().unwrap();
     assert!((before + 30_000_000..=after + 30_000_000).contains(&fixture.deadline()));
     assert_eq!(fixture.coordinator.runtime.session().unwrap().shutdown_deadline_usec, Some(fixture.deadline()));
@@ -109,12 +109,12 @@ async fn logind_shutdown_uses_the_full_delay_budget() {
 #[tokio::test]
 async fn repeated_notices_never_extend_the_original_deadline() {
     let mut fixture = Fixture::new().await;
-    fixture.notify(true, 30_000_000);
+    fixture.notify(true, 30_000_000).await;
     let original = fixture.deadline();
-    fixture.notify(true, 60_000_000);
+    fixture.notify(true, 60_000_000).await;
     assert_eq!(fixture.deadline(), original);
     let before = monotonic_usec().unwrap();
-    fixture.notify(true, 1_000_000);
+    fixture.notify(true, 1_000_000).await;
     let after = monotonic_usec().unwrap();
     assert!((before + 1_000_000..=after + 1_000_000).contains(&fixture.deadline()));
     assert!(fixture.deadline() < original);
@@ -126,7 +126,7 @@ async fn queued_shutdown_keeps_the_receivers_original_deadline() {
     let notice = ShutdownNotice::new(true, 30_000_000);
     let deadline = notice.deadline_usec;
     fixture.notices.send(notice).unwrap();
-    fixture.coordinator.notifications().unwrap();
+    fixture.coordinator.notifications().await.unwrap();
     assert_eq!(fixture.deadline(), deadline);
     assert_eq!(fixture.coordinator.record.shutdown_deadline_usec, Some(deadline));
 }
@@ -136,7 +136,7 @@ async fn a_queued_expired_shutdown_cannot_receive_a_fresh_budget() {
     let mut fixture = Fixture::new().await;
     let deadline = monotonic_usec().unwrap().saturating_sub(1);
     fixture.notices.send(ShutdownNotice { preparing: true, deadline_usec: deadline }).unwrap();
-    fixture.coordinator.notifications().unwrap();
+    fixture.coordinator.notifications().await.unwrap();
     assert_eq!(fixture.deadline(), deadline);
     assert!(fixture.coordinator.manager.deadline.remaining(Duration::from_secs(5)).is_err());
     assert_eq!(fixture.coordinator.runtime.session().unwrap().shutdown_deadline_usec, Some(deadline));
@@ -145,20 +145,20 @@ async fn a_queued_expired_shutdown_cannot_receive_a_fresh_budget() {
 #[tokio::test]
 async fn wm_exit_does_not_replace_loginds_budget_or_prevent_its_cancellation() {
     let mut fixture = Fixture::new().await;
-    fixture.notify(true, 30_000_000);
+    fixture.notify(true, 30_000_000).await;
     let original = fixture.deadline();
     for action in ["compositor-exited", "external-stop"] {
-        fixture.coordinator.begin_stop(action, Some(monotonic_usec().unwrap() + 5_000_000)).unwrap();
+        fixture.coordinator.begin_stop(action, Some(monotonic_usec().unwrap() + 5_000_000)).await.unwrap();
         assert_eq!(fixture.deadline(), original);
         assert_eq!(fixture.coordinator.action, "external-shutdown");
     }
-    fixture.notify(false, 30_000_000);
+    fixture.notify(false, 30_000_000).await;
     let control = fixture.coordinator.shutdown.as_ref().unwrap();
     assert!(control.cancelled.load(Ordering::SeqCst));
     assert!(!control.noncancelable.load(Ordering::SeqCst));
     assert_eq!(fixture.deadline(), 0);
     assert_eq!(fixture.coordinator.runtime.session().unwrap().shutdown_deadline_usec, None);
-    fixture.notify(true, 30_000_000);
+    fixture.notify(true, 30_000_000).await;
     assert!(!fixture.coordinator.shutdown.as_ref().unwrap().cancelled.load(Ordering::SeqCst));
     assert!(fixture.deadline() >= original);
 }
@@ -167,10 +167,10 @@ async fn wm_exit_does_not_replace_loginds_budget_or_prevent_its_cancellation() {
 async fn compositor_cleanup_retains_its_explicit_five_second_deadline() {
     let mut fixture = Fixture::new().await;
     let deadline = monotonic_usec().unwrap() + 5_000_000;
-    fixture.coordinator.begin_stop("compositor-exited", Some(deadline)).unwrap();
+    fixture.coordinator.begin_stop("compositor-exited", Some(deadline)).await.unwrap();
     assert_eq!(fixture.deadline(), deadline);
     assert_eq!(fixture.coordinator.record.shutdown_deadline_usec, None);
-    fixture.notify(true, 30_000_000);
+    fixture.notify(true, 30_000_000).await;
     assert_eq!(fixture.deadline(), deadline);
     assert_eq!(fixture.coordinator.action, "external-shutdown");
 }
@@ -178,15 +178,15 @@ async fn compositor_cleanup_retains_its_explicit_five_second_deadline() {
 #[tokio::test]
 async fn notices_during_infrastructure_stop_record_the_budget_without_reopening_preparation() {
     let mut fixture = Fixture::new().await;
-    fixture.coordinator.begin_stop("reboot", None).unwrap();
+    fixture.coordinator.begin_stop("reboot", None).await.unwrap();
     fixture.coordinator.lifecycle.phase = SessionPhase::StoppingSession;
     let before = monotonic_usec().unwrap();
-    fixture.notify(true, 30_000_000);
+    fixture.notify(true, 30_000_000).await;
     let after = monotonic_usec().unwrap();
     assert!((before + 30_000_000..=after + 30_000_000).contains(&fixture.deadline()));
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::StoppingSession);
     assert_eq!(fixture.coordinator.action, "reboot");
-    fixture.notify(false, 30_000_000);
+    fixture.notify(false, 30_000_000).await;
     assert!(fixture.coordinator.shutdown.as_ref().unwrap().noncancelable.load(Ordering::SeqCst));
 }
 

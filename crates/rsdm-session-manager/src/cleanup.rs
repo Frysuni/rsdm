@@ -11,39 +11,71 @@ use super::{
 };
 
 pub async fn cleanup(generation: &str) -> Result<(), SessionError> {
-    let Some(runtime) = Runtime::open(generation)? else { return Ok(()); };
-    // Validation may have created the private directory before publishing a
-    // session record. No service or environment side effect precedes that
-    // record, so an empty generation needs no user-manager connection.
-    if !runtime.path.join("session.toml").try_exists()? && runtime.apps()?.is_empty() {
-        return Ok(());
-    }
-    let _lease = super::session_lease::SessionLease::acquire()?;
+    let generation = generation.to_string();
+    let Some((runtime, _lease, saved_deadline)) = super::runtime::blocking(move || {
+        open_recovery(&generation)
+    }).await? else { return Ok(()); };
     let deadline = Deadline::default();
-    deadline.set(recovery_deadline(runtime.session()?.shutdown_deadline_usec, 0)?);
+    deadline.set(recovery_deadline(saved_deadline, 0)?);
     let manager = UserManager::connect_until(deadline).await?;
     acquire_lease(&manager).await?;
     recover(&manager, &runtime).await
 }
 
+fn open_recovery(generation: &str) -> Result<Option<(Runtime, super::session_lease::SessionLease, Option<u64>)>, SessionError> {
+    let Some(runtime) = Runtime::open(generation)? else { return Ok(None); };
+    // Validation may have created the private directory before publishing a
+    // session record. No service or environment side effect precedes that
+    // record, so an empty generation needs no user-manager connection.
+    if !runtime.path.join("session.toml").try_exists()? && runtime.apps()?.is_empty() {
+        return Ok(None);
+    }
+    let lease = super::session_lease::SessionLease::acquire()?;
+    let deadline = runtime.session()?.shutdown_deadline_usec;
+    Ok(Some((runtime, lease, deadline)))
+}
+
 pub(super) async fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), SessionError> {
-    let mut record = runtime.session()?;
+    let records = runtime.clone();
+    let mut record = super::runtime::blocking(move || records.session()).await?;
     let control = std::sync::Arc::new(ShutdownControl::for_manager(manager));
     control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
     control.recovery.store(true, std::sync::atomic::Ordering::SeqCst);
     let deadline = recovery_deadline(record.shutdown_deadline_usec, manager.deadline.get())?;
     control.force(deadline);
     record.shutdown_deadline_usec = Some(deadline);
+
     let mut failure = None;
-    if let Err(error) = runtime.save_session(&record) { failure = Some(error); }
-    if let Err(error) = app_stop::prepare_apps(&manager, &runtime, runtime.apps()?, control).await {
+    let records = runtime.clone();
+    let recovering = record.clone();
+    if let Err(error) = super::runtime::blocking(move || records.save_session(&recovering)).await { failure = Some(error); }
+    let records = runtime.clone();
+    let applications = super::runtime::blocking(move || records.apps()).await?;
+    if let Err(error) = app_stop::prepare_apps(&manager, &runtime, applications, control).await {
         failure = Some(error);
     }
+
     let mut cleanup_manager = manager.clone();
     cleanup_manager.deadline = manager.deadline.reserving(Duration::from_secs(1))?;
-    for app in runtime.apps()? {
+    let records = runtime.clone();
+    for app in super::runtime::blocking(move || records.apps()).await? {
         if let Err(error) = apps::finish(&cleanup_manager, &runtime, &app).await { failure.get_or_insert(error); }
     }
+
+    recover_infrastructure(manager, &cleanup_manager, runtime, &mut record, &mut failure).await;
+    let records = runtime.clone();
+    if let Err(error) = super::runtime::blocking(move || records.reap_closed_app_locks()).await { failure.get_or_insert(error); }
+    if let Some(error) = failure { return Err(error); }
+
+    record.phase = rsdm_core::domain::SessionPhase::Closed;
+    let records = runtime.clone();
+    super::runtime::blocking(move || records.save_session(&record)).await
+}
+
+async fn recover_infrastructure(
+    manager: &UserManager, cleanup_manager: &UserManager, runtime: &Runtime,
+    record: &mut SessionRecord, failure: &mut Option<SessionError>,
+) {
     let owns_environment = match cleanup_manager.environment().await {
         Ok(environment) => environment.contains(&format!("{GENERATION_ENV}={}", runtime.generation)),
         Err(error) => { failure.get_or_insert(error); false }
@@ -56,16 +88,12 @@ pub(super) async fn recover(manager: &UserManager, runtime: &Runtime) -> Result<
     if let Err(error) = cleanup_manager.stop(&record.anchor_unit, Duration::from_secs(15)).await { failure.get_or_insert(error); }
     let _ = cleanup_manager.unref(&record.anchor_unit).await;
     if let Some(unit) = record.compositor_unit.clone() {
-        if let Err(error) = stop_compositor(manager, &runtime.generation, &mut record, &unit).await { failure.get_or_insert(error); }
+        if let Err(error) = stop_compositor(manager, &runtime.generation, record, &unit).await { failure.get_or_insert(error); }
         if record.provider == "managed" { let _ = manager.unref(&unit).await; }
     }
     if owns_environment {
         if let Err(error) = env::clear_owned(&manager, &record.exported_environment).await { failure.get_or_insert(error); }
     }
-    if let Err(error) = runtime.reap_closed_app_locks() { failure.get_or_insert(error); }
-    if let Some(error) = failure { return Err(error); }
-    record.phase = rsdm_core::domain::SessionPhase::Closed;
-    runtime.save_session(&record)
 }
 
 async fn stop_compositor(manager: &UserManager, generation: &str, record: &mut SessionRecord, unit: &str) -> Result<(), SessionError> {

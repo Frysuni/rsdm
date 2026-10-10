@@ -291,6 +291,10 @@ shutdown/recovery their retries and sleeps also obey the shared deadline;
 revisions or revocation affect an already waiting lease. The lease is released
 before application exit waits or systemd jobs.
 
+Registration, session records and recovery filesystem operations run on blocking
+tasks. The coordinator awaits each write before its dependent external action;
+pending writes and contended app leases leave Tokio timers and I/O running.
+
 Stopping a native/external launcher pins the original child with a pidfd.
 Its TERM grace and post-KILL exit check share the shutdown deadline. Expiry
 interrupts either wait and still permits immediate KILL of that owned child;

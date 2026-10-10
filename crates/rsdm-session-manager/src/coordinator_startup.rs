@@ -20,7 +20,7 @@ impl Coordinator {
         let ready_deadline = Instant::now().checked_add(Duration::from_secs(cfg.ready_timeout_secs))
             .ok_or_else(|| SessionError::State("readiness timeout is too large".into()))?;
         let identity = SessionIdentity::discover().await?;
-        let lease = super::session_lease::SessionLease::acquire()?;
+        let lease = super::runtime::blocking(super::session_lease::SessionLease::acquire).await?;
         let (endpoint, requests) = control::Endpoint::channel(identity.uid);
         // Acquire the one-session lease before changing shared manager state.
         let bus = control::ControlServer::start(endpoint).await?;
@@ -34,10 +34,14 @@ impl Coordinator {
         let power = ShutdownMonitor::start(notices_sender, "Saving registered graphical applications")
             .await
             .map_err(|error| SessionError::State(format!("creating shutdown delay monitor: {error}")))?;
-        let runtime = Runtime::create(&identity.generation)?;
-        if runtime.path.join("session.toml").try_exists()? {
-            return Err(SessionError::State("this session generation already has a recovery record".into()));
-        }
+        let generation = identity.generation.clone();
+        let runtime = super::runtime::blocking(move || {
+            let runtime = Runtime::create(&generation)?;
+            if runtime.path.join("session.toml").try_exists()? {
+                return Err(SessionError::State("this session generation already has a recovery record".into()));
+            }
+            Ok(runtime)
+        }).await?;
         let xsmp = super::xsmp::Handle::start(&manager, &runtime, &provider).await?;
         let mut environment = identity.command_environment(env::command_environment());
         for (name, value) in &xsmp.environment {

@@ -40,7 +40,7 @@ impl Coordinator {
             // Persist ownership intent before the start job can pull in a
             // target, including when the anchor's activation later fails.
             self.record.owns_targets = true;
-            self.save()?;
+            self.save().await?;
         }
         Ok(())
     }
@@ -68,7 +68,7 @@ impl Coordinator {
             }
         }
         if self.exit_code != 0 {
-            self.begin_stop("compositor-exited", Some(monotonic_usec()?.saturating_add(5_000_000)))?;
+            self.begin_stop("compositor-exited", Some(monotonic_usec()?.saturating_add(5_000_000))).await?;
         }
         if !self.finalize_replies.is_empty() && self.lifecycle.accepts_finalize() {
             self.activate().await;
@@ -95,7 +95,7 @@ impl Coordinator {
         Ok(())
     }
 
-    pub(super) fn complete_readiness(&mut self, ready: bool) -> Result<(), SessionError> {
+    pub(super) async fn complete_readiness(&mut self, ready: bool) -> Result<(), SessionError> {
         let ready = ready && self.lifecycle.accepts_finalize();
         self.pending_ready = false;
         self.ready_busy = false;
@@ -109,9 +109,9 @@ impl Coordinator {
         }
         if self.lifecycle.phase == SessionPhase::Running {
             while let Some((request, reply, _)) = self.queued.pop_front() {
-                self.launch(request, reply)?;
+                self.launch(request, reply).await?;
             }
         }
-        self.save()
+        self.save().await
     }
 }

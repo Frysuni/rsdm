@@ -96,26 +96,26 @@ impl Coordinator {
             tokio::select! {
                 request = self.requests.recv() => {
                     let request = request.ok_or_else(|| SessionError::State("session control channel closed".into()))?;
-                    self.request(request)?;
+                    self.request(request).await?;
                 }
                 work = self.work.recv() => {
                     let work = work.ok_or_else(|| SessionError::State("session work channel closed".into()))?;
                     self.completed(work).await?;
                 }
                 notice = self.notices.recv(), if notices_open => match notice {
-                    Some(notice) => self.shutdown_notice(notice)?,
+                    Some(notice) => self.shutdown_notice(notice).await?,
                     None => notices_open = false,
                 },
                 _ = tick.tick() => {
-                    self.notifications()?;
+                    self.notifications().await?;
                     self.control_bus.maintain();
-                    self.start_observation();
+                    self.start_observation().await;
                 }
             }
             if self.lifecycle.phase == SessionPhase::Closed {
                 break;
             }
-            self.publish_next_environment()?;
+            self.publish_next_environment().await?;
             self.advance()?;
         }
         self.finish_reply_delivery().await?;
@@ -129,7 +129,7 @@ impl Coordinator {
             if local.is_zero() { break; }
             let Ok(wait) = self.manager.deadline.remaining(local.min(Duration::from_millis(50))) else { break; };
             match tokio::time::timeout(wait, self.requests.recv()).await {
-                Ok(Some(request)) => self.request(request)?,
+                Ok(Some(request)) => self.request(request).await?,
                 Ok(None) => break,
                 Err(_) => {}
             }
@@ -141,9 +141,11 @@ impl Coordinator {
         self.observation_busy || self.process.as_ref().is_some_and(|process| process.booting)
     }
 
-    pub fn save(&mut self) -> Result<(), SessionError> {
+    pub async fn save(&mut self) -> Result<(), SessionError> {
         self.record.phase = self.lifecycle.phase;
-        self.runtime.save_session(&self.record)
+        let runtime = self.runtime.clone();
+        let record = self.record.clone();
+        super::runtime::blocking(move || runtime.save_session(&record)).await
     }
 
     pub(super) async fn completed(&mut self, work: Work) -> Result<(), SessionError> {
@@ -157,9 +159,9 @@ impl Coordinator {
                 self.lifecycle.complete_launch(&unit);
                 let _ = reply.try_send(result.map_err(|error| error.to_string()));
             }
-            Work::Prepared(result) => self.prepared(result)?,
-            Work::Delegated(result) => self.delegated(result)?,
-            Work::PowerRequested(result) => self.power_requested(result)?,
+            Work::Prepared(result) => self.prepared(result).await?,
+            Work::Delegated(result) => self.delegated(result).await?,
+            Work::PowerRequested(result) => self.power_requested(result).await?,
             Work::Finished(result) => {
                 match result {
                     Ok(()) => self.respond_stop("completed", "session processes stopped"),
@@ -172,7 +174,7 @@ impl Coordinator {
                 self.lifecycle.phase = SessionPhase::Closed;
             }
         }
-        self.save()
+        self.save().await
     }
 
 }

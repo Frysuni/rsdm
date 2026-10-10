@@ -3,7 +3,9 @@
 use super::{SessionError, bus::UserManager, env, runtime::{Runtime, SessionRecord}};
 
 pub(super) async fn publish(manager: &UserManager, runtime: &Runtime, record: &SessionRecord) -> Result<(), SessionError> {
-    runtime.save_session(record)?;
+    let records = runtime.clone();
+    let initial = record.clone();
+    super::runtime::blocking(move || records.save_session(&initial)).await?;
     let result = async {
         env::clear_names(manager, &env::DISPLAY_VARS.iter().map(|name| name.to_string()).collect::<Vec<_>>()).await?;
         env::publish(manager, &record.exported_environment).await
@@ -19,7 +21,8 @@ pub(super) async fn rollback(manager: &UserManager, runtime: &Runtime, record: &
     }
     let mut closed = record.clone();
     closed.phase = rsdm_core::domain::SessionPhase::Closed;
-    if let Err(error) = runtime.save_session(&closed) {
+    let runtime = runtime.clone();
+    if let Err(error) = super::runtime::blocking(move || runtime.save_session(&closed)).await {
         tracing::warn!(%error, "could not record startup rollback");
     }
 }

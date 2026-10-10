@@ -124,11 +124,11 @@ logind notices, and periodic observation. Reply delivery and recovery worker
 draining share their original budgets through asynchronous waits.
 Deadline revisions use Tokio watch so every pending operation observes both
 shortening and revocation without retaining watchers after completion.
-Application workers await recovery record reads and writes on blocking filesystem
-tasks. A record lease, validation and mutation stay within one task; D-Bus waits
-do not retain that lease. The actor still awaits target ownership checks during
-readiness and performs synchronous registration and session record operations;
-either can delay cancellation while their migration is pending. Registration and
+The actor, startup, recovery and app workers await recovery record reads and writes
+on blocking filesystem tasks. A record lease, validation and mutation stay within
+one task; D-Bus waits do not retain that lease. The actor still awaits target
+ownership checks during readiness, which can delay cancellation while their
+migration is pending. Registration and
 recovery records precede side effects. InvocationID and pidfd checks keep
 cleanup/signals attached to the recorded processes.
 

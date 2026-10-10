@@ -5,7 +5,7 @@ use rsdm_core::domain::SessionPhase;
 use super::{SessionError, activation, control::Reply, coordinator::{Coordinator, Work}, env};
 
 impl Coordinator {
-    pub(super) fn finalize_request(
+    pub(super) async fn finalize_request(
         &mut self, generation: String, environment: Vec<(String, String)>, reply: Reply<()>,
     ) -> Result<(), SessionError> {
         if generation != self.runtime.generation || !self.lifecycle.accepts_finalize() {
@@ -14,13 +14,16 @@ impl Coordinator {
         }
         // The endpoint's admission permit bounds queued and active requests.
         self.pending_environment.push_back((environment, reply));
-        self.publish_next_environment()
+        self.publish_next_environment().await
     }
 
-    pub(super) fn publish_next_environment(&mut self) -> Result<(), SessionError> {
+    pub(super) async fn publish_next_environment(&mut self) -> Result<(), SessionError> {
         if self.environment_reply.is_some() || !self.lifecycle.accepts_finalize() { return Ok(()); }
         let Some((environment, reply)) = self.pending_environment.pop_front() else { return Ok(()); };
-        let recorded = activation::claim_environment(&mut self.record, &environment).and_then(|()| self.save());
+        let recorded = async {
+            activation::claim_environment(&mut self.record, &environment)?;
+            self.save().await
+        }.await;
         if let Err(error) = recorded {
             let _ = reply.try_send(Err(error.to_string()));
             return Ok(());
@@ -43,7 +46,7 @@ impl Coordinator {
         // No app preparation can start while this publication is outstanding.
         // Honour cancellation before replying, so an accepted startup finalize
         // does not fail and cause its launcher to exit after a cancelled logout.
-        self.resume_if_cancelled()?;
+        self.resume_if_cancelled().await?;
         match result {
             Err(error) => { let _ = reply.try_send(Err(error.to_string())); }
             Ok(()) if !self.lifecycle.accepts_finalize() => {
@@ -55,7 +58,7 @@ impl Coordinator {
                 self.activate().await;
             }
         }
-        self.publish_next_environment()
+        self.publish_next_environment().await
     }
 
     pub(super) fn reject_pending_environment(&mut self, message: &str) {

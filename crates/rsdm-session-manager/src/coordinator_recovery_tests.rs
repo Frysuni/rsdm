@@ -5,7 +5,7 @@ use crate::control::{Reply, Request};
 async fn recovery_worker_drain_cannot_extend_an_active_shutdown_deadline() {
     let mut fixture = Fixture::new().await;
     let deadline = monotonic_usec().unwrap() + 50_000;
-    fixture.coordinator.begin_stop("external-shutdown", Some(deadline)).unwrap();
+    fixture.coordinator.begin_stop("external-shutdown", Some(deadline)).await.unwrap();
     fixture.coordinator.workers = 1;
     let before = Instant::now();
     fixture.coordinator.recover().await;

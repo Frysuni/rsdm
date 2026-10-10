@@ -12,20 +12,20 @@ use super::{
 };
 
 impl Coordinator {
-    pub fn request(&mut self, request: Request) -> Result<(), SessionError> {
+    pub async fn request(&mut self, request: Request) -> Result<(), SessionError> {
         match request {
-            Request::Launch(request, reply) => self.launch(request, reply)?,
+            Request::Launch(request, reply) => self.launch(request, reply).await?,
             Request::Finalize { generation, environment, reply } => {
-                self.finalize_request(generation, environment, reply)?;
+                self.finalize_request(generation, environment, reply).await?;
             }
             Request::Stop { generation, action, reply } => {
-                self.stop_request(generation, action, reply)?;
+                self.stop_request(generation, action, reply).await?;
             }
             Request::Cancel { generation, reply } => {
                 let _ = reply.try_send(self.cancel_request(&generation));
             }
             Request::Status(reply) => {
-                let _ = reply.try_send(Ok(self.status()?));
+                let _ = reply.try_send(Ok(self.status().await?));
             }
             Request::StopReplySent(permit) => {
                 self.replies_pending = self.replies_pending.saturating_sub(1);
@@ -46,7 +46,7 @@ impl Coordinator {
         Ok(())
     }
 
-    fn stop_request(
+    async fn stop_request(
         &mut self,
         generation: String,
         action: String,
@@ -64,7 +64,7 @@ impl Coordinator {
             let _ = reply.try_send(Err("another shutdown action is already in progress".into()));
         } else {
             self.stop_replies.push(reply);
-            self.begin_stop(&action, None)?;
+            self.begin_stop(&action, None).await?;
         }
         Ok(())
     }
@@ -87,8 +87,9 @@ impl Coordinator {
         Ok(())
     }
 
-    fn status(&self) -> Result<SessionStatus, SessionError> {
-        let apps = self.runtime.apps()?.into_iter().map(|app| {
+    async fn status(&self) -> Result<SessionStatus, SessionError> {
+        let runtime = self.runtime.clone();
+        let apps = super::runtime::blocking(move || runtime.apps()).await?.into_iter().map(|app| {
             let method = self.app_method(&app);
             let state = if app.quit_started { "quitting" } else { "registered" };
             (app.unit, method, app.policy.timeout_secs, state.to_string())
@@ -120,7 +121,7 @@ impl Coordinator {
         "term".into()
     }
 
-    pub fn launch(&mut self, request: LaunchRequest, reply: Reply<String>) -> Result<(), SessionError> {
+    pub async fn launch(&mut self, request: LaunchRequest, reply: Reply<String>) -> Result<(), SessionError> {
         if request.generation != self.runtime.generation || !self.lifecycle.accepts_launch() {
             let _ = reply.try_send(Err("session is shutting down or generation is stale".into()));
             return Ok(());
@@ -133,7 +134,7 @@ impl Coordinator {
             self.queued.push_back((request, reply, Instant::now()));
             return Ok(());
         }
-        let app = match apps::register(&self.runtime, &self.provider, &request) {
+        let app = match apps::register(&self.runtime, &self.provider, &request).await {
             Ok(app) => app,
             Err(error) => {
                 let _ = reply.try_send(Err(error.to_string()));

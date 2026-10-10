@@ -35,11 +35,11 @@ impl Coordinator {
 
         // Publish the budget before waiting; workers may already have accepted
         // mutations whose invocation will be recovered from the saved intent.
-        if let Err(error) = self.save() {
+        if let Err(error) = self.save().await {
             tracing::warn!(%error, "could not persist recovery deadline");
         }
         self.drain_workers().await;
-        if let Err(error) = self.save() {
+        if let Err(error) = self.save().await {
             tracing::warn!(%error, "could not persist recovery state");
         }
         if let Err(error) = super::cleanup::recover(&self.manager, &self.runtime).await {
