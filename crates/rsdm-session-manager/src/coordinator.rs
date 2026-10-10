@@ -80,6 +80,10 @@ pub(super) async fn start(argv: &[String], cfg: &SessionManagerConfig, options: 
     if result.as_ref().map_or(true, |code| *code != 0) {
         coordinator.recover().await;
     }
+    if let Err(error) = coordinator.xsmp.shutdown(&coordinator.manager.deadline).await {
+        if result.is_ok() { return Err(error); }
+        tracing::warn!(%error, "XSMP worker shutdown failed during session recovery");
+    }
     result
 }
 

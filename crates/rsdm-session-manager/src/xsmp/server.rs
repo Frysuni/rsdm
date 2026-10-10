@@ -1,9 +1,11 @@
 //! One thread owns all ICE objects, dispatch and SM library globals.
 
-use std::{cell::Cell, collections::HashSet, ptr, sync::{atomic::{AtomicBool, Ordering}, mpsc::{Receiver, Sender}}, time::Duration};
+use std::{cell::Cell, collections::HashSet, os::fd::OwnedFd, ptr, sync::{Arc, atomic::{AtomicBool, Ordering}}, time::Duration};
+
+use tokio::sync::{mpsc::{UnboundedReceiver, UnboundedSender}, oneshot};
 
 use super::{Message, Notice, authority::Authority, callbacks::{self, Admission}, ffi,
-    listeners::Listeners, peer::Peer, protocol::Phase};
+    interrupt::Interrupt, listeners::Listeners, peer::Peer, protocol::Phase, readiness};
 use crate::{SessionError, bus::UserManager, runtime::Runtime};
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -15,33 +17,49 @@ pub(super) struct Server {
     listeners: Listeners,
     _authority: Authority,
     admission: Box<Admission>,
-    messages: Receiver<Message>,
-    pub notices: Sender<Notice>,
+    messages: UnboundedReceiver<Message>,
+    pub notices: UnboundedSender<Notice>,
     pub cancellable: bool,
     announced: HashSet<String>,
+    interrupt: Arc<Interrupt>,
+    _listener_sockets: Vec<Arc<OwnedFd>>,
+}
+
+enum Event {
+    Message(Option<Message>),
+    Ready(usize),
+    Tick,
 }
 
 pub(super) async fn run(
-    manager: UserManager, runtime: Runtime, messages: Receiver<Message>, notices: Sender<Notice>,
-    ready: Sender<Result<Vec<(String, String)>, SessionError>>,
+    manager: UserManager, runtime: Runtime, messages: UnboundedReceiver<Message>, notices: UnboundedSender<Notice>,
+    ready: oneshot::Sender<Result<Vec<(String, String)>, SessionError>>, interrupt: Arc<Interrupt>,
 ) {
-    let mut server = match Server::create(manager, runtime, messages, notices) {
-        Ok(server) => server,
-        Err(error) => { let _ = ready.send(Err(error)); return; }
+    let result = tokio::select! {
+        biased;
+        _ = interrupt.stopped() => Ok(()),
+        result = async {
+            let mut server = match Server::create(manager, runtime, messages, notices.clone(), interrupt.clone()) {
+                Ok(server) => server,
+                Err(error) => { let _ = ready.send(Err(error)); return Ok(()); }
+            };
+            let environment = vec![
+                ("SESSION_MANAGER".into(), server.listeners.networks.join(",")),
+                ("ICEAUTHORITY".into(), server._authority.path.to_string_lossy().into_owned()),
+            ];
+            if ready.send(Ok(environment)).is_err() { return Ok(()); }
+            server.run().await
+        } => result,
     };
-    let environment = vec![
-        ("SESSION_MANAGER".into(), server.listeners.networks.join(",")),
-        ("ICEAUTHORITY".into(), server._authority.path.to_string_lossy().into_owned()),
-    ];
-    if ready.send(Ok(environment)).is_err() { return; }
-    if let Err(error) = server.run().await {
-        let _ = server.notices.send(Notice::Failed(error.to_string()));
+    if let Err(error) = result {
+        let _ = notices.send(Notice::Failed(error.to_string()));
     }
 }
 
 impl Server {
     fn create(
-        manager: UserManager, runtime: Runtime, messages: Receiver<Message>, notices: Sender<Notice>,
+        manager: UserManager, runtime: Runtime, messages: UnboundedReceiver<Message>, notices: UnboundedSender<Notice>,
+        interrupt: Arc<Interrupt>,
     ) -> Result<Self, SessionError> {
         // libSM/libICE have process-global callbacks and an append-only cookie
         // table. A coordinator process owns exactly one server lifetime.
@@ -55,6 +73,8 @@ impl Server {
         }
         let listeners = Listeners::open()?;
         if listeners.count() > 32 { return Err(SessionError::State("too many local ICE transports".into())); }
+        let listener_sockets = (0..listeners.count()).map(|index| interrupt.register(listeners.fd(index)))
+            .collect::<Result<Vec<_>, _>>()?;
         let authority = Authority::create(&runtime.path, &listeners.networks)?;
         let admission = Box::new(Admission { peer: Cell::new(ptr::null_mut()) });
         let mut error: [libc::c_char; 256] = [0; 256];
@@ -64,56 +84,58 @@ impl Server {
             (&*admission as *const Admission).cast_mut().cast(), None, 256, error.as_mut_ptr()) };
         if initialized == 0 { return Err(SessionError::State("could not initialize XSMP".into())); }
         Ok(Self { manager, runtime, peers: Vec::new(), listeners, _authority: authority, admission,
-            messages, notices, cancellable: true, announced: HashSet::new() })
+            messages, notices, cancellable: true, announced: HashSet::new(), interrupt,
+            _listener_sockets: listener_sockets })
     }
 
     async fn run(&mut self) -> Result<(), SessionError> {
+        let mut tick = tokio::time::interval(Duration::from_millis(25));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
-            while let Ok(message) = self.messages.try_recv() {
-                match message {
-                    Message::Prepare { units, cancellable, reply } => {
-                        let result = self.prepare(&units, cancellable).await.map_err(|error| error.to_string());
-                        let _ = reply.try_send(result);
-                    }
-                    Message::Cancel => self.cancel(),
-                    Message::Stop => return Ok(()),
-                }
-            }
             self.advance()?;
-            self.poll().await?;
+            let descriptors: Vec<_> = (0..self.listeners.count()).map(|index| self.listeners.fd(index))
+                .chain(self.peers.iter().map(|peer| peer.fd())).collect();
+            let event = tokio::select! {
+                message = self.messages.recv() => Event::Message(message),
+                ready = readiness::wait(&descriptors) => Event::Ready(ready?),
+                _ = tick.tick() => Event::Tick,
+            };
+            // All readiness registrations and their nonblocking flags are gone
+            // before a branch can call libICE, including prepare/cancel writes.
+            match event {
+                Event::Message(Some(message)) => self.message(message).await?,
+                Event::Message(None) => return Ok(()),
+                Event::Ready(index) => self.process_ready(index).await?,
+                Event::Tick => {},
+            }
             self.remove_closed();
             self.announce();
-            tokio::task::yield_now().await;
         }
     }
 
-    async fn poll(&mut self) -> Result<(), SessionError> {
-        let mut descriptors: Vec<_> = (0..self.listeners.count()).map(|index| descriptor(self.listeners.fd(index)))
-            .chain(self.peers.iter().map(|peer| descriptor(peer.fd()))).collect();
-        // SAFETY: the vector contains all live listener/connection descriptors.
-        let ready = unsafe { libc::poll(descriptors.as_mut_ptr(), descriptors.len() as libc::nfds_t, 25) };
-        if ready < 0 {
-            let error = std::io::Error::last_os_error();
-            return if error.kind() == std::io::ErrorKind::Interrupted { Ok(()) } else { Err(error.into()) };
-        }
-        let listeners = self.listeners.count();
-        let peers = self.peers.len();
-        for index in 0..peers {
-            if descriptors[listeners + index].revents != 0 {
-                let peer = (&mut *self.peers[index]) as *mut Peer;
-                self.admission.peer.set(peer);
-                unsafe { Peer::process(peer); }
-                self.admission.peer.set(ptr::null_mut());
+    async fn message(&mut self, message: Message) -> Result<(), SessionError> {
+        match message {
+            Message::Prepare { units, cancellable, reply } => {
+                let result = self.prepare(&units, cancellable).await.map_err(|error| error.to_string());
+                let _ = reply.try_send(result);
             }
+            Message::Cancel => self.cancel(),
         }
-        for (index, descriptor) in descriptors.iter().take(listeners).enumerate() {
-            if descriptor.revents & libc::POLLIN != 0 {
-                match Peer::accept(self.listeners.object(index), &self.manager, &self.runtime).await {
-                    Ok(peer) if self.peers.len() < 256 => self.peers.push(peer),
-                    Ok(_) => {},
-                    Err(error) => tracing::debug!(%error, "rejected ICE peer"),
-                }
-            }
+        Ok(())
+    }
+
+    async fn process_ready(&mut self, index: usize) -> Result<(), SessionError> {
+        if index >= self.listeners.count() {
+            let peer = (&mut *self.peers[index - self.listeners.count()]) as *mut Peer;
+            self.admission.peer.set(peer);
+            unsafe { Peer::process(peer); }
+            self.admission.peer.set(ptr::null_mut());
+            return Ok(());
+        }
+        match Peer::accept(self.listeners.object(index), &self.manager, &self.runtime, &self.interrupt).await {
+            Ok(peer) if self.peers.len() < 256 => self.peers.push(peer),
+            Ok(_) => {},
+            Err(error) => tracing::debug!(%error, "rejected ICE peer"),
         }
         Ok(())
     }
@@ -138,8 +160,4 @@ impl Drop for Server {
         // closed; libICE references no application objects after this point.
         self.peers.clear();
     }
-}
-
-fn descriptor(fd: i32) -> libc::pollfd {
-    libc::pollfd { fd, events: libc::POLLIN, revents: 0 }
 }

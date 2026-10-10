@@ -9,11 +9,15 @@ mod ffi;
 #[cfg(feature = "xsmp")]
 mod listeners;
 #[cfg(feature = "xsmp")]
+mod interrupt;
+#[cfg(feature = "xsmp")]
 mod peer;
 #[cfg(feature = "xsmp")]
 mod properties;
 #[cfg(feature = "xsmp")]
 mod protocol;
+#[cfg(feature = "xsmp")]
+mod readiness;
 #[cfg(feature = "xsmp")]
 mod server;
 #[cfg(feature = "xsmp")]

@@ -38,7 +38,7 @@ impl Coordinator {
         if runtime.path.join("session.toml").try_exists()? {
             return Err(SessionError::State("this session generation already has a recovery record".into()));
         }
-        let xsmp = super::xsmp::Handle::start(&manager, &runtime, &provider)?;
+        let xsmp = super::xsmp::Handle::start(&manager, &runtime, &provider).await?;
         let mut environment = identity.command_environment(env::command_environment());
         for (name, value) in &xsmp.environment {
             environment.retain(|(existing, _)| existing != name);

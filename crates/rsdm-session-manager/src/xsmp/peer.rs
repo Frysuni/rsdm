@@ -1,8 +1,8 @@
 //! Socket credentials, pinned process identity and registered app ownership.
 
-use std::{ptr, time::Instant};
+use std::{os::fd::OwnedFd, ptr, sync::Arc, time::Instant};
 
-use super::{ffi, properties::Properties, protocol::Phase};
+use super::{ffi, interrupt::Interrupt, properties::Properties, protocol::Phase};
 use crate::{SessionError, apps, bus::UserManager,
     processes::{ProcessHandle, app_processes}, runtime::Runtime};
 
@@ -13,6 +13,7 @@ pub(super) struct Peer {
     pub invocation: Vec<u8>,
     pub pid: u32,
     process: ProcessHandle,
+    _interrupt: Arc<OwnedFd>,
     pub phase: Phase,
     pub selected: bool,
     pub interaction_requested: bool,
@@ -26,21 +27,21 @@ pub(super) struct Peer {
 }
 
 impl Peer {
-    pub async fn accept(listener: ffi::ListenObj, manager: &UserManager, runtime: &Runtime) -> Result<Box<Self>, SessionError> {
+    pub async fn accept(listener: ffi::ListenObj, manager: &UserManager, runtime: &Runtime, interrupt: &Interrupt) -> Result<Box<Self>, SessionError> {
         let mut status = 0;
         // SAFETY: the listener belongs to the server; a successful accept gives
         // this function one owned connection reference.
         let ice = unsafe { ffi::IceAcceptConnection(listener, &mut status) };
         if ice.is_null() { return Err(SessionError::State("ICE connection could not be accepted".into())); }
+        let mut accepted = Accepted(ice);
         unsafe { ffi::IceSetShutdownNegotiation(ice, 0); }
-        let admission = Self::admit(ice, manager, runtime).await;
-        if admission.is_err() {
-            unsafe { ffi::IceCloseConnection(ice); }
-        }
-        admission
+        let socket = interrupt.register(unsafe { ffi::IceConnectionNumber(ice) })?;
+        let peer = Self::admit(ice, socket, manager, runtime).await?;
+        accepted.0 = ptr::null_mut();
+        Ok(peer)
     }
 
-    async fn admit(ice: ffi::IceConn, manager: &UserManager, runtime: &Runtime) -> Result<Box<Self>, SessionError> {
+    async fn admit(ice: ffi::IceConn, interrupt: Arc<OwnedFd>, manager: &UserManager, runtime: &Runtime) -> Result<Box<Self>, SessionError> {
         let credentials = credentials(unsafe { ffi::IceConnectionNumber(ice) })?;
         // SAFETY: geteuid has no preconditions.
         if credentials.uid != unsafe { libc::geteuid() } || credentials.pid <= 0 {
@@ -58,7 +59,7 @@ impl Peer {
             return Err(SessionError::State("ICE peer is not a registered application process".into()));
         }
         Ok(Box::new(Self {
-            ice, sms: ptr::null_mut(), unit, invocation: app.invocation_id, pid, process,
+            ice, sms: ptr::null_mut(), unit, invocation: app.invocation_id, pid, process, _interrupt: interrupt,
             phase: Phase::Registering, selected: false, interaction_requested: false, interacting: false,
             cancellation_requested: false, local_save_requested: false, deadline: 0,
             cancel_on_timeout: false, properties: Properties::default(), accepted: Instant::now(),
@@ -87,6 +88,16 @@ impl Peer {
             peer.sms = ptr::null_mut();
             peer.phase = Phase::Closed;
         } else if result != 0 { peer.phase = Phase::Closed; }
+    }
+}
+
+struct Accepted(ffi::IceConn);
+
+impl Drop for Accepted {
+    fn drop(&mut self) {
+        // An admission future can be dropped while awaiting D-Bus ownership.
+        // The connection remains ours until it has been transferred to Peer.
+        if !self.0.is_null() { unsafe { ffi::IceCloseConnection(self.0); } }
     }
 }
 

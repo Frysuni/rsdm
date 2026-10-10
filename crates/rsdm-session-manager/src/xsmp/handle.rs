@@ -1,9 +1,11 @@
 //! Thread ownership and requests for the optional XSMP backend.
 
-use std::{collections::HashSet, sync::mpsc::{self, Receiver, Sender}, thread::JoinHandle};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use super::server;
-use crate::{SessionError, bus::UserManager, control::Reply,
+use tokio::sync::{mpsc::{self, UnboundedReceiver, UnboundedSender}, oneshot};
+
+use super::{interrupt::Interrupt, server};
+use crate::{SessionError, bus::UserManager, control::Reply, deadline::Deadline,
     provider::{Provider, ProviderKind}, runtime::Runtime};
 
 pub enum Notice {
@@ -16,44 +18,74 @@ pub enum Notice {
 pub enum Message {
     Prepare { units: Vec<String>, cancellable: bool, reply: Reply<Vec<String>> },
     Cancel,
-    Stop,
 }
 
 pub struct Handle {
-    sender: Option<Sender<Message>>,
-    thread: Option<JoinHandle<()>>,
-    notices: Receiver<Notice>,
+    sender: Option<UnboundedSender<Message>>,
+    finished: Option<oneshot::Receiver<()>>,
+    notices: UnboundedReceiver<Notice>,
+    interrupt: Arc<Interrupt>,
     pub connected: HashSet<String>,
     pub environment: Vec<(String, String)>,
 }
 
 impl Handle {
-    pub fn start(manager: &UserManager, runtime: &Runtime, provider: &Provider) -> Result<Self, SessionError> {
-        let (sender, messages) = mpsc::channel();
-        let (events, notices) = mpsc::channel();
-        let mut handle = Self { sender: None, thread: None, notices, connected: HashSet::new(), environment: Vec::new() };
+    pub async fn start(manager: &UserManager, runtime: &Runtime, provider: &Provider) -> Result<Self, SessionError> {
+        let (sender, messages) = mpsc::unbounded_channel();
+        let (events, notices) = mpsc::unbounded_channel();
+        let mut handle = Self { sender: None, finished: None, notices, interrupt: Arc::default(),
+            connected: HashSet::new(), environment: Vec::new() };
         if !matches!(provider.kind, ProviderKind::Managed | ProviderKind::Niri) { return Ok(handle); }
+        manager.deadline.remaining(Duration::MAX)?;
 
-        let (ready, started) = mpsc::channel();
-        let manager = manager.clone();
+        let (ready, started) = oneshot::channel();
+        let (finished, completion) = oneshot::channel();
+        handle.sender = Some(sender);
+        handle.finished = Some(completion);
+        let interrupt = handle.interrupt.clone();
+        let worker_manager = manager.clone();
         let runtime = runtime.clone();
-        let worker = std::thread::spawn(move || {
-            let executor = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-                Ok(executor) => executor,
-                Err(error) => { let _ = ready.send(Err(error.into())); return; }
-            };
-            executor.block_on(server::run(manager, runtime, messages, events, ready));
-        });
-        match started.recv() {
-            Ok(Ok(environment)) => {
-                handle.environment = environment;
-                handle.sender = Some(sender);
-                handle.thread = Some(worker);
+        // The completion channel replaces join: dropping a pending startup
+        // still interrupts the worker, and no caller blocks on its thread.
+        let _ = std::thread::spawn(move || {
+            match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(executor) => executor.block_on(server::run(worker_manager, runtime, messages, events, ready, interrupt)),
+                Err(error) => { let _ = ready.send(Err(error.into())); }
             }
-            Ok(Err(error)) => { let _ = worker.join(); return Err(error); }
-            Err(_) => { let _ = worker.join(); return Err(SessionError::State("XSMP server failed during startup".into())); }
-        }
+            let _ = finished.send(());
+        });
+        handle.await_startup(started, &manager.deadline).await?;
         Ok(handle)
+    }
+
+    async fn await_startup(
+        &mut self, started: oneshot::Receiver<Result<Vec<(String, String)>, SessionError>>, deadline: &Deadline,
+    ) -> Result<(), SessionError> {
+        self.environment = deadline.bound(async {
+            tokio::time::timeout(Duration::from_secs(5), started).await
+                .map_err(|_| SessionError::State("XSMP startup timed out".into()))?
+                .map_err(|_| SessionError::State("XSMP server failed during startup".into()))?
+        }).await?;
+        Ok(())
+    }
+
+    pub async fn shutdown(&mut self, deadline: &Deadline) -> Result<(), SessionError> {
+        self.interrupt.stop();
+        self.sender.take();
+
+        let Some(finished) = self.finished.as_mut() else { return Ok(()); };
+        if finished.try_recv().is_ok() {
+            self.finished.take();
+            return Ok(());
+        }
+
+        let result = deadline.bound(async {
+            tokio::time::timeout(Duration::from_millis(500), finished).await
+                .map_err(|_| SessionError::State("XSMP worker shutdown timed out".into()))?
+                .map_err(|_| SessionError::State("XSMP worker failed during shutdown".into()))
+        }).await;
+        if result.is_ok() { self.finished.take(); }
+        result
     }
 
     pub fn available(&self) -> bool { self.sender.is_some() }
@@ -83,7 +115,10 @@ impl Handle {
 
 impl Drop for Handle {
     fn drop(&mut self) {
-        if let Some(sender) = &self.sender { let _ = sender.send(Message::Stop); }
-        if let Some(worker) = self.thread.take() { let _ = worker.join(); }
+        self.interrupt.stop();
     }
 }
+
+#[cfg(test)]
+#[path = "handle_tests.rs"]
+mod tests;

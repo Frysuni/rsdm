@@ -108,6 +108,11 @@ jobs, reconnects, recovery leases, and shared deadlines use Tokio timers;
 Session Manager has no direct async-io, async-channel, or futures-lite dependency.
 Native session launchers use Tokio child processes. Cancelling an exit wait
 retains the owned child and its pidfd for escalation inside the shared deadline.
+XSMP keeps libSM/libICE on one dedicated thread with a current-thread runtime.
+Tokio channels carry its commands, startup and completion. Socket readiness uses
+AsyncFd registrations that restore blocking mode before any FFI call. Shutdown
+interrupts owned socket duplicates and awaits completion inside the shared
+deadline; dropping a handle never joins a possibly blocked thread.
 
 When `session_manager.enabled` is set, step 8 wraps the original command in
 `rsdm session start`, with the selected config and desktop metadata. Its user

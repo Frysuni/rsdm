@@ -45,7 +45,7 @@ impl Fixture {
         let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
         let manager = UserManager::with_connection(connection.clone());
         let provider = Provider { kind: ProviderKind::External, native_unit: None, logout_command: Vec::new() };
-        let xsmp = xsmp::Handle::start(&manager, &runtime, &provider).unwrap();
+        let xsmp = xsmp::Handle::start(&manager, &runtime, &provider).await.unwrap();
         // SAFETY: geteuid has no preconditions.
         let uid = unsafe { libc::geteuid() };
         let record = SessionRecord {

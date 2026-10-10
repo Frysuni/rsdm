@@ -178,11 +178,12 @@ using niri's systemd integration.
 
 ## XSMP
 
-Official builds enable the `xsmp` Cargo feature. Managed WM and native niri
-sessions publish `SESSION_MANAGER` and `ICEAUTHORITY` before app launch. The
-server uses local Unix ICE connections and private cookie authentication.
-Clients must belong to a registered app's verified unit invocation; a claimed
-`SmProcessID` is not ownership evidence.
+Official builds enable `xsmp`. Managed WM and native niri sessions publish
+`SESSION_MANAGER` and `ICEAUTHORITY` before app launch. Local Unix ICE connections
+use private cookie authentication. Clients must belong to a registered app's
+verified unit invocation; claimed `SmProcessID` is not ownership evidence.
+The dedicated Tokio thread awaits socket readiness. Stop interrupts ICE I/O
+during admission and awaits completion inside the session deadline without join.
 
 It implements save, serialized interaction, the shared phase-2 barrier,
 cancellation and `Die`, while still waiting for actual process exit. Explicit
