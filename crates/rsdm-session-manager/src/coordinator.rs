@@ -24,6 +24,7 @@ pub(super) const MAX_COORDINATOR_WORKERS: usize = 8;
 pub(super) enum Work {
     Observed(super::coordinator_probe::ObservationResult),
     Boot(Result<Vec<u8>, SessionError>),
+    TargetsChecked(Result<bool, SessionError>),
     Ready(Result<bool, SessionError>),
     EnvironmentPublished(Result<(), SessionError>),
     Launched(String, Reply<String>, Result<String, SessionError>),
@@ -153,6 +154,7 @@ impl Coordinator {
         match work {
             Work::Observed(result) => self.observation_completed(result).await?,
             Work::Boot(result) => self.boot_completed(result).await?,
+            Work::TargetsChecked(result) => self.targets_checked(result).await?,
             Work::Ready(result) => self.ready_completed(result)?,
             Work::EnvironmentPublished(result) => self.environment_published(result).await?,
             Work::Launched(unit, reply, result) => {

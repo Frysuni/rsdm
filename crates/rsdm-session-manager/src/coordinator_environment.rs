@@ -55,7 +55,7 @@ impl Coordinator {
             Ok(()) if self.lifecycle.phase == SessionPhase::Running => { let _ = reply.try_send(Ok(())); }
             Ok(()) => {
                 self.finalize_replies.push(reply);
-                self.activate().await;
+                self.activate();
             }
         }
         self.publish_next_environment().await

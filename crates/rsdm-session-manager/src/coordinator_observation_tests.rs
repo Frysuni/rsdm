@@ -48,7 +48,7 @@ async fn stale_readiness_cannot_acknowledge_or_restart_a_stopping_session() {
     fixture.coordinator.begin_stop("logout", None).await.unwrap();
 
     fixture.coordinator.complete_readiness(true).await.unwrap();
-    fixture.coordinator.activate().await;
+    fixture.coordinator.activate();
     assert!(response.try_recv().unwrap().is_err());
     assert!(!fixture.coordinator.ready_once);
     assert!(!fixture.coordinator.ready_busy);

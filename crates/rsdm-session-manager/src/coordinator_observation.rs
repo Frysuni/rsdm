@@ -175,14 +175,14 @@ impl Coordinator {
                 readiness.target_active || display_ready
             };
             if ready {
-                self.activate().await;
+                self.activate();
             }
         }
 
         // Explicit finalize may have published its environment while this
         // worker owned the process. Retry that deferred activation now.
         if self.lifecycle.phase == SessionPhase::Starting && !self.finalize_replies.is_empty() {
-            self.activate().await;
+            self.activate();
         }
 
         while self.queued.front().is_some_and(|(_, _, accepted)| {

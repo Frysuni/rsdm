@@ -270,6 +270,9 @@ async fn explicit_finalize_retries_activation_after_observation_returns_the_proc
     assert!(matches!(observation, Work::Observed(_)));
     fixture.coordinator.completed(observation).await.unwrap();
     assert!(fixture.coordinator.ready_busy);
+    let ownership = tokio::time::timeout(Duration::from_secs(2), fixture.coordinator.work.recv()).await.unwrap().unwrap();
+    assert!(matches!(ownership, Work::TargetsChecked(Ok(false))));
+    fixture.coordinator.completed(ownership).await.unwrap();
     let activation = tokio::time::timeout(Duration::from_secs(2), fixture.coordinator.work.recv()).await.unwrap().unwrap();
     assert!(matches!(activation, Work::Ready(Err(_))));
     assert_eq!(state.starts.load(Ordering::SeqCst), 1);

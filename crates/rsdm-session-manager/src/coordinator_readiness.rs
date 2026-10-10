@@ -1,6 +1,6 @@
 //! Activate the session anchor only after compositor readiness is established.
 
-use std::time::Instant;
+use std::{sync::atomic::Ordering, time::Instant};
 
 use rsdm_core::domain::SessionPhase;
 
@@ -9,15 +9,39 @@ use super::{
 };
 
 impl Coordinator {
-    pub async fn activate(&mut self) {
+    pub fn activate(&mut self) {
         if !self.lifecycle.accepts_finalize() || self.ready_busy || self.booting() {
             return;
         }
-        if let Err(error) = self.claim_targets().await {
-            tracing::error!(%error, "cannot persist graphical target ownership");
-            return;
-        }
         self.ready_busy = true;
+        let manager = self.manager.clone();
+        let managed = self.provider.kind == ProviderKind::Managed;
+        let stopping = self.stopping.clone();
+        let events = self.events.clone();
+        self.workers += 1;
+        tokio::spawn(async move {
+            let result = async {
+                if !managed || stopping.load(Ordering::SeqCst) { return Ok(false); }
+                Ok(!manager.active(units::SESSION_TARGET).await?)
+            }.await;
+            let _ = events.send(Work::TargetsChecked(result));
+        });
+    }
+
+    pub(super) async fn targets_checked(&mut self, result: Result<bool, SessionError>) -> Result<(), SessionError> {
+        self.resume_if_cancelled().await?;
+        if !self.lifecycle.accepts_finalize() { return self.complete_readiness(false).await; }
+        let owns_targets = match result {
+            Ok(owns) => owns,
+            Err(error) => return self.ready_completed(Err(error)),
+        };
+        if owns_targets {
+            // Persist intent before the start job can pull in a target,
+            // including when the anchor's activation later fails.
+            self.record.owns_targets = true;
+            self.save().await?;
+        }
+
         let manager = self.manager.clone();
         let provider = self.provider.clone();
         let record = self.record.clone();
@@ -33,15 +57,6 @@ impl Coordinator {
             ).await;
             let _ = events.send(Work::Ready(result));
         });
-    }
-
-    async fn claim_targets(&mut self) -> Result<(), SessionError> {
-        if self.provider.kind == ProviderKind::Managed && !self.manager.active(units::SESSION_TARGET).await? {
-            // Persist ownership intent before the start job can pull in a
-            // target, including when the anchor's activation later fails.
-            self.record.owns_targets = true;
-            self.save().await?;
-        }
         Ok(())
     }
 
@@ -71,7 +86,7 @@ impl Coordinator {
             self.begin_stop("compositor-exited", Some(monotonic_usec()?.saturating_add(5_000_000))).await?;
         }
         if !self.finalize_replies.is_empty() && self.lifecycle.accepts_finalize() {
-            self.activate().await;
+            self.activate();
         }
         Ok(())
     }

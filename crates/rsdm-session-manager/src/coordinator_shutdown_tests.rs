@@ -205,6 +205,9 @@ mod replies;
 #[path = "coordinator_environment_tests.rs"]
 mod environment;
 
+#[path = "coordinator_activation_tests.rs"]
+mod activation;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_rejected_logout_helper_never_stops_or_unrefs_a_conflicting_unit() {
     use crate::helper_start_fixture::{self, Mode};

@@ -126,11 +126,11 @@ Deadline revisions use Tokio watch so every pending operation observes both
 shortening and revocation without retaining watchers after completion.
 The actor, startup, recovery and app workers await recovery record reads and writes
 on blocking filesystem tasks. A record lease, validation and mutation stay within
-one task; D-Bus waits do not retain that lease. The actor still awaits target
-ownership checks during readiness, which can delay cancellation while their
-migration is pending. Registration and
-recovery records precede side effects. InvocationID and pidfd checks keep
-cleanup/signals attached to the recorded processes.
+one task; D-Bus waits do not retain that lease. Target ownership reads run in
+workers; the actor checks the current lifecycle and records ownership before
+allowing anchor activation. Pending reads leave status, stop and cancel available.
+Registration and recovery records precede side effects. InvocationID and pidfd
+checks keep cleanup/signals attached to the recorded processes.
 
 Bare compositors use a transient service and a per-generation anchor. The
 official `niri-session` runs unchanged outside that service and owns its real
