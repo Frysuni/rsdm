@@ -34,16 +34,10 @@ impl Coordinator {
         self.observation_completed(result).await
     }
 
-    pub async fn start_observation(&mut self) {
+    pub fn start_observation(&mut self) {
         if self.observation_busy {
             return;
         }
-        if super::signals::requested() && self.lifecycle.accepts_launch() {
-            if let Err(error) = self.begin_stop("logout", None).await {
-                tracing::error!(%error, "cannot begin signal-triggered session stop");
-            }
-        }
-
         // Keep the process available until the original start worker reports.
         // A retry is observed only after that worker has already completed.
         if self.process.as_ref().is_some_and(|process| process.booting) && !self.pending_boot {

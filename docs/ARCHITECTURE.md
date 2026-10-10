@@ -120,7 +120,8 @@ coordinator owns one generation, separate from logind and desktop-entry IDs.
 Typed D-Bus handlers feed a serial lifecycle actor. Start/stop jobs, app
 preparation, control-bus maintenance and serialized finalize publication run in
 workers. The actor uses Tokio channels and `select!` for requests, completions,
-logind notices, and periodic observation. Reply delivery and recovery worker
+logind notices, termination signals, and periodic observation. SIGTERM/SIGINT use
+Tokio signal streams after session exec. Reply delivery and recovery worker
 draining share their original budgets through asynchronous waits.
 Deadline revisions use Tokio watch so every pending operation observes both
 shortening and revocation without retaining watchers after completion.

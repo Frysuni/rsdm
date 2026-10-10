@@ -75,9 +75,9 @@ pub(super) struct Coordinator {
 }
 
 pub(super) async fn start(argv: &[String], cfg: &SessionManagerConfig, options: &StartOptions) -> Result<i32, SessionError> {
+    let mut signals = super::signals::Signals::new()?;
     let mut coordinator = Coordinator::create(argv, cfg, options).await?;
-    super::signals::install();
-    let result = coordinator.run().await;
+    let result = coordinator.run(&mut signals).await;
     if result.as_ref().map_or(true, |code| *code != 0) {
         coordinator.recover().await;
     }
@@ -89,7 +89,7 @@ pub(super) async fn start(argv: &[String], cfg: &SessionManagerConfig, options: 
 }
 
 impl Coordinator {
-    async fn run(&mut self) -> Result<i32, SessionError> {
+    async fn run(&mut self, signals: &mut super::signals::Signals) -> Result<i32, SessionError> {
         let mut tick = tokio::time::interval(Duration::from_millis(100));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut notices_open = true;
@@ -107,10 +107,14 @@ impl Coordinator {
                     Some(notice) => self.shutdown_notice(notice).await?,
                     None => notices_open = false,
                 },
+                received = signals.recv() => {
+                    received?;
+                    if self.lifecycle.accepts_launch() { self.begin_stop("logout", None).await?; }
+                }
                 _ = tick.tick() => {
                     self.notifications().await?;
                     self.control_bus.maintain();
-                    self.start_observation().await;
+                    self.start_observation();
                 }
             }
             if self.lifecycle.phase == SessionPhase::Closed {

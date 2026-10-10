@@ -1,17 +1,31 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+//! Termination signals are consumed by the serial lifecycle actor.
 
-static TERMINATE: AtomicBool = AtomicBool::new(false);
+use tokio::signal::unix::{Signal, SignalKind, signal};
 
-pub(super) fn install() {
-    TERMINATE.store(false, Ordering::SeqCst);
-    // SAFETY: the handler performs only an atomic store.
-    unsafe {
-        let handler = on_terminate as *const () as libc::sighandler_t;
-        libc::signal(libc::SIGTERM, handler);
-        libc::signal(libc::SIGINT, handler);
+use super::SessionError;
+
+pub(super) struct Signals {
+    terminate: Signal,
+    interrupt: Signal,
+}
+
+impl Signals {
+    pub(super) fn new() -> Result<Self, SessionError> {
+        Ok(Self {
+            terminate: signal(SignalKind::terminate())?,
+            interrupt: signal(SignalKind::interrupt())?,
+        })
+    }
+
+    pub(super) async fn recv(&mut self) -> Result<(), SessionError> {
+        let received = tokio::select! {
+            received = self.terminate.recv() => received,
+            received = self.interrupt.recv() => received,
+        };
+        received.ok_or_else(|| SessionError::State("session termination signal stream closed".into()))
     }
 }
 
-pub(super) fn requested() -> bool { TERMINATE.swap(false, Ordering::SeqCst) }
-
-extern "C" fn on_terminate(_signal: libc::c_int) { TERMINATE.store(true, Ordering::SeqCst); }
+#[cfg(test)]
+#[path = "signals_tests.rs"]
+mod tests;

@@ -127,6 +127,31 @@ pkgs.testers.runNixOSTest {
         machine.fail("test -e " + runtime + "/display-alive")
         machine.wait_until_fails("systemctl is-active --quiet rsdm-test-session")
 
+    with subtest("termination signals prepare applications before stopping the compositor"):
+        for signal in ["TERM", "INT"]:
+            session = start_session()
+            name = "signal-" + signal.lower()
+            machine.succeed(session + "rsdm app -- ${application} " + name)
+            machine.wait_for_file(runtime + "/app-" + name + "-ready")
+            machine.succeed("systemctl kill --kill-whom=main --signal=" + signal + " rsdm-test-session")
+            machine.wait_until_fails("systemctl is-active --quiet rsdm-test-session")
+            machine.succeed("grep -q saved " + runtime + "/app-" + name)
+            machine.fail("test -e " + runtime + "/display-alive")
+
+    with subtest("signal-triggered preparation can cancel and a later signal can stop the session"):
+        session = start_session()
+        machine.succeed(session + "rsdm app --shutdown-timeout 1 --on-timeout cancel -- ${stubborn}")
+        machine.wait_for_file(runtime + "/stubborn-ready")
+        machine.succeed("systemctl kill --kill-whom=main --signal=TERM rsdm-test-session")
+        machine.wait_until_succeeds(session + "rsdm session status | grep ': preparing '")
+        machine.wait_until_succeeds(session + "rsdm session status | grep ': running '")
+        machine.succeed("test -e " + runtime + "/display-alive")
+        machine.succeed(user + "systemctl --user is-active --quiet app-rsdm-*service")
+        machine.succeed(user + "systemctl --user kill --signal=KILL app-rsdm-*service")
+        machine.succeed("systemctl kill --kill-whom=main --signal=INT rsdm-test-session")
+        machine.wait_until_fails("systemctl is-active --quiet rsdm-test-session")
+        machine.fail("test -e " + runtime + "/display-alive")
+
     with subtest("a cancel timeout preserves the compositor and protected application"):
         session = start_session()
         machine.succeed(session + "rsdm app --shutdown-timeout 1 --on-timeout cancel -- ${stubborn}")

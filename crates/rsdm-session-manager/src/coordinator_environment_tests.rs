@@ -184,7 +184,7 @@ async fn cancelling_logout_preserves_an_accepted_startup_finalize_until_readines
     assert_eq!(fixture.coordinator.finalize_replies.len(), 1);
     state.ready.store(true, Ordering::SeqCst);
     fixture.coordinator.completed(Work::Ready(Ok(false))).await.unwrap();
-    fixture.coordinator.start_observation().await;
+    fixture.coordinator.start_observation();
     let work = tokio::time::timeout(Duration::from_secs(2), fixture.coordinator.work.recv()).await.unwrap().unwrap();
     fixture.coordinator.completed(work).await.unwrap();
     assert!(response.try_recv().unwrap().is_ok());

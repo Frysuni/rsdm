@@ -76,7 +76,7 @@ pub(super) async fn install_manager(fixture: &Fixture) -> Arc<ManagerState> {
 }
 
 async fn complete_observation(fixture: &mut Fixture) {
-    fixture.coordinator.start_observation().await;
+    fixture.coordinator.start_observation();
     let work = tokio::time::timeout(Duration::from_secs(8), fixture.coordinator.work.recv()).await.unwrap().unwrap();
     assert!(matches!(work, Work::Observed(_)));
     fixture.coordinator.completed(work).await.unwrap();
@@ -258,7 +258,7 @@ async fn explicit_finalize_retries_activation_after_observation_returns_the_proc
     fixture.coordinator.ready_once = false;
     // No published display or automatic readiness: only finalize can activate.
     fixture.coordinator.ready_deadline = Instant::now();
-    fixture.coordinator.start_observation().await;
+    fixture.coordinator.start_observation();
     assert!(fixture.coordinator.observation_busy);
     let (reply, mut response) = tokio::sync::mpsc::channel(1);
     fixture.coordinator.environment_reply = Some(Reply::for_test(reply));

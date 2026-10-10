@@ -15,7 +15,7 @@ async fn observation_preserves_the_process_until_the_start_worker_completes() {
     ).unwrap());
     fixture.coordinator.workers = 1;
 
-    fixture.coordinator.start_observation().await;
+    fixture.coordinator.start_observation();
     assert!(!fixture.coordinator.observation_busy);
     assert!(fixture.coordinator.process.is_some());
     fixture.coordinator.completed(Work::Boot(Ok(vec![3; 16]))).await.unwrap();
@@ -29,7 +29,7 @@ async fn stopping_does_not_start_observations_that_starve_preparation() {
     let mut fixture = Fixture::new().await;
     fixture.coordinator.begin_stop("logout", None).await.unwrap();
 
-    fixture.coordinator.start_observation().await;
+    fixture.coordinator.start_observation();
     fixture.coordinator.advance().unwrap();
     assert!(!fixture.coordinator.observation_busy);
     assert!(fixture.coordinator.preparing);
@@ -60,7 +60,7 @@ async fn stale_readiness_cannot_acknowledge_or_restart_a_stopping_session() {
 async fn an_inflight_observation_returns_ownership_before_shutdown_advances() {
     let mut fixture = Fixture::new().await;
     completion::install_manager(&fixture).await;
-    fixture.coordinator.start_observation().await;
+    fixture.coordinator.start_observation();
     assert!(fixture.coordinator.observation_busy);
     fixture.coordinator.begin_stop("logout", None).await.unwrap();
     fixture.coordinator.advance().unwrap();
@@ -68,7 +68,7 @@ async fn an_inflight_observation_returns_ownership_before_shutdown_advances() {
 
     let work = tokio::time::timeout(Duration::from_secs(8), fixture.coordinator.work.recv()).await.unwrap().unwrap();
     fixture.coordinator.completed(work).await.unwrap();
-    fixture.coordinator.start_observation().await;
+    fixture.coordinator.start_observation();
     fixture.coordinator.advance().unwrap();
     assert!(!fixture.coordinator.observation_busy);
     assert!(fixture.coordinator.preparing);
@@ -84,7 +84,7 @@ async fn recovery_reclaims_the_launcher_from_a_completed_observation() {
         &["true".into()], &[], &fixture.directory, &fixture.coordinator.provider,
         "unused.service".into(),
     ).unwrap());
-    fixture.coordinator.start_observation().await;
+    fixture.coordinator.start_observation();
     assert!(fixture.coordinator.process.is_none());
     let work = tokio::time::timeout(Duration::from_secs(8), fixture.coordinator.work.recv()).await.unwrap().unwrap();
     assert!(matches!(work, Work::Observed(_)));
