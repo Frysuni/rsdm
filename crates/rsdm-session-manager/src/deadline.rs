@@ -1,28 +1,22 @@
 //! A shared monotonic deadline that wakes all pending operations when revised.
 
-use std::{future::Future, sync::{Arc, Mutex}, time::Duration};
+use std::{future::Future, time::Duration};
 
-use async_channel::{Receiver, Sender};
-use futures_lite::future;
+use tokio::sync::watch;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(super) struct Deadline {
-    state: Arc<Mutex<State>>,
+    state: watch::Sender<u64>,
     reserve_usec: u64,
 }
 
-struct State {
-    usec: u64,
-    changed: (Sender<()>, Receiver<()>),
-}
-
-impl Default for State {
-    fn default() -> Self { Self { usec: 0, changed: async_channel::bounded(1) } }
+impl Default for Deadline {
+    fn default() -> Self { Self { state: watch::channel(0).0, reserve_usec: 0 } }
 }
 
 impl Deadline {
     pub fn get(&self) -> u64 {
-        self.effective(self.state.lock().unwrap_or_else(|error| error.into_inner()).usec)
+        self.effective(*self.state.borrow())
     }
 
     // A phase shares revisions and revocation with the absolute deadline, but
@@ -40,15 +34,11 @@ impl Deadline {
     }
 
     pub fn set(&self, usec: u64) {
-        let old = {
-            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            if state.usec == usec { return; }
-            state.usec = usec;
-            std::mem::replace(&mut state.changed, async_channel::bounded(1))
-        };
-        // Closing wakes every receiver clone, rather than notifying just one
-        // operation. Each waiter then snapshots the new deadline and channel.
-        old.0.close();
+        self.state.send_if_modified(|current| {
+            if *current == usec { return false; }
+            *current = usec;
+            true
+        });
     }
 
     pub fn remaining(&self, maximum: Duration) -> zbus::Result<Duration> {
@@ -60,17 +50,19 @@ impl Deadline {
     ) -> Result<T, E>
     where E: From<zbus::Error> {
         self.remaining(Duration::MAX)?;
-        future::or(operation, async { Err(self.expired().await.into()) }).await
+        tokio::select! {
+            biased;
+            result = operation => result,
+            error = self.expired() => Err(error.into()),
+        }
     }
 
     async fn expired(&self) -> zbus::Error {
+        let mut changed = self.state.subscribe();
         loop {
-            let (usec, changed) = {
-                let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-                (self.effective(state.usec), state.changed.1.clone())
-            };
+            let usec = self.effective(*changed.borrow_and_update());
             if usec == 0 {
-                let _ = changed.recv().await;
+                let _ = changed.changed().await;
                 continue;
             }
             let remaining = match remaining_until(usec, Duration::MAX) {
@@ -78,8 +70,10 @@ impl Deadline {
                 Err(error) if self.get() == usec => return error,
                 Err(_) => continue,
             };
-            future::or(async { async_io::Timer::after(remaining).await; },
-                async { let _ = changed.recv().await; }).await;
+            tokio::select! {
+                _ = async_io::Timer::after(remaining) => {},
+                _ = changed.changed() => {},
+            }
         }
     }
 }

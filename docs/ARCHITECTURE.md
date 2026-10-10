@@ -111,6 +111,8 @@ preparation, control-bus maintenance and serialized finalize publication run in
 workers. The actor uses Tokio channels and `select!` for requests, completions,
 logind notices, and periodic observation. Reply delivery and recovery worker
 draining share their original budgets through asynchronous waits.
+Deadline revisions use Tokio watch so every pending operation observes both
+shortening and revocation without retaining watchers after completion.
 Observation and readiness still perform synchronous manager reads;
 their timeouts can delay cancellation. Registration and
 recovery records precede side effects. InvocationID and pidfd checks keep

@@ -1,8 +1,10 @@
 use std::{
     pin::Pin,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{Arc, atomic::{AtomicUsize, Ordering}},
     task::{Context, Poll, Wake, Waker},
 };
+
+use futures_lite::future;
 
 use super::*;
 use crate::processes::monotonic_usec;
@@ -75,9 +77,9 @@ fn completed_and_dropped_operations_release_their_deadline_watchers() {
         let mut operation = Box::pin(deadline.bound(std::future::pending::<zbus::Result<()>>()));
         assert!(async_io::block_on(future::poll_once(Pin::as_mut(&mut operation))).is_none());
         drop(operation);
-        assert_eq!(deadline.state.lock().unwrap().changed.1.receiver_count(), 1);
+        assert_eq!(deadline.state.receiver_count(), 0);
         assert!(async_io::block_on(deadline.bound(async { Ok::<_, zbus::Error>(()) })).is_ok());
-        assert_eq!(deadline.state.lock().unwrap().changed.1.receiver_count(), 1);
+        assert_eq!(deadline.state.receiver_count(), 0);
     }
 }
 
