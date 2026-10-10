@@ -168,6 +168,15 @@ async fn cancellation_while_waiting_for_a_record_lease_does_not_dispatch_quit() 
     let mut preparation = Box::pin(begin_preparation(
         &fixture.manager, &fixture.runtime, &fixture.app.unit, &control,
     ));
+    let queried = async {
+        while fixture.queries.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    };
+    tokio::select! {
+        result = tokio::time::timeout(Duration::from_secs(2), queried) => result.unwrap(),
+        result = &mut preparation => panic!("contended preparation completed: {}", result.is_ok()),
+    }
     tokio::select! {
         biased;
         _ = tokio::time::sleep(Duration::from_millis(20)) => {},
