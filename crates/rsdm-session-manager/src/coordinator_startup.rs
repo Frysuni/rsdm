@@ -23,7 +23,7 @@ impl Coordinator {
         let lease = super::session_lease::SessionLease::acquire()?;
         let (endpoint, requests) = control::Endpoint::channel(identity.uid);
         // Acquire the one-session lease before changing shared manager state.
-        let bus = control::ControlServer::start(endpoint)?;
+        let bus = control::ControlServer::start(endpoint).await?;
         let manager = UserManager::connect()?;
         super::processes::require_pidfds()?;
         if manager.active(units::SESSION_TARGET)? {

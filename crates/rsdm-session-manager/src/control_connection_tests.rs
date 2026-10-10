@@ -1,70 +1,71 @@
 //! Suspend the health reply on a private peer, without touching the user bus.
 
-use std::{os::unix::net::UnixStream, sync::mpsc};
+use std::{os::unix::net::UnixStream, sync::Arc};
+
+use tokio::sync::{Notify, mpsc};
 
 use super::*;
 
 struct Bus {
-    entered: mpsc::Sender<()>,
-    resume: async_channel::Receiver<()>,
+    entered: mpsc::UnboundedSender<()>,
+    resume: Arc<Notify>,
 }
 
 #[zbus_macros::interface(name = "org.freedesktop.DBus")]
 impl Bus {
     async fn get_id(&self) -> &str {
         let _ = self.entered.send(());
-        let _ = self.resume.recv().await;
+        self.resume.notified().await;
         "private-peer"
     }
 }
 
-fn fixture() -> (Server, Connection, mpsc::Receiver<()>, async_channel::Sender<()>) {
-    let (entered, ready) = mpsc::channel();
-    let (resume, resumed) = async_channel::bounded(1);
+async fn fixture() -> (Server, Connection, mpsc::UnboundedReceiver<()>, Arc<Notify>) {
+    let (entered, ready) = mpsc::unbounded_channel();
+    let resume = Arc::new(Notify::new());
+    let bus = Bus { entered, resume: resume.clone() };
     let (server_socket, client_socket) = UnixStream::pair().unwrap();
-    let peer = thread::spawn(move || async_io::block_on(async {
+    let peer = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p()
             .server(zbus::Guid::generate()).unwrap()
-            .serve_at("/org/freedesktop/DBus", Bus { entered, resume: resumed }).unwrap()
+            .serve_at("/org/freedesktop/DBus", bus).unwrap()
             .build().await.unwrap()
-    }));
-    let connection = async_io::block_on(async {
-        zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()
     });
+    let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
     // SAFETY: geteuid has no preconditions.
     let (endpoint, _received) = Endpoint::channel(unsafe { libc::geteuid() });
-    (Server::with_connection(connection, endpoint), peer.join().unwrap(), ready, resume)
+    (Server::with_connection(connection, endpoint), peer.await.unwrap(), ready, resume)
 }
 
-#[test]
-fn pending_health_checks_leave_the_caller_responsive() {
-    let (mut server, _peer, ready, resume) = fixture();
+#[tokio::test]
+async fn pending_health_checks_leave_the_caller_responsive() {
+    let (mut server, _peer, mut ready, resume) = fixture().await;
     server.start_maintenance();
-    ready.recv_timeout(Duration::from_secs(2)).unwrap();
+    tokio::time::timeout(Duration::from_secs(2), ready.recv()).await.unwrap().unwrap();
     let before = Instant::now();
     server.maintain();
     assert!(before.elapsed() < Duration::from_millis(100));
     assert!(server.pending.is_some());
 
-    resume.try_send(()).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while server.pending.is_some() && Instant::now() < deadline {
-        server.maintain();
-        thread::sleep(Duration::from_millis(5));
-    }
-    assert!(server.pending.is_none());
+    resume.notify_one();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while server.pending.is_some() {
+            server.maintain();
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }).await.unwrap();
 }
 
-#[test]
-fn closing_the_result_channel_cancels_its_pending_worker() {
-    let (mut server, _peer, ready, _resume) = fixture();
+#[tokio::test]
+async fn dropping_the_server_cancels_its_pending_worker() {
+    let (mut server, _peer, mut ready, _resume) = fixture().await;
     server.start_maintenance();
-    ready.recv_timeout(Duration::from_secs(2)).unwrap();
-    let pending = server.pending.take().unwrap();
-    pending.close();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while pending.sender_count() != 0 && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(5));
-    }
-    assert_eq!(pending.sender_count(), 0);
+    tokio::time::timeout(Duration::from_secs(2), ready.recv()).await.unwrap().unwrap();
+    let worker = server.pending.as_ref().unwrap().worker.abort_handle();
+    drop(server);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !worker.is_finished() {
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
 }
