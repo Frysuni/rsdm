@@ -1,11 +1,13 @@
-use std::{future::Future, io::{BufRead, BufReader}, pin::Pin, process::Stdio, task::{Context, Waker}};
+use std::{future::Future, pin::Pin, process::Stdio, task::{Context, Waker}, time::Instant};
+
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::*;
 
 struct Launcher(Child);
 
 impl Launcher {
-    fn new(ignore_term: bool) -> Self {
+    async fn new(ignore_term: bool) -> Self {
         let script = if ignore_term {
             "trap '' TERM; printf 'ready\\n'; exec sleep 30"
         } else {
@@ -13,7 +15,7 @@ impl Launcher {
         };
         let mut child = Command::new("sh").args(["-c", script]).stdout(Stdio::piped()).spawn().unwrap();
         let mut ready = String::new();
-        BufReader::new(child.stdout.take().unwrap()).read_line(&mut ready).unwrap();
+        BufReader::new(child.stdout.take().unwrap()).read_line(&mut ready).await.unwrap();
         assert_eq!(ready, "ready\n");
         Self(child)
     }
@@ -26,8 +28,7 @@ impl Launcher {
 
 impl Drop for Launcher {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        let _ = self.0.start_kill();
     }
 }
 
@@ -41,15 +42,15 @@ fn assert_timed_out(result: Result<(), SessionError>) {
 
 #[tokio::test]
 async fn an_ordinary_launcher_is_terminated_and_reaped() {
-    let mut launcher = Launcher::new(false);
+    let mut launcher = Launcher::new(false).await;
     stop_launcher(&mut launcher.0, &Deadline::default()).await.unwrap();
     assert_eq!(launcher.status().await.signal(), Some(libc::SIGTERM));
 }
 
 #[tokio::test]
 async fn an_already_reaped_launcher_needs_no_shutdown_budget() {
-    let mut launcher = Launcher::new(false);
-    launcher.0.kill().unwrap();
+    let mut launcher = Launcher::new(false).await;
+    launcher.0.kill().await.unwrap();
     let status = launcher.status().await;
     let deadline = Deadline::default();
     deadline.set(1);
@@ -59,8 +60,8 @@ async fn an_already_reaped_launcher_needs_no_shutdown_budget() {
 
 #[tokio::test]
 async fn an_expired_budget_skips_grace_and_kills_only_the_owned_launcher() {
-    let mut launcher = Launcher::new(true);
-    let mut unrelated = Launcher::new(true);
+    let mut launcher = Launcher::new(true).await;
+    let mut unrelated = Launcher::new(true).await;
     let deadline = Deadline::default();
     deadline.set(1);
     let before = Instant::now();
@@ -68,11 +69,12 @@ async fn an_expired_budget_skips_grace_and_kills_only_the_owned_launcher() {
     assert!(before.elapsed() < Duration::from_secs(1));
     assert_eq!(launcher.status().await.signal(), Some(libc::SIGKILL));
     assert!(unrelated.0.try_wait().unwrap().is_none());
+    unrelated.0.kill().await.unwrap();
 }
 
 #[tokio::test]
 async fn revising_the_deadline_interrupts_an_active_launcher_wait() {
-    let mut launcher = Launcher::new(true);
+    let mut launcher = Launcher::new(true).await;
     let deadline = Deadline::default();
     let mut stopping = Box::pin(stop_launcher(&mut launcher.0, &deadline));
     assert_pending(stopping.as_mut());
@@ -85,11 +87,31 @@ async fn revising_the_deadline_interrupts_an_active_launcher_wait() {
 
 #[tokio::test]
 async fn escalation_does_not_add_a_new_wait_after_the_shared_budget() {
-    let mut launcher = Launcher::new(true);
+    let mut launcher = Launcher::new(true).await;
     let deadline = Deadline::default();
     deadline.set(super::super::processes::monotonic_usec().unwrap() + 50_000);
     let before = Instant::now();
     assert_timed_out(stop_launcher(&mut launcher.0, &deadline).await);
     assert!(before.elapsed() < Duration::from_secs(1));
+    assert_eq!(launcher.status().await.signal(), Some(libc::SIGKILL));
+}
+
+#[tokio::test]
+async fn cancelling_a_pending_wait_keeps_the_child_available_for_owned_escalation() {
+    let mut launcher = Launcher::new(true).await;
+    let pid = launcher.0.id().unwrap();
+    let mut waiting = Box::pin(wait_for_launcher(&mut launcher.0, Duration::from_secs(5)));
+    tokio::select! {
+        biased;
+        _ = tokio::time::sleep(Duration::from_millis(20)) => {},
+        result = &mut waiting => panic!("launcher wait completed before cancellation: {result:?}"),
+    }
+    drop(waiting);
+    assert_eq!(launcher.0.id(), Some(pid));
+    assert!(launcher.0.try_wait().unwrap().is_none());
+
+    let deadline = Deadline::default();
+    deadline.set(1);
+    assert_timed_out(stop_launcher(&mut launcher.0, &deadline).await);
     assert_eq!(launcher.status().await.signal(), Some(libc::SIGKILL));
 }

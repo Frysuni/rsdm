@@ -106,6 +106,8 @@ The workspace uses zbus's Tokio backend with its blocking API disabled.
 Private bus fixtures use Tokio sockets and asynchronous setup. User-manager
 jobs, reconnects, recovery leases, and shared deadlines use Tokio timers;
 Session Manager has no direct async-io, async-channel, or futures-lite dependency.
+Native session launchers use Tokio child processes. Cancelling an exit wait
+retains the owned child and its pidfd for escalation inside the shared deadline.
 
 When `session_manager.enabled` is set, step 8 wraps the original command in
 `rsdm session start`, with the selected config and desktop metadata. Its user

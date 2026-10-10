@@ -1,6 +1,8 @@
 //! Observing a managed compositor or an unchanged native session launcher.
 
-use std::{os::unix::process::ExitStatusExt, path::Path, process::{Child, Command, ExitStatus}, time::{Duration, Instant}};
+use std::{os::unix::process::ExitStatusExt, path::Path, process::ExitStatus, time::Duration};
+
+use tokio::process::{Child, Command};
 
 use super::{SessionError, bus::UserManager, deadline::Deadline, processes::ProcessHandle, provider::{Provider, ProviderKind}};
 
@@ -82,7 +84,8 @@ async fn stop_launcher(child: &mut Child, deadline: &Deadline) -> Result<(), Ses
     if child.try_wait()?.is_some() { return Ok(()); }
     // The unreaped child cannot be replaced before this handle is opened.
     // Keep that same handle for escalation, even when the budget expires.
-    let handle = ProcessHandle::open(child.id())?;
+    let Some(pid) = child.id() else { return Ok(()); };
+    let handle = ProcessHandle::open(pid)?;
     let graceful = deadline.bound(async {
         if let Some(handle) = &handle { handle.signal(libc::SIGTERM)?; }
         wait_for_launcher(child, Duration::from_secs(5)).await
@@ -101,12 +104,12 @@ async fn stop_launcher(child: &mut Child, deadline: &Deadline) -> Result<(), Ses
 }
 
 async fn wait_for_launcher(child: &mut Child, timeout: Duration) -> Result<bool, SessionError> {
-    let limit = Instant::now() + timeout;
-    loop {
-        if child.try_wait()?.is_some() { return Ok(true); }
-        let now = Instant::now();
-        if now >= limit { return Ok(false); }
-        tokio::time::sleep_until((now + Duration::from_millis(50)).min(limit).into()).await;
+    match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(result) => {
+            result?;
+            Ok(true)
+        },
+        Err(_) => Ok(false),
     }
 }
 
