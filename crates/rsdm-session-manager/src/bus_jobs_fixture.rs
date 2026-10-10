@@ -1,6 +1,6 @@
 //! Private user-manager fixture for job and start-ownership regressions.
 
-use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}}, thread};
+use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}}};
 
 use super::*;
 
@@ -159,21 +159,19 @@ impl Service {
     fn exec_main_status(&self) -> i32 { self.0.status }
 }
 
-pub(super) fn fixture(state: State) -> (UserManager, Connection, Arc<State>) {
+pub(super) async fn fixture(state: State) -> (UserManager, Connection, Arc<State>) {
     let state = Arc::new(state);
     let shared = state.clone();
     let (server_socket, client_socket) = UnixStream::pair().unwrap();
-    let server = thread::spawn(move || async_io::block_on(async {
+    let server = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
             .serve_at(MANAGER_PATH, Manager(shared.clone())).unwrap()
             .serve_at("/unit", Unit(shared.clone())).unwrap()
             .serve_at("/unit", Service(shared)).unwrap().build().await.unwrap()
-    }));
-    let connection = async_io::block_on(async {
-        zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()
     });
-    let server = server.join().unwrap();
-    let manager = async_io::block_on(UserManager::from_connection(connection)).unwrap();
+    let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    let server = server.await.unwrap();
+    let manager = UserManager::from_connection(connection).await.unwrap();
     (manager, server, state)
 }
 

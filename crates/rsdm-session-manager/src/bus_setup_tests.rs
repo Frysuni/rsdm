@@ -1,4 +1,4 @@
-use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicUsize, Ordering}}, thread};
+use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicUsize, Ordering}}};
 
 use super::*;
 use crate::processes::monotonic_usec;
@@ -23,17 +23,17 @@ impl Manager {
     }
 }
 
-fn fixture(version_delay: Duration, subscribe_delay: Duration) -> (Connection, Connection, Arc<AtomicUsize>) {
+async fn fixture(version_delay: Duration, subscribe_delay: Duration) -> (Connection, Connection, Arc<AtomicUsize>) {
     let (server_socket, client_socket) = UnixStream::pair().unwrap();
     let subscriptions = Arc::new(AtomicUsize::new(0));
     let state = subscriptions.clone();
-    let server = thread::spawn(move || async_io::block_on(async {
+    let server = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
             .serve_at(MANAGER_PATH, Manager { version_delay, subscribe_delay, subscriptions: state }).unwrap()
             .build().await.unwrap()
-    }));
-    let connection = async_io::block_on(zbus::connection::Builder::unix_stream(client_socket).p2p().build()).unwrap();
-    (connection, server.join().unwrap(), subscriptions)
+    });
+    let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    (connection, server.await.unwrap(), subscriptions)
 }
 
 fn short_deadline() -> Deadline {
@@ -47,46 +47,46 @@ fn assert_timed_out(result: Result<UserManager, SessionError>, before: Instant) 
     assert!(before.elapsed() < Duration::from_secs(1));
 }
 
-#[test]
-fn expired_setup_does_not_even_poll_the_connection_builder() {
+#[tokio::test]
+async fn expired_setup_does_not_even_poll_the_connection_builder() {
     let deadline = Deadline::default();
     deadline.set(1);
     let calls = AtomicUsize::new(0);
     let before = Instant::now();
-    let result = async_io::block_on(UserManager::connect_with(async {
+    let result = UserManager::connect_with(async {
         calls.fetch_add(1, Ordering::SeqCst);
         std::future::pending().await
-    }, deadline));
+    }, deadline).await;
     assert_timed_out(result, before);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
-#[test]
-fn the_recovery_budget_includes_a_hung_bus_handshake() {
+#[tokio::test]
+async fn the_recovery_budget_includes_a_hung_bus_handshake() {
     let (_silent_peer, client_socket) = UnixStream::pair().unwrap();
     let before = Instant::now();
-    let result = async_io::block_on(UserManager::connect_with(
+    let result = UserManager::connect_with(
         zbus::connection::Builder::unix_stream(client_socket).p2p().build(), short_deadline(),
-    ));
+    ).await;
     assert_timed_out(result, before);
 }
 
-#[test]
-fn the_recovery_budget_includes_version_validation_and_subscription() {
+#[tokio::test]
+async fn the_recovery_budget_includes_version_validation_and_subscription() {
     for (version, subscribe, expected) in [(2, 0, 0), (0, 2, 1)] {
-        let (connection, _server, subscriptions) = fixture(Duration::from_secs(version), Duration::from_secs(subscribe));
+        let (connection, _server, subscriptions) = fixture(Duration::from_secs(version), Duration::from_secs(subscribe)).await;
         let before = Instant::now();
-        let result = async_io::block_on(UserManager::connect_with(async { Ok(connection) }, short_deadline()));
+        let result = UserManager::connect_with(async { Ok(connection) }, short_deadline()).await;
         assert_timed_out(result, before);
         assert_eq!(subscriptions.load(Ordering::SeqCst), expected);
     }
 }
 
-#[test]
-fn a_connected_manager_keeps_the_deadline_source_used_during_setup() {
-    let (connection, _server, _) = fixture(Duration::ZERO, Duration::ZERO);
+#[tokio::test]
+async fn a_connected_manager_keeps_the_deadline_source_used_during_setup() {
+    let (connection, _server, _) = fixture(Duration::ZERO, Duration::ZERO).await;
     let deadline = Deadline::default();
-    let manager = async_io::block_on(UserManager::connect_with(async { Ok(connection) }, deadline.clone())).unwrap();
+    let manager = UserManager::connect_with(async { Ok(connection) }, deadline.clone()).await.unwrap();
     deadline.set(1);
     assert_eq!(manager.deadline.get(), 1);
     assert!(manager.deadline.remaining(Duration::from_secs(1)).is_err());

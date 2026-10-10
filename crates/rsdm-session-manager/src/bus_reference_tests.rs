@@ -2,9 +2,9 @@
 
 use super::*;
 
-#[test]
-fn abandoning_an_unsubmitted_intent_removes_only_its_reference() {
-    let (connection, _server, _) = fixture(state());
+#[tokio::test]
+async fn abandoning_an_unsubmitted_intent_removes_only_its_reference() {
+    let (connection, _server, _) = fixture(state()).await;
     let owner = Transport::new(connection);
     owner.stage_reference("existing.service", "ours".into()).submitted();
     let intent = owner.stage_reference("rejected.service", "ours".into());
@@ -13,9 +13,9 @@ fn abandoning_an_unsubmitted_intent_removes_only_its_reference() {
     assert!(owner.has_reference("existing.service"));
 }
 
-#[test]
-fn rejecting_a_second_attempt_preserves_the_original_invocation() {
-    let (connection, _server, _) = fixture(state());
+#[tokio::test]
+async fn rejecting_a_second_attempt_preserves_the_original_invocation() {
+    let (connection, _server, _) = fixture(state()).await;
     let owner = Transport::new(connection);
     owner.stage_reference("example.service", "ours".into()).submitted();
     owner.remember("example.service", &[1; 16]);
@@ -28,9 +28,9 @@ fn rejecting_a_second_attempt_preserves_the_original_invocation() {
     assert_eq!(reference.invocation, Some(vec![1; 16]));
 }
 
-#[test]
-fn overlapping_rejections_remove_the_intent_only_after_both_settle() {
-    let (connection, _server, _) = fixture(state());
+#[tokio::test]
+async fn overlapping_rejections_remove_the_intent_only_after_both_settle() {
+    let (connection, _server, _) = fixture(state()).await;
     let owner = Transport::new(connection);
     let mut first = owner.stage_reference("example.service", "ours".into());
     let mut second = owner.stage_reference("example.service", "ours".into());
@@ -42,10 +42,10 @@ fn overlapping_rejections_remove_the_intent_only_after_both_settle() {
     assert!(!owner.has_reference("example.service"));
 }
 
-#[test]
-fn an_accepted_overlap_survives_rejection_in_either_completion_order() {
+#[tokio::test]
+async fn an_accepted_overlap_survives_rejection_in_either_completion_order() {
     for accepted_first in [false, true] {
-        let (connection, _server, _) = fixture(state());
+        let (connection, _server, _) = fixture(state()).await;
         let owner = Transport::new(connection);
         let mut rejected = owner.stage_reference("example.service", "ours".into());
         let mut accepted = Some(owner.stage_reference("example.service", "ours".into()));
@@ -59,9 +59,9 @@ fn an_accepted_overlap_survives_rejection_in_either_completion_order() {
     }
 }
 
-#[test]
-fn rejecting_an_old_intent_cannot_remove_a_replacement_claim() {
-    let (connection, _server, _) = fixture(state());
+#[tokio::test]
+async fn rejecting_an_old_intent_cannot_remove_a_replacement_claim() {
+    let (connection, _server, _) = fixture(state()).await;
     let owner = Transport::new(connection);
     let old = owner.stage_reference("example.service", "ours".into());
     owner.forget("example.service");
@@ -72,14 +72,14 @@ fn rejecting_an_old_intent_cannot_remove_a_replacement_claim() {
     assert!(!owner.has_reference("example.service"));
 }
 
-#[test]
-fn a_published_candidate_reference_is_retained_until_ordinary_cleanup() {
-    let (original, _original_server, _) = fixture(state());
+#[tokio::test]
+async fn a_published_candidate_reference_is_retained_until_ordinary_cleanup() {
+    let (original, _original_server, _) = fixture(state()).await;
     let owner = Transport::new(original);
     let mut intent = owner.stage_reference("example.service", "ours".into());
     intent.submitted();
-    let (candidate, _server, state) = fixture(state());
-    assert!(async_io::block_on(owner.restore_candidate(&candidate, 0)).unwrap());
+    let (candidate, _server, state) = fixture(state()).await;
+    assert!(owner.restore_candidate(&candidate, 0).await.unwrap());
     assert_eq!(state.refs.load(Ordering::SeqCst), 1);
     assert!(!intent.reject());
     assert!(owner.has_reference("example.service"));

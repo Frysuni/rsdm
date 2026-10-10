@@ -1,6 +1,6 @@
 //! References are restored only for the same owned transient invocation.
 
-use std::{os::unix::net::UnixStream, sync::atomic::{AtomicUsize, Ordering}, thread, time::Duration};
+use std::{os::unix::net::UnixStream, sync::atomic::{AtomicUsize, Ordering}, time::Duration};
 
 use super::*;
 
@@ -18,8 +18,8 @@ struct UnitState {
 }
 
 struct Pause {
-    entered: std::sync::mpsc::Sender<()>,
-    resume: async_channel::Receiver<()>,
+    entered: Arc<tokio::sync::Notify>,
+    resume: Arc<tokio::sync::Notify>,
 }
 
 struct Manager(Arc<UnitState>);
@@ -35,8 +35,8 @@ impl Manager {
         let current = self.0.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
         self.0.max_in_flight.fetch_max(current, Ordering::SeqCst);
         if let Some(pause) = &self.0.pause {
-            let _ = pause.entered.send(());
-            let _ = pause.resume.recv().await;
+            pause.entered.notify_one();
+            pause.resume.notified().await;
         }
         if !self.0.delay.is_zero() { async_io::Timer::after(self.0.delay).await; }
         self.0.in_flight.fetch_sub(1, Ordering::SeqCst);
@@ -67,20 +67,18 @@ impl Service {
     fn environment(&self) -> Vec<String> { vec![format!("RSDM_SESSION_GENERATION={}", self.0.generation)] }
 }
 
-fn fixture(state: UnitState) -> (Connection, Connection, Arc<UnitState>) {
+async fn fixture(state: UnitState) -> (Connection, Connection, Arc<UnitState>) {
     let state = Arc::new(state);
     let shared = state.clone();
     let (server_socket, client_socket) = UnixStream::pair().unwrap();
-    let server = thread::spawn(move || async_io::block_on(async {
+    let server = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
             .serve_at(MANAGER_PATH, Manager(shared.clone())).unwrap()
             .serve_at("/unit", Unit(shared.clone())).unwrap()
             .serve_at("/unit", Service(shared)).unwrap().build().await.unwrap()
-    }));
-    let client = async_io::block_on(async {
-        zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()
     });
-    (client, server.join().unwrap(), state)
+    let client = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    (client, server.await.unwrap(), state)
 }
 
 fn state() -> UnitState {
@@ -89,17 +87,17 @@ fn state() -> UnitState {
         delay: Duration::ZERO, in_flight: AtomicUsize::new(0), max_in_flight: AtomicUsize::new(0) }
 }
 
-#[test]
-fn reconnect_restores_a_reference_to_the_original_owned_invocation() {
-    let (connection, _server, state) = fixture(state());
+#[tokio::test]
+async fn reconnect_restores_a_reference_to_the_original_owned_invocation() {
+    let (connection, _server, state) = fixture(state()).await;
     let reference = Reference { invocation: Some(vec![1; 16]), ..Reference::new("ours".into()) };
-    async_io::block_on(restore_reference(&connection, "example.service", &reference)).unwrap();
+    restore_reference(&connection, "example.service", &reference).await.unwrap();
     assert_eq!(state.refs.load(Ordering::SeqCst), 1);
     assert_eq!(state.unrefs.load(Ordering::SeqCst), 0);
 }
 
-#[test]
-fn foreign_replaced_unstarted_and_non_transient_units_are_never_referenced() {
+#[tokio::test]
+async fn foreign_replaced_unstarted_and_non_transient_units_are_never_referenced() {
     for case in 0..4 {
         let mut initial = state();
         match case {
@@ -108,27 +106,27 @@ fn foreign_replaced_unstarted_and_non_transient_units_are_never_referenced() {
             2 => initial.invocation = vec![0; 16],
             _ => initial.transient = false,
         }
-        let (connection, _server, state) = fixture(initial);
+        let (connection, _server, state) = fixture(initial).await;
         let reference = Reference { invocation: Some(vec![1; 16]), ..Reference::new("ours".into()) };
-        async_io::block_on(restore_reference(&connection, "example.service", &reference)).unwrap();
+        restore_reference(&connection, "example.service", &reference).await.unwrap();
         assert_eq!(state.refs.load(Ordering::SeqCst), 0);
     }
 }
 
-#[test]
-fn an_invocation_replaced_during_ref_unit_is_immediately_unreferenced() {
+#[tokio::test]
+async fn an_invocation_replaced_during_ref_unit_is_immediately_unreferenced() {
     let mut initial = state();
     initial.replaced = true;
-    let (connection, _server, state) = fixture(initial);
+    let (connection, _server, state) = fixture(initial).await;
     let reference = Reference { invocation: Some(vec![1; 16]), ..Reference::new("ours".into()) };
-    async_io::block_on(restore_reference(&connection, "example.service", &reference)).unwrap();
+    restore_reference(&connection, "example.service", &reference).await.unwrap();
     assert_eq!(state.refs.load(Ordering::SeqCst), 1);
     assert_eq!(state.unrefs.load(Ordering::SeqCst), 1);
 }
 
-#[test]
-fn cloned_workers_keep_the_original_reference_identity_and_share_release() {
-    let (connection, _server, _) = fixture(state());
+#[tokio::test]
+async fn cloned_workers_keep_the_original_reference_identity_and_share_release() {
+    let (connection, _server, _) = fixture(state()).await;
     let owner = Transport::new(connection);
     let worker = owner.clone();
     owner.stage_reference("example.service", "ours".into()).submitted();
@@ -145,69 +143,65 @@ fn manager_reexec_does_not_require_replacing_a_live_bus_connection() {
     assert!(disconnected(&zbus::Error::from(std::io::Error::from(std::io::ErrorKind::BrokenPipe))));
 }
 
-#[test]
-fn slow_restoration_does_not_lock_state_or_publish_a_forgotten_reference() {
-    let (original, _original_server, _) = fixture(state());
+#[tokio::test]
+async fn slow_restoration_does_not_lock_state_or_publish_a_forgotten_reference() {
+    let (original, _original_server, _) = fixture(state()).await;
     let owner = Transport::new(original);
     owner.stage_reference("example.service", "ours".into()).submitted();
     owner.remember("example.service", &[1; 16]);
-    let (entered, ready) = std::sync::mpsc::channel();
-    let (resume, resumed) = async_channel::bounded(1);
+    let ready = Arc::new(tokio::sync::Notify::new());
+    let resume = Arc::new(tokio::sync::Notify::new());
     let mut initial = state();
-    initial.pause = Some(Pause { entered, resume: resumed });
-    let (candidate, _server, _) = fixture(initial);
+    initial.pause = Some(Pause { entered: ready.clone(), resume: resume.clone() });
+    let (candidate, _server, _) = fixture(initial).await;
     let restorer = owner.clone();
-    let worker = thread::spawn(move || async_io::block_on(restorer.restore_candidate(&candidate, 0)));
-    ready.recv_timeout(Duration::from_secs(2)).unwrap();
+    let worker = tokio::spawn(async move { restorer.restore_candidate(&candidate, 0).await });
+    tokio::time::timeout(Duration::from_secs(2), ready.notified()).await.unwrap();
 
     let reader = owner.clone();
-    let (accessed, access) = std::sync::mpsc::channel();
-    let reader = thread::spawn(move || {
+    let reader = tokio::spawn(async move {
         let _ = reader.connection();
         reader.forget("example.service");
-        let _ = accessed.send(reader.epoch());
+        reader.epoch()
     });
-    let responsive = access.recv_timeout(Duration::from_secs(1));
-    resume.try_send(()).unwrap();
-    let published = worker.join().unwrap().unwrap();
-    reader.join().unwrap();
-    assert_eq!(responsive.unwrap(), 0);
+    let responsive = tokio::time::timeout(Duration::from_secs(1), reader).await;
+    resume.notify_one();
+    let published = worker.await.unwrap().unwrap();
+    assert_eq!(responsive.unwrap().unwrap(), 0);
     assert!(!published);
     assert_eq!(owner.epoch(), 0);
     assert!(owner.0.lock().unwrap().references.is_empty());
 }
 
-#[test]
-fn reference_restoration_uses_bounded_parallel_batches() {
+#[tokio::test]
+async fn reference_restoration_uses_bounded_parallel_batches() {
     let mut initial = state();
     initial.delay = Duration::from_millis(20);
-    let (connection, _server, state) = fixture(initial);
+    let (connection, _server, state) = fixture(initial).await;
     let references: Vec<_> = (0..24)
         .map(|_| ("example.service".to_string(), Reference { invocation: Some(vec![1; 16]), ..Reference::new("ours".into()) }))
         .collect();
     let entries: Vec<_> = references.iter().map(|(unit, reference)| (unit, reference)).collect();
-    async_io::block_on(async {
-        for batch in entries.chunks(REFERENCE_RESTORE_BATCH) {
-            restore_reference_batch(&connection, batch).await.unwrap();
-        }
-    });
+    for batch in entries.chunks(REFERENCE_RESTORE_BATCH) {
+        restore_reference_batch(&connection, batch).await.unwrap();
+    }
     assert_eq!(state.refs.load(Ordering::SeqCst), 24);
     assert_eq!(state.unrefs.load(Ordering::SeqCst), 0);
     assert!(state.max_in_flight.load(Ordering::SeqCst) > 1);
     assert!(state.max_in_flight.load(Ordering::SeqCst) <= REFERENCE_RESTORE_BATCH);
 }
 
-#[test]
-fn maintenance_guard_is_shared_bounded_and_released_on_drop() {
-    let (connection, _server, _) = fixture(state());
+#[tokio::test]
+async fn maintenance_guard_is_shared_bounded_and_released_on_drop() {
+    let (connection, _server, _) = fixture(state()).await;
     let owner = Transport::new(connection);
     let worker = owner.clone();
-    let guard = async_io::block_on(owner.acquire_connection_guard(Instant::now() + Duration::from_secs(1))).unwrap();
-    let blocked = async_io::block_on(worker.acquire_connection_guard(Instant::now() + Duration::from_millis(20)));
+    let guard = owner.acquire_connection_guard(Instant::now() + Duration::from_secs(1)).await.unwrap();
+    let blocked = worker.acquire_connection_guard(Instant::now() + Duration::from_millis(20)).await;
     assert!(matches!(blocked, Err(error) if retryable_error(&error)));
     assert_eq!(worker.epoch(), 0);
     drop(guard);
-    assert!(async_io::block_on(worker.acquire_connection_guard(Instant::now() + Duration::from_secs(1))).is_ok());
+    assert!(worker.acquire_connection_guard(Instant::now() + Duration::from_secs(1)).await.is_ok());
 }
 
 #[path = "bus_reference_tests.rs"]
