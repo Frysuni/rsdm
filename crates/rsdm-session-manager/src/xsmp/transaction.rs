@@ -6,20 +6,20 @@ use super::{Notice, ffi, protocol::{self, Phase}, server::Server};
 use crate::{SessionError, apps, processes::{app_processes, monotonic_usec}};
 
 impl Server {
-    pub fn prepare(&mut self, units: &[String], cancellable: bool) -> Result<Vec<String>, SessionError> {
+    pub async fn prepare(&mut self, units: &[String], cancellable: bool) -> Result<Vec<String>, SessionError> {
         let mut selected = Vec::new();
         for unit in units {
             let mut app = self.runtime.app(unit)?;
             if app.invocation_id.is_empty() {
-                if !apps::pin_pending(&self.manager, &self.runtime, unit)? { continue; }
+                if !apps::pin_pending(&self.manager, &self.runtime, unit).await? { continue; }
                 app = self.runtime.app(unit)?;
             }
             if !app.policy.quit_command.is_empty() || app.policy.method == ShutdownMethod::Term
-                || app_processes(&self.manager, &app)?.is_empty()
+                || app_processes(&self.manager, &app).await?.is_empty()
             { continue; }
             let mut peers = Vec::new();
             for (index, peer) in self.peers.iter().enumerate() {
-                if peer.unit == *unit && peer.verified(&self.manager, &self.runtime)? { peers.push(index); }
+                if peer.unit == *unit && peer.verified(&self.manager, &self.runtime).await? { peers.push(index); }
             }
             if peers.is_empty() && app.policy.method == ShutdownMethod::Xsmp {
                 return Err(SessionError::State(format!("{unit} has no authenticated XSMP connection")));

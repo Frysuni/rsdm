@@ -61,24 +61,24 @@ fn connect(reject: bool) -> (UserManager, zbus::Connection, Effects) {
     (UserManager::with_connection(connection), server.join().unwrap(), effects)
 }
 
-#[test]
-fn cleanup_clears_activation_before_unsetting_owned_manager_values() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cleanup_clears_activation_before_unsetting_owned_manager_values() {
     let (manager, _server, effects) = connect(false);
     let previous = vec![
         ("WAYLAND_DISPLAY".into(), "wayland-old".into()),
         ("DISPLAY".into(), ":old".into()),
         ("PATH".into(), "/bin".into()),
     ];
-    clear_owned(&manager, &previous).unwrap();
+    clear_owned(&manager, &previous).await.unwrap();
     assert_eq!(*effects.lock().unwrap(), [
         Effect::Activation(vec![("DISPLAY".into(), String::new())]),
         Effect::Unset(vec!["DISPLAY".into()]),
     ]);
 }
 
-#[test]
-fn a_failed_activation_update_preserves_manager_ownership_for_recovery() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_activation_update_preserves_manager_ownership_for_recovery() {
     let (manager, _server, effects) = connect(true);
-    assert!(clear_names(&manager, &["DISPLAY".into()]).is_err());
+    assert!(clear_names(&manager, &["DISPLAY".into()]).await.is_err());
     assert!(effects.lock().unwrap().is_empty());
 }

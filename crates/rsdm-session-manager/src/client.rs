@@ -1,6 +1,6 @@
 //! CLI requests and the basic launch path outside an RSDM-coordinated login.
 
-use std::{path::Path, thread, time::{Duration, Instant}};
+use std::{path::Path, time::{Duration, Instant}};
 
 use rsdm_core::domain::{SessionManagerConfig, ShutdownPolicy};
 
@@ -19,10 +19,7 @@ pub async fn generation() -> Result<String, SessionError> {
 pub async fn run_app(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, SessionError> {
     policy.validate().map_err(|error| SessionError::State(error.into()))?;
     if std::env::var_os(GENERATION_ENV).is_none() {
-        let argv = argv.to_vec();
-        let policy = policy.clone();
-        return tokio::task::spawn_blocking(move || basic_launch(&argv, &policy)).await
-            .map_err(|error| SessionError::State(format!("application launch worker failed: {error}")))?;
+        return basic_launch(argv, policy).await;
     }
     let generation = generation().await?;
     let request = LaunchRequest {
@@ -68,20 +65,20 @@ pub async fn cancel() -> Result<(), SessionError> {
     Ok(())
 }
 
-fn basic_launch(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, SessionError> {
+async fn basic_launch(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, SessionError> {
     if *policy != ShutdownPolicy::default() {
         return Err(SessionError::State("shutdown policy requires an RSDM-coordinated session".into()));
     }
     let program = argv.first().ok_or(SessionError::EmptyCommand)?;
-    let manager = UserManager::connect()?;
+    let manager = UserManager::connect().await?;
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !manager.active(units::SESSION_TARGET)? {
+    while !manager.active(units::SESSION_TARGET).await? {
         if Instant::now() >= deadline { return Err(SessionError::NoGraphicalSession); }
-        thread::sleep(Duration::from_millis(200));
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
     let unit = format!("{}.service", unique_unit_name(ManagedUnitKind::App, program));
     let mut properties = units::app_properties(argv, &env::command_environment(), Path::new(&std::env::current_dir()?), None)?;
     properties.retain(|(name, _)| *name != "AddRef");
-    manager.start_service(&unit, &properties)?;
+    manager.start_service(&unit, &properties).await?;
     Ok(0)
 }

@@ -6,14 +6,14 @@ use super::{SessionError, bus::{UserManager, missing_unit}, runtime::AppRecord};
 
 const SERVICE: &str = "org.freedesktop.systemd1.Service";
 
-pub(super) fn verify_invocation(manager: &UserManager, app: &AppRecord) -> Result<bool, SessionError> {
-    match manager.invocation_id(&app.unit) {
+pub(super) async fn verify_invocation(manager: &UserManager, app: &AppRecord) -> Result<bool, SessionError> {
+    match manager.invocation_id(&app.unit).await {
         Ok(id) => {
             // An unreferenced unit can lose its invocation identity as its
             // final processes exit. Require both stopped state and an empty
             // cgroup before treating that terminal race as a closed app.
-            if id.iter().all(|byte| *byte == 0) && !manager.active(&app.unit)?
-                && manager.processes(&app.unit)?.is_empty()
+            if id.iter().all(|byte| *byte == 0) && !manager.active(&app.unit).await?
+                && manager.processes(&app.unit).await?.is_empty()
             { return Ok(false); }
             if app.invocation_id.is_empty() || id != app.invocation_id {
                 return Err(SessionError::State(format!("{} invocation changed", app.unit)));
@@ -25,40 +25,40 @@ pub(super) fn verify_invocation(manager: &UserManager, app: &AppRecord) -> Resul
     }
 }
 
-pub(super) fn app_processes(manager: &UserManager, app: &AppRecord) -> Result<Vec<u32>, SessionError> {
-    if !verify_invocation(manager, app)? { return Ok(Vec::new()); }
-    let control: u32 = match manager.unit_property(&app.unit, SERVICE, "ControlPID") {
+pub(super) async fn app_processes(manager: &UserManager, app: &AppRecord) -> Result<Vec<u32>, SessionError> {
+    if !verify_invocation(manager, app).await? { return Ok(Vec::new()); }
+    let control: u32 = match manager.unit_property(&app.unit, SERVICE, "ControlPID").await {
         Ok(pid) => pid,
         Err(SessionError::Bus(error)) if missing_unit(&error) => return Ok(Vec::new()),
         Err(error) => return Err(error),
     };
-    Ok(manager.processes(&app.unit)?.into_iter()
+    Ok(manager.processes(&app.unit).await?.into_iter()
         .map(|(_, pid, _)| pid).filter(|pid| *pid != control).collect())
 }
 
-pub(super) fn generation_invocation(
+pub(super) async fn generation_invocation(
     manager: &UserManager, unit: &str, generation: &str,
 ) -> Result<Option<Vec<u8>>, SessionError> {
-    let result = (|| {
-        let id = manager.invocation_id(unit)?;
-        let environment: Vec<String> = manager.unit_property(unit, SERVICE, "Environment")?;
+    let result = async {
+        let id = manager.invocation_id(unit).await?;
+        let environment: Vec<String> = manager.unit_property(unit, SERVICE, "Environment").await?;
         if id.is_empty() || !environment.contains(&format!("{}={generation}", super::identity::GENERATION_ENV))
-            || manager.invocation_id(unit)? != id
+            || manager.invocation_id(unit).await? != id
         {
             return Err(SessionError::State(format!("{unit} does not belong to this generation")));
         }
         Ok(Some(id))
-    })();
+    }.await;
     match result {
         Err(SessionError::Bus(error)) if missing_unit(&error) => Ok(None),
         other => other,
     }
 }
 
-pub(super) fn signal_app(manager: &UserManager, app: &AppRecord, signal: i32) -> Result<(), SessionError> {
-    let processes = app_processes(manager, app)?;
+pub(super) async fn signal_app(manager: &UserManager, app: &AppRecord, signal: i32) -> Result<(), SessionError> {
+    let processes = app_processes(manager, app).await?;
     if processes.is_empty() { return Ok(()); }
-    let group: String = manager.unit_property(&app.unit, SERVICE, "ControlGroup")?;
+    let group: String = manager.unit_property(&app.unit, SERVICE, "ControlGroup").await?;
     if !group.starts_with('/') || group == "/" {
         return Err(SessionError::State(format!("{} has no dedicated cgroup", app.unit)));
     }
@@ -69,7 +69,7 @@ pub(super) fn signal_app(manager: &UserManager, app: &AppRecord, signal: i32) ->
         for &pid in batch {
             if let Some(handle) = ProcessHandle::open(pid)? { pinned.push((pid, handle)); }
         }
-        if !verify_invocation(manager, app)? { return Ok(()); }
+        if !verify_invocation(manager, app).await? { return Ok(()); }
         for (pid, handle) in pinned {
             let membership = match std::fs::read_to_string(format!("/proc/{pid}/cgroup")) {
                 Ok(membership) => membership,
@@ -93,29 +93,29 @@ fn belongs_to_cgroup(membership: &str, group: &str) -> bool {
     })
 }
 
-pub(super) fn stop_invocation(manager: &UserManager, unit: &str, expected: &[u8]) -> Result<(), SessionError> {
-    match manager.invocation_id(unit) {
-        Ok(id) if !expected.is_empty() && id == expected => manager.stop(unit, std::time::Duration::from_secs(15)),
-        Ok(id) if id.iter().all(|byte| *byte == 0) && !manager.active(unit)?
-            && manager.processes(unit)?.is_empty() => Ok(()),
+pub(super) async fn stop_invocation(manager: &UserManager, unit: &str, expected: &[u8]) -> Result<(), SessionError> {
+    match manager.invocation_id(unit).await {
+        Ok(id) if !expected.is_empty() && id == expected => manager.stop(unit, std::time::Duration::from_secs(15)).await,
+        Ok(id) if id.iter().all(|byte| *byte == 0) && !manager.active(unit).await?
+            && manager.processes(unit).await?.is_empty() => Ok(()),
         Ok(_) => Err(SessionError::State(format!("{unit} invocation changed or was never verified"))),
         Err(SessionError::Bus(error)) if missing_unit(&error) => Ok(()),
         Err(error) => Err(error),
     }
 }
 
-pub(super) fn terminate_main(manager: &UserManager, app: &AppRecord) -> Result<(), SessionError> {
-    if !verify_invocation(manager, app)? {
+pub(super) async fn terminate_main(manager: &UserManager, app: &AppRecord) -> Result<(), SessionError> {
+    if !verify_invocation(manager, app).await? {
         return Ok(());
     }
-    let main: u32 = manager.unit_property(&app.unit, SERVICE, "MainPID")?;
+    let main: u32 = manager.unit_property(&app.unit, SERVICE, "MainPID").await?;
     if main == 0 {
-        return signal_app(manager, app, libc::SIGTERM);
+        return signal_app(manager, app, libc::SIGTERM).await;
     }
     let Some(handle) = ProcessHandle::open(main)? else {
-        return signal_app(manager, app, libc::SIGTERM);
+        return signal_app(manager, app, libc::SIGTERM).await;
     };
-    if app_processes(manager, app)?.contains(&main) {
+    if app_processes(manager, app).await?.contains(&main) {
         handle.signal(libc::SIGTERM)?;
     }
     Ok(())

@@ -78,18 +78,32 @@ fn connect(version: &'static str, result: &'static str) -> (UserManager, Connect
     (client, server, calls)
 }
 
-#[test]
-fn accepts_an_early_job_signal_and_ignores_another_job_for_the_same_unit() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn accepts_an_early_job_signal_and_ignores_another_job_for_the_same_unit() {
     let (manager, _server, calls) = connect("250", "done");
-    manager.start_service("example.service", &Vec::new()).unwrap();
+    manager.start_service("example.service", &Vec::new()).await.unwrap();
     assert_eq!(*calls.lock().unwrap(), [("example.service".into(), "fail".into())]);
 }
 
-#[test]
-fn accepted_method_call_does_not_hide_a_failed_job() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn accepted_method_call_does_not_hide_a_failed_job() {
     let (manager, _server, _) = connect("260.1", "failed");
-    let error = manager.start_service("example.service", &Vec::new()).unwrap_err();
+    let error = manager.start_service("example.service", &Vec::new()).await.unwrap_err();
     assert!(error.to_string().contains("job completed with failed"));
+}
+
+#[tokio::test]
+async fn a_pending_start_reply_leaves_the_callers_runtime_responsive() {
+    let (manager, _server, calls) = connect("260", "done");
+    let properties = Vec::new();
+    let mut start = Box::pin(manager.start_service("example.service", &properties));
+    tokio::select! {
+        biased;
+        _ = tokio::time::sleep(Duration::from_millis(5)) => {},
+        result = &mut start => panic!("start completed before the delayed reply: {result:?}"),
+    }
+    start.await.unwrap();
+    assert_eq!(*calls.lock().unwrap(), [("example.service".into(), "fail".into())]);
 }
 
 #[test]

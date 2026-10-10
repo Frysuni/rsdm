@@ -1,6 +1,6 @@
 //! Application preflight precedes native delegation or owned infrastructure stop.
 
-use std::{path::{Path, PathBuf}, sync::{Arc, atomic::Ordering}, thread, time::{Duration, Instant}};
+use std::{path::{Path, PathBuf}, sync::{Arc, atomic::Ordering}, time::{Duration, Instant}};
 
 use rsdm_core::domain::{SessionPhase, ShutdownMethod};
 
@@ -60,8 +60,7 @@ impl Coordinator {
                 if !native && matches!(action.as_str(), "poweroff" | "reboot") {
                     manager.deadline.bound(rsdm_system::logind::check(&action)).await?;
                 }
-                tokio::task::spawn_blocking(move || app_stop::prepare_apps(&manager, &runtime, apps, control))
-                    .await.map_err(|error| SessionError::State(format!("application preparation worker failed: {error}")))?
+                app_stop::prepare_apps(&manager, &runtime, apps, control).await
             }.await;
             let _ = events.send(Work::Prepared(result));
         });
@@ -136,7 +135,7 @@ impl Coordinator {
         let directory = self.directory.clone();
         let events = self.events.clone();
         self.workers += 1;
-        thread::spawn(move || { let _ = events.send(Work::Finished(finish(&manager, &runtime, &record, &provider, process, directory))); });
+        tokio::spawn(async move { let _ = events.send(Work::Finished(finish(&manager, &runtime, &record, &provider, process, directory).await)); });
         Ok(())
     }
 
@@ -174,34 +173,34 @@ impl Coordinator {
     }
 }
 
-fn finish(
+async fn finish(
     manager: &UserManager, runtime: &Runtime, record: &SessionRecord, provider: &Provider, mut process: SessionProcess, directory: PathBuf,
 ) -> Result<(), SessionError> {
     let mut failure = None;
     let mut cleanup_manager = manager.clone();
     cleanup_manager.deadline = manager.deadline.reserving(Duration::from_secs(1))?;
     for app in runtime.apps()? {
-        if let Err(error) = apps::finish(&cleanup_manager, runtime, &app) { failure.get_or_insert(error); }
+        if let Err(error) = apps::finish(&cleanup_manager, runtime, &app).await { failure.get_or_insert(error); }
     }
     if !provider.logout_command.is_empty() {
-        if let Err(error) = run_logout_command(&cleanup_manager, record, provider, &directory) { failure.get_or_insert(error); }
+        if let Err(error) = run_logout_command(&cleanup_manager, record, provider, &directory).await { failure.get_or_insert(error); }
     }
     if record.owns_targets {
         for target in [units::AUTOSTART_TARGET, units::SESSION_TARGET, units::PRE_TARGET] {
-            if let Err(error) = cleanup_manager.stop(target, Duration::from_secs(15)) { failure.get_or_insert(error); }
+            if let Err(error) = cleanup_manager.stop(target, Duration::from_secs(15)).await { failure.get_or_insert(error); }
         }
     }
-    if let Err(error) = cleanup_manager.stop(&record.anchor_unit, Duration::from_secs(15)) { failure.get_or_insert(error); }
-    let _ = cleanup_manager.unref(&record.anchor_unit);
-    if let Err(error) = process.stop(manager, provider, &runtime.generation) { failure.get_or_insert(error); }
-    if let Err(error) = env::clear_owned(manager, &record.exported_environment) { failure.get_or_insert(error); }
+    if let Err(error) = cleanup_manager.stop(&record.anchor_unit, Duration::from_secs(15)).await { failure.get_or_insert(error); }
+    let _ = cleanup_manager.unref(&record.anchor_unit).await;
+    if let Err(error) = process.stop(manager, provider, &runtime.generation).await { failure.get_or_insert(error); }
+    if let Err(error) = env::clear_owned(manager, &record.exported_environment).await { failure.get_or_insert(error); }
     if let Err(error) = runtime.reap_closed_app_locks() { failure.get_or_insert(error); }
     match failure { Some(error) => Err(error), None => Ok(()) }
 }
 
-fn run_logout_command(manager: &UserManager, record: &SessionRecord, provider: &Provider, directory: &Path) -> Result<(), SessionError> {
+async fn run_logout_command(manager: &UserManager, record: &SessionRecord, provider: &Provider, directory: &Path) -> Result<(), SessionError> {
     let unit = format!("rsdm-logout-{}.service", record.identity.generation);
-    let environment: Vec<_> = manager.environment()?.into_iter().filter_map(|entry| entry.split_once('=')
+    let environment: Vec<_> = manager.environment().await?.into_iter().filter_map(|entry| entry.split_once('=')
         .map(|(name, value)| (name.to_string(), value.to_string()))).collect();
     if !environment.iter().any(|(name, value)| {
         name == super::identity::GENERATION_ENV && value == &record.identity.generation
@@ -217,20 +216,20 @@ fn run_logout_command(manager: &UserManager, record: &SessionRecord, provider: &
         ("RuntimeMaxUSec", zbus::zvariant::Value::from(15_000_000_u64)),
         ("TimeoutStopUSec", zbus::zvariant::Value::from(1_000_000_u64)),
     ]);
-    let result = (|| {
-        manager.start_service(&unit, &properties)?;
+    let result = async {
+        manager.start_service(&unit, &properties).await?;
         let deadline = Instant::now() + Duration::from_secs(15);
-        while manager.active(&unit)? {
+        while manager.active(&unit).await? {
             if Instant::now() >= deadline { return Err(SessionError::State("logout command timed out".into())); }
-            thread::sleep(Duration::from_millis(50));
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        let status: i32 = manager.unit_property(&unit, "org.freedesktop.systemd1.Service", "ExecMainStatus")?;
+        let status: i32 = manager.unit_property(&unit, "org.freedesktop.systemd1.Service", "ExecMainStatus").await?;
         if status != 0 { return Err(SessionError::State(format!("logout command failed with status {status}"))); }
         Ok(())
-    })();
+    }.await;
     if !matches!(result, Err(SessionError::StartRejected { .. })) {
-        let _ = manager.stop(&unit, Duration::from_secs(3));
-        let _ = manager.unref(&unit);
+        let _ = manager.stop(&unit, Duration::from_secs(3)).await;
+        let _ = manager.unref(&unit).await;
     }
     result
 }

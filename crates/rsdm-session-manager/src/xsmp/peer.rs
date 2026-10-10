@@ -26,21 +26,21 @@ pub(super) struct Peer {
 }
 
 impl Peer {
-    pub fn accept(listener: ffi::ListenObj, manager: &UserManager, runtime: &Runtime) -> Result<Box<Self>, SessionError> {
+    pub async fn accept(listener: ffi::ListenObj, manager: &UserManager, runtime: &Runtime) -> Result<Box<Self>, SessionError> {
         let mut status = 0;
         // SAFETY: the listener belongs to the server; a successful accept gives
         // this function one owned connection reference.
         let ice = unsafe { ffi::IceAcceptConnection(listener, &mut status) };
         if ice.is_null() { return Err(SessionError::State("ICE connection could not be accepted".into())); }
         unsafe { ffi::IceSetShutdownNegotiation(ice, 0); }
-        let admission = Self::admit(ice, manager, runtime);
+        let admission = Self::admit(ice, manager, runtime).await;
         if admission.is_err() {
             unsafe { ffi::IceCloseConnection(ice); }
         }
         admission
     }
 
-    fn admit(ice: ffi::IceConn, manager: &UserManager, runtime: &Runtime) -> Result<Box<Self>, SessionError> {
+    async fn admit(ice: ffi::IceConn, manager: &UserManager, runtime: &Runtime) -> Result<Box<Self>, SessionError> {
         let credentials = credentials(unsafe { ffi::IceConnectionNumber(ice) })?;
         // SAFETY: geteuid has no preconditions.
         if credentials.uid != unsafe { libc::geteuid() } || credentials.pid <= 0 {
@@ -48,13 +48,13 @@ impl Peer {
         }
         let pid = credentials.pid as u32;
         let process = ProcessHandle::open(pid)?.ok_or_else(|| SessionError::State("ICE peer process exited".into()))?;
-        let unit = manager.unit_for_pid(pid)?;
+        let unit = manager.unit_for_pid(pid).await?;
         let mut app = runtime.app(&unit)?;
         if app.invocation_id.is_empty() {
-            apps::pin_pending(manager, runtime, &unit)?;
+            apps::pin_pending(manager, runtime, &unit).await?;
             app = runtime.app(&unit)?;
         }
-        if !process.alive()? || !app_processes(manager, &app)?.contains(&pid) {
+        if !process.alive()? || !app_processes(manager, &app).await?.contains(&pid) {
             return Err(SessionError::State("ICE peer is not a registered application process".into()));
         }
         Ok(Box::new(Self {
@@ -65,10 +65,10 @@ impl Peer {
         }))
     }
 
-    pub fn verified(&self, manager: &UserManager, runtime: &Runtime) -> Result<bool, SessionError> {
+    pub async fn verified(&self, manager: &UserManager, runtime: &Runtime) -> Result<bool, SessionError> {
         if self.phase == Phase::Closed || self.sms.is_null() || !self.process.alive()? { return Ok(false); }
         let app = runtime.app(&self.unit)?;
-        Ok(app.invocation_id == self.invocation && app_processes(manager, &app)?.contains(&self.pid))
+        Ok(app.invocation_id == self.invocation && app_processes(manager, &app).await?.contains(&self.pid))
     }
 
     pub fn fd(&self) -> i32 {

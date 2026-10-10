@@ -1,6 +1,6 @@
 //! Activate the session anchor only after compositor readiness is established.
 
-use std::{thread, time::Instant};
+use std::time::Instant;
 
 use rsdm_core::domain::SessionPhase;
 
@@ -9,11 +9,11 @@ use super::{
 };
 
 impl Coordinator {
-    pub fn activate(&mut self) {
+    pub async fn activate(&mut self) {
         if !self.lifecycle.accepts_finalize() || self.ready_busy || self.booting() {
             return;
         }
-        if let Err(error) = self.claim_targets() {
+        if let Err(error) = self.claim_targets().await {
             tracing::error!(%error, "cannot persist graphical target ownership");
             return;
         }
@@ -26,17 +26,17 @@ impl Coordinator {
         let stopping = self.stopping.clone();
         let events = self.events.clone();
         self.workers += 1;
-        thread::spawn(move || {
+        tokio::spawn(async move {
             let result = activation::activate(
                 &manager, &provider, &record.anchor_unit, record.compositor_unit.as_deref(),
                 &environment, &directory, &stopping,
-            );
+            ).await;
             let _ = events.send(Work::Ready(result));
         });
     }
 
-    fn claim_targets(&mut self) -> Result<(), SessionError> {
-        if self.provider.kind == ProviderKind::Managed && !self.manager.active(units::SESSION_TARGET)? {
+    async fn claim_targets(&mut self) -> Result<(), SessionError> {
+        if self.provider.kind == ProviderKind::Managed && !self.manager.active(units::SESSION_TARGET).await? {
             // Persist ownership intent before the start job can pull in a
             // target, including when the anchor's activation later fails.
             self.record.owns_targets = true;
@@ -45,7 +45,7 @@ impl Coordinator {
         Ok(())
     }
 
-    pub fn boot_completed(&mut self, result: Result<Vec<u8>, SessionError>) -> Result<(), SessionError> {
+    pub async fn boot_completed(&mut self, result: Result<Vec<u8>, SessionError>) -> Result<(), SessionError> {
         if let Err(SessionError::Bus(error)) = &result {
             if super::bus::retryable_error(error) {
                 tracing::warn!(%error, "deferring compositor start verification while the user manager is unavailable");
@@ -71,7 +71,7 @@ impl Coordinator {
             self.begin_stop("compositor-exited", Some(monotonic_usec()?.saturating_add(5_000_000)))?;
         }
         if !self.finalize_replies.is_empty() && self.lifecycle.accepts_finalize() {
-            self.activate();
+            self.activate().await;
         }
         Ok(())
     }

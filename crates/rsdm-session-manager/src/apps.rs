@@ -50,18 +50,18 @@ pub(super) fn register(
     Ok(app)
 }
 
-pub(super) fn launch(
+pub(super) async fn launch(
     manager: &UserManager, runtime: &Runtime, anchor: &str, request: &LaunchRequest, mut app: AppRecord,
 ) -> Result<String, SessionError> {
     let properties = match launch_properties(runtime, anchor, request, &app) {
         Ok(properties) => properties,
         Err(error) => return Err(rollback_launch(manager, runtime, &app, error)),
     };
-    let started = manager.start_service(&app.unit, &properties);
+    let started = manager.start_service(&app.unit, &properties).await;
     if let Err(error @ SessionError::StartRejected { .. }) = started {
         return Err(rollback_launch(manager, runtime, &app, error));
     }
-    let invocation = super::processes::generation_invocation(manager, &app.unit, &runtime.generation)
+    let invocation = super::processes::generation_invocation(manager, &app.unit, &runtime.generation).await
         .and_then(|id| id.ok_or_else(|| SessionError::State("application invocation is unavailable after start".into())));
     match invocation {
         Ok(id) => {
@@ -117,19 +117,19 @@ fn rollback_launch(manager: &UserManager, runtime: &Runtime, app: &AppRecord, er
     }
 }
 
-pub(super) fn release_closed(manager: &UserManager, runtime: &Runtime) -> Result<(), SessionError> {
+pub(super) async fn release_closed(manager: &UserManager, runtime: &Runtime) -> Result<(), SessionError> {
     for app in runtime.apps()? {
         if app.invocation_id.is_empty() {
             continue;
         }
-        let state = manager.unit_property::<String>(&app.unit, "org.freedesktop.systemd1.Unit", "ActiveState");
+        let state = manager.unit_property::<String>(&app.unit, "org.freedesktop.systemd1.Unit", "ActiveState").await;
         let stopped = match state {
             Ok(state) => matches!(state.as_str(), "inactive" | "failed"),
             Err(SessionError::Bus(error)) if super::bus::missing_unit(&error) => true,
             Err(error) => return Err(error),
         };
-        if stopped && super::processes::app_processes(manager, &app)?.is_empty() {
-            let _ = manager.unref(&app.unit);
+        if stopped && super::processes::app_processes(manager, &app).await?.is_empty() {
+            let _ = manager.unref(&app.unit).await;
             runtime.remove_app(&app.unit)?;
         }
     }
@@ -147,23 +147,23 @@ pub(super) fn reset_preparation(runtime: &Runtime) -> Result<(), SessionError> {
     Ok(())
 }
 
-pub fn stop_hook(generation: &str, unit: &str) -> Result<(), SessionError> {
+pub async fn stop_hook(generation: &str, unit: &str) -> Result<(), SessionError> {
     let runtime = Runtime::open(generation)?.ok_or_else(|| SessionError::State("session recovery record is missing".into()))?;
     let deadline = Deadline::default();
     if let Some(saved) = runtime.session()?.shutdown_deadline_usec { deadline.set(saved); }
-    let manager = UserManager::connect_until(deadline)?;
+    let manager = UserManager::connect_until(deadline).await?;
     let control = super::app_stop::ShutdownControl::for_manager(&manager);
     control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
-    pin_pending(&manager, &runtime, unit)?;
-    super::app_stop::prepare_app(&manager, &runtime, unit, &control)?;
+    pin_pending(&manager, &runtime, unit).await?;
+    super::app_stop::prepare_app(&manager, &runtime, unit, &control).await?;
     Ok(())
 }
 
-pub(super) fn pin_pending(manager: &UserManager, runtime: &Runtime, unit: &str) -> Result<bool, SessionError> {
+pub(super) async fn pin_pending(manager: &UserManager, runtime: &Runtime, unit: &str) -> Result<bool, SessionError> {
     if !runtime.app(unit)?.invocation_id.is_empty() {
         return Ok(true);
     }
-    let Some(id) = super::processes::generation_invocation(manager, unit, &runtime.generation)? else {
+    let Some(id) = super::processes::generation_invocation(manager, unit, &runtime.generation).await? else {
         return Ok(false);
     };
     let _lease = runtime.app_lease_until(unit, &manager.deadline)?;
@@ -175,12 +175,12 @@ pub(super) fn pin_pending(manager: &UserManager, runtime: &Runtime, unit: &str) 
     Ok(true)
 }
 
-pub(super) fn finish(manager: &UserManager, runtime: &Runtime, app: &AppRecord) -> Result<(), SessionError> {
-    if pin_pending(manager, runtime, &app.unit)?
-        && super::processes::verify_invocation(manager, &runtime.app(&app.unit)?)?
+pub(super) async fn finish(manager: &UserManager, runtime: &Runtime, app: &AppRecord) -> Result<(), SessionError> {
+    if pin_pending(manager, runtime, &app.unit).await?
+        && super::processes::verify_invocation(manager, &runtime.app(&app.unit)?).await?
     {
-        manager.stop(&app.unit, Duration::from_secs(10))?;
-        manager.unref(&app.unit)?;
+        manager.stop(&app.unit, Duration::from_secs(10)).await?;
+        manager.unref(&app.unit).await?;
     }
     runtime.remove_app(&app.unit)
 }

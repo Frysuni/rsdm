@@ -2,18 +2,18 @@
 
 use super::{SessionError, bus::UserManager, env, runtime::{Runtime, SessionRecord}};
 
-pub(super) fn publish(manager: &UserManager, runtime: &Runtime, record: &SessionRecord) -> Result<(), SessionError> {
+pub(super) async fn publish(manager: &UserManager, runtime: &Runtime, record: &SessionRecord) -> Result<(), SessionError> {
     runtime.save_session(record)?;
-    let result = (|| {
-        env::clear_names(manager, &env::DISPLAY_VARS.iter().map(|name| name.to_string()).collect::<Vec<_>>())?;
-        env::publish(manager, &record.exported_environment)
-    })();
-    if result.is_err() { rollback(manager, runtime, record); }
+    let result = async {
+        env::clear_names(manager, &env::DISPLAY_VARS.iter().map(|name| name.to_string()).collect::<Vec<_>>()).await?;
+        env::publish(manager, &record.exported_environment).await
+    }.await;
+    if result.is_err() { rollback(manager, runtime, record).await; }
     result
 }
 
-pub(super) fn rollback(manager: &UserManager, runtime: &Runtime, record: &SessionRecord) {
-    if let Err(error) = env::clear_owned(manager, &record.exported_environment) {
+pub(super) async fn rollback(manager: &UserManager, runtime: &Runtime, record: &SessionRecord) {
+    if let Err(error) = env::clear_owned(manager, &record.exported_environment).await {
         tracing::warn!(%error, "startup environment rollback failed");
         return;
     }

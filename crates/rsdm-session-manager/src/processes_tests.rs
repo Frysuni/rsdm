@@ -59,45 +59,45 @@ fn manager(invocation: Vec<u8>, state: &'static str, processes: Vec<u32>) -> (Us
     (UserManager::with_connection(connection), worker.join().unwrap(), queries)
 }
 
-#[test]
-fn recovery_accepts_an_empty_native_unit_after_systemd_cleared_its_invocation() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn recovery_accepts_an_empty_native_unit_after_systemd_cleared_its_invocation() {
     let (manager, _server, _) = manager(vec![0; 16], "inactive", Vec::new());
-    stop_invocation(&manager, "native.service", &[1; 16]).unwrap();
+    stop_invocation(&manager, "native.service", &[1; 16]).await.unwrap();
 }
 
-#[test]
-fn a_cleared_invocation_cannot_hide_remaining_processes() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cleared_invocation_cannot_hide_remaining_processes() {
     let (manager, _server, _) = manager(vec![0; 16], "inactive", vec![42]);
-    assert!(stop_invocation(&manager, "native.service", &[1; 16]).is_err());
+    assert!(stop_invocation(&manager, "native.service", &[1; 16]).await.is_err());
 }
 
-#[test]
-fn a_cleared_invocation_cannot_hide_an_active_unit() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cleared_invocation_cannot_hide_an_active_unit() {
     let (manager, _server, _) = manager(vec![0; 16], "active", Vec::new());
-    assert!(stop_invocation(&manager, "native.service", &[1; 16]).is_err());
+    assert!(stop_invocation(&manager, "native.service", &[1; 16]).await.is_err());
 }
 
-#[test]
-fn recovery_does_not_stop_a_replacement_native_invocation() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn recovery_does_not_stop_a_replacement_native_invocation() {
     let (manager, _server, _) = manager(vec![2; 16], "inactive", Vec::new());
-    assert!(stop_invocation(&manager, "native.service", &[1; 16]).is_err());
+    assert!(stop_invocation(&manager, "native.service", &[1; 16]).await.is_err());
 }
 
-#[test]
-fn process_signaling_does_not_repeat_full_cgroup_snapshots() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn process_signaling_does_not_repeat_full_cgroup_snapshots() {
     let (manager, _server, queries) = manager(vec![1; 16], "active", vec![std::process::id(); 128]);
     let app = AppRecord { unit: "native.service".into(), invocation_id: vec![1; 16],
         policy: rsdm_core::domain::ShutdownPolicy::default(), deadline_usec: None, quit_started: false };
-    signal_app(&manager, &app, 0).unwrap();
+    signal_app(&manager, &app, 0).await.unwrap();
     assert_eq!(queries.load(Ordering::SeqCst), 1);
 }
 
-#[test]
-fn process_signaling_rejects_a_replacement_before_taking_a_snapshot() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn process_signaling_rejects_a_replacement_before_taking_a_snapshot() {
     let (manager, _server, queries) = manager(vec![2; 16], "active", vec![std::process::id()]);
     let app = AppRecord { unit: "native.service".into(), invocation_id: vec![1; 16],
         policy: rsdm_core::domain::ShutdownPolicy::default(), deadline_usec: None, quit_started: false };
-    assert!(signal_app(&manager, &app, 0).is_err());
+    assert!(signal_app(&manager, &app, 0).await.is_err());
     assert_eq!(queries.load(Ordering::SeqCst), 0);
 }
 

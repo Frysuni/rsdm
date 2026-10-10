@@ -63,14 +63,14 @@ impl Provider {
         matches!(self.kind, ProviderKind::Gnome | ProviderKind::Plasma)
     }
 
-    pub fn ready(&self, manager: &UserManager) -> Result<bool, SessionError> {
+    pub async fn ready(&self, manager: &UserManager) -> Result<bool, SessionError> {
         if let Some(unit) = &self.native_unit {
-            return manager.active(unit);
+            return manager.active(unit).await;
         }
         match self.kind {
-            ProviderKind::Gnome => manager.read(|| async { native_gnome_running(&manager.connection()).await }),
-            ProviderKind::Plasma => manager.read(|| async { native_name_owned(&manager.connection(), "org.kde.ksmserver").await }),
-            _ => manager.active(super::units::SESSION_TARGET),
+            ProviderKind::Gnome => manager.read(|| async { native_gnome_running(&manager.connection()).await }).await,
+            ProviderKind::Plasma => manager.read(|| async { native_name_owned(&manager.connection(), "org.kde.ksmserver").await }).await,
+            _ => manager.active(super::units::SESSION_TARGET).await,
         }
     }
 

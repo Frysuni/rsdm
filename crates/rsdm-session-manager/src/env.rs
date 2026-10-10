@@ -82,24 +82,24 @@ pub(super) fn valid_environment_name(name: &str) -> bool {
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
-pub(super) fn publish(
+pub(super) async fn publish(
     manager: &super::bus::UserManager, pairs: &[(String, String)],
 ) -> Result<(), super::SessionError> {
     if pairs.iter().any(|(name, value)| !valid_environment_name(name) || value.contains('\0')) {
         return Err(super::SessionError::State("invalid session environment".into()));
     }
-    manager.set_environment(&pairs.iter().map(|(name, value)| format!("{name}={value}")).collect::<Vec<_>>())?;
-    manager.update_activation(pairs)
+    manager.set_environment(&pairs.iter().map(|(name, value)| format!("{name}={value}")).collect::<Vec<_>>()).await?;
+    manager.update_activation(pairs).await
 }
 
-pub(super) fn clear_owned(
+pub(super) async fn clear_owned(
     manager: &super::bus::UserManager, pairs: &[(String, String)],
 ) -> Result<(), super::SessionError> {
-    let current = manager.environment()?;
-    clear_names(manager, &owned_names(pairs, &current))
+    let current = manager.environment().await?;
+    clear_names(manager, &owned_names(pairs, &current)).await
 }
 
-pub(super) fn clear_names(
+pub(super) async fn clear_names(
     manager: &super::bus::UserManager, names: &[String],
 ) -> Result<(), super::SessionError> {
     if names.is_empty() {
@@ -109,8 +109,8 @@ pub(super) fn clear_names(
     // display endpoints; clear them before removing the manager ownership data
     // so a failed update can still be retried by generation recovery.
     let empty = names.iter().map(|name| (name.clone(), String::new())).collect::<Vec<_>>();
-    manager.update_activation(&empty)?;
-    manager.unset_environment(names)
+    manager.update_activation(&empty).await?;
+    manager.unset_environment(names).await
 }
 
 fn owned_names(pairs: &[(String, String)], current: &[String]) -> Vec<String> {

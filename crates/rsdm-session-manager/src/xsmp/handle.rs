@@ -37,7 +37,13 @@ impl Handle {
         let (ready, started) = mpsc::channel();
         let manager = manager.clone();
         let runtime = runtime.clone();
-        let worker = std::thread::spawn(move || server::run(manager, runtime, messages, events, ready));
+        let worker = std::thread::spawn(move || {
+            let executor = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(executor) => executor,
+                Err(error) => { let _ = ready.send(Err(error.into())); return; }
+            };
+            executor.block_on(server::run(manager, runtime, messages, events, ready));
+        });
         match started.recv() {
             Ok(Ok(environment)) => {
                 handle.environment = environment;

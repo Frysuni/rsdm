@@ -42,11 +42,11 @@ impl Coordinator {
         if let Err(error) = self.save() {
             tracing::warn!(%error, "could not persist recovery state");
         }
-        if let Err(error) = super::cleanup::recover(&self.manager, &self.runtime) {
+        if let Err(error) = super::cleanup::recover(&self.manager, &self.runtime).await {
             tracing::error!(%error, "session recovery failed");
         }
         if let Some(process) = &mut self.process {
-            if let Err(error) = process.stop(&self.manager, &self.provider, &self.runtime.generation) {
+            if let Err(error) = process.stop(&self.manager, &self.provider, &self.runtime.generation).await {
                 tracing::error!(%error, "session launcher cleanup failed");
             }
         }

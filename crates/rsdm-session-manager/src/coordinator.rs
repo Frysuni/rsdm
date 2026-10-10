@@ -1,4 +1,4 @@
-//! Serial lifecycle decisions; blocking start/stop jobs run in workers.
+//! Serial lifecycle decisions; start/stop jobs run in asynchronous workers.
 
 use std::{
     collections::VecDeque,
@@ -96,7 +96,7 @@ impl Coordinator {
                 }
                 work = self.work.recv() => {
                     let work = work.ok_or_else(|| SessionError::State("session work channel closed".into()))?;
-                    self.completed(work)?;
+                    self.completed(work).await?;
                 }
                 notice = self.notices.recv(), if notices_open => match notice {
                     Some(notice) => self.shutdown_notice(notice)?,
@@ -142,13 +142,13 @@ impl Coordinator {
         self.runtime.save_session(&self.record)
     }
 
-    pub(super) fn completed(&mut self, work: Work) -> Result<(), SessionError> {
+    pub(super) async fn completed(&mut self, work: Work) -> Result<(), SessionError> {
         self.workers = self.workers.saturating_sub(1);
         match work {
-            Work::Observed(result) => self.observation_completed(result)?,
-            Work::Boot(result) => self.boot_completed(result)?,
+            Work::Observed(result) => self.observation_completed(result).await?,
+            Work::Boot(result) => self.boot_completed(result).await?,
             Work::Ready(result) => self.ready_completed(result)?,
-            Work::EnvironmentPublished(result) => self.environment_published(result)?,
+            Work::EnvironmentPublished(result) => self.environment_published(result).await?,
             Work::Launched(unit, reply, result) => {
                 self.lifecycle.complete_launch(&unit);
                 let _ = reply.try_send(result.map_err(|error| error.to_string()));

@@ -10,7 +10,7 @@ use super::{
     runtime::{Runtime, SessionRecord}, units,
 };
 
-pub fn cleanup(generation: &str) -> Result<(), SessionError> {
+pub async fn cleanup(generation: &str) -> Result<(), SessionError> {
     let Some(runtime) = Runtime::open(generation)? else { return Ok(()); };
     // Validation may have created the private directory before publishing a
     // session record. No service or environment side effect precedes that
@@ -21,12 +21,12 @@ pub fn cleanup(generation: &str) -> Result<(), SessionError> {
     let _lease = super::session_lease::SessionLease::acquire()?;
     let deadline = Deadline::default();
     deadline.set(recovery_deadline(runtime.session()?.shutdown_deadline_usec, 0)?);
-    let manager = UserManager::connect_until(deadline)?;
-    acquire_lease(&manager)?;
-    recover(&manager, &runtime)
+    let manager = UserManager::connect_until(deadline).await?;
+    acquire_lease(&manager).await?;
+    recover(&manager, &runtime).await
 }
 
-pub(super) fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), SessionError> {
+pub(super) async fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), SessionError> {
     let mut record = runtime.session()?;
     let control = std::sync::Arc::new(ShutdownControl::for_manager(manager));
     control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -36,31 +36,31 @@ pub(super) fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), Se
     record.shutdown_deadline_usec = Some(deadline);
     let mut failure = None;
     if let Err(error) = runtime.save_session(&record) { failure = Some(error); }
-    if let Err(error) = app_stop::prepare_apps(&manager, &runtime, runtime.apps()?, control) {
+    if let Err(error) = app_stop::prepare_apps(&manager, &runtime, runtime.apps()?, control).await {
         failure = Some(error);
     }
     let mut cleanup_manager = manager.clone();
     cleanup_manager.deadline = manager.deadline.reserving(Duration::from_secs(1))?;
     for app in runtime.apps()? {
-        if let Err(error) = apps::finish(&cleanup_manager, &runtime, &app) { failure.get_or_insert(error); }
+        if let Err(error) = apps::finish(&cleanup_manager, &runtime, &app).await { failure.get_or_insert(error); }
     }
-    let owns_environment = match cleanup_manager.environment() {
+    let owns_environment = match cleanup_manager.environment().await {
         Ok(environment) => environment.contains(&format!("{GENERATION_ENV}={}", runtime.generation)),
         Err(error) => { failure.get_or_insert(error); false }
     };
     if record.owns_targets && owns_environment {
         for target in [units::AUTOSTART_TARGET, units::SESSION_TARGET, units::PRE_TARGET] {
-            if let Err(error) = cleanup_manager.stop(target, Duration::from_secs(15)) { failure.get_or_insert(error); }
+            if let Err(error) = cleanup_manager.stop(target, Duration::from_secs(15)).await { failure.get_or_insert(error); }
         }
     }
-    if let Err(error) = cleanup_manager.stop(&record.anchor_unit, Duration::from_secs(15)) { failure.get_or_insert(error); }
-    let _ = cleanup_manager.unref(&record.anchor_unit);
+    if let Err(error) = cleanup_manager.stop(&record.anchor_unit, Duration::from_secs(15)).await { failure.get_or_insert(error); }
+    let _ = cleanup_manager.unref(&record.anchor_unit).await;
     if let Some(unit) = record.compositor_unit.clone() {
-        if let Err(error) = stop_compositor(manager, &runtime.generation, &mut record, &unit) { failure.get_or_insert(error); }
-        if record.provider == "managed" { let _ = manager.unref(&unit); }
+        if let Err(error) = stop_compositor(manager, &runtime.generation, &mut record, &unit).await { failure.get_or_insert(error); }
+        if record.provider == "managed" { let _ = manager.unref(&unit).await; }
     }
     if owns_environment {
-        if let Err(error) = env::clear_owned(&manager, &record.exported_environment) { failure.get_or_insert(error); }
+        if let Err(error) = env::clear_owned(&manager, &record.exported_environment).await { failure.get_or_insert(error); }
     }
     if let Err(error) = runtime.reap_closed_app_locks() { failure.get_or_insert(error); }
     if let Some(error) = failure { return Err(error); }
@@ -68,12 +68,12 @@ pub(super) fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), Se
     runtime.save_session(&record)
 }
 
-fn stop_compositor(manager: &UserManager, generation: &str, record: &mut SessionRecord, unit: &str) -> Result<(), SessionError> {
+async fn stop_compositor(manager: &UserManager, generation: &str, record: &mut SessionRecord, unit: &str) -> Result<(), SessionError> {
     if record.compositor_invocation.is_empty() && record.provider == "managed" {
-        let Some(id) = super::processes::generation_invocation(manager, unit, generation)? else { return Ok(()); };
+        let Some(id) = super::processes::generation_invocation(manager, unit, generation).await? else { return Ok(()); };
         record.compositor_invocation = id;
     }
-    super::processes::stop_invocation(manager, unit, &record.compositor_invocation)
+    super::processes::stop_invocation(manager, unit, &record.compositor_invocation).await
 }
 
 pub(super) fn recovery_deadline(saved: Option<u64>, current: u64) -> Result<u64, SessionError> {
@@ -83,8 +83,8 @@ pub(super) fn recovery_deadline(saved: Option<u64>, current: u64) -> Result<u64,
     Ok(deadline)
 }
 
-fn acquire_lease(manager: &UserManager) -> Result<(), SessionError> {
-    async_io::block_on(manager.deadline.bound(async {
+async fn acquire_lease(manager: &UserManager) -> Result<(), SessionError> {
+    manager.deadline.bound(async {
         let lease = async {
             loop {
                 match manager.connection().request_name_with_flags(BUS_NAME, RequestNameFlags::DoNotQueue.into()).await {
@@ -98,7 +98,7 @@ fn acquire_lease(manager: &UserManager) -> Result<(), SessionError> {
             async_io::Timer::after(Duration::from_secs(2)).await;
             Err(zbus::Error::from(zbus::fdo::Error::TimedOut("acquiring the recovery bus name timed out".into())).into())
         }).await
-    }))
+    }).await
 }
 
 #[cfg(test)]

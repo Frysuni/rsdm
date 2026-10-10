@@ -4,6 +4,7 @@ use std::{
     fs::{self, OpenOptions}, os::{fd::AsRawFd, unix::{fs::PermissionsExt, net::UnixStream}},
     sync::atomic::AtomicUsize, time::Instant,
 };
+use std::thread;
 
 use super::*;
 use rsdm_core::domain::ShutdownPolicy;
@@ -84,8 +85,8 @@ impl Drop for Fixture {
     fn drop(&mut self) { let _ = fs::remove_dir_all(&self.runtime.path); }
 }
 
-#[test]
-fn waiting_for_an_app_does_not_hold_its_record_lease() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn waiting_for_an_app_does_not_hold_its_record_lease() {
     let fixture = Fixture::new();
     let runtime = fixture.runtime.clone();
     let manager = fixture.manager.clone();
@@ -93,13 +94,12 @@ fn waiting_for_an_app_does_not_hold_its_record_lease() {
     let control = Arc::new(ShutdownControl::default());
     control.xsmp_units.set(vec![unit.clone()]).unwrap();
     let worker_control = control.clone();
-    let (sender, result) = std::sync::mpsc::channel();
-    let worker = thread::spawn(move || {
-        let _ = sender.send(prepare_app(&manager, &runtime, &unit, &worker_control));
+    let worker = tokio::spawn(async move {
+        prepare_app(&manager, &runtime, &unit, &worker_control).await
     });
     let deadline = Instant::now() + Duration::from_secs(2);
     while fixture.queries.load(Ordering::SeqCst) < 2 && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(5));
+        tokio::time::sleep(Duration::from_millis(5)).await;
     }
     let lease = OpenOptions::new().read(true).write(true)
         .open(fixture.runtime.path.join("apps").join(format!("{}.lock", fixture.app.unit))).unwrap();
@@ -107,8 +107,7 @@ fn waiting_for_an_app_does_not_hold_its_record_lease() {
     let acquired = unsafe { libc::flock(lease.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0;
     drop(lease);
     control.cancelled.store(true, Ordering::SeqCst);
-    let outcome = result.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
-    worker.join().unwrap();
+    let outcome = tokio::time::timeout(Duration::from_secs(2), worker).await.unwrap().unwrap().unwrap();
     assert!(fixture.queries.load(Ordering::SeqCst) >= 2);
     assert!(acquired, "application wait retained the record lease");
     assert_eq!(outcome, AppOutcome::Cancelled);
@@ -156,13 +155,13 @@ fn cancellation_does_not_reset_a_replacement_invocation() {
     assert!(saved.quit_started);
 }
 
-#[test]
-fn a_rejected_quit_helper_never_stops_or_unrefs_a_conflicting_unit() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rejected_quit_helper_never_stops_or_unrefs_a_conflicting_unit() {
     use crate::helper_start_fixture::{self, Mode};
     let app = helper_start_fixture::app();
     for mode in [Mode::Collision, Mode::Denied] {
         let fixture = helper_start_fixture::Fixture::new(app.unit.replacen("app-rsdm-", "rsdm-quit-", 1), mode);
-        assert!(matches!(launch_quit(&fixture.manager, &app, helper_start_fixture::GENERATION), Err(SessionError::StartRejected { .. })));
+        assert!(matches!(launch_quit(&fixture.manager, &app, helper_start_fixture::GENERATION).await, Err(SessionError::StartRejected { .. })));
         assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
         assert!(fixture.state.lifetime_bound.load(Ordering::SeqCst));
         assert_eq!(fixture.state.stops.load(Ordering::SeqCst), 0);
@@ -170,12 +169,12 @@ fn a_rejected_quit_helper_never_stops_or_unrefs_a_conflicting_unit() {
     }
 }
 
-#[test]
-fn an_accepted_quit_helper_with_an_inspection_error_still_attempts_cleanup() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_accepted_quit_helper_with_an_inspection_error_still_attempts_cleanup() {
     use crate::helper_start_fixture::{self, Mode};
     let app = helper_start_fixture::app();
     let fixture = helper_start_fixture::Fixture::new(app.unit.replacen("app-rsdm-", "rsdm-quit-", 1), Mode::InspectionDenied);
-    assert!(launch_quit(&fixture.manager, &app, helper_start_fixture::GENERATION).is_err());
+    assert!(launch_quit(&fixture.manager, &app, helper_start_fixture::GENERATION).await.is_err());
     assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
     assert!(fixture.state.lifetime_bound.load(Ordering::SeqCst));
     assert_eq!(fixture.state.unrefs.load(Ordering::SeqCst), 1);

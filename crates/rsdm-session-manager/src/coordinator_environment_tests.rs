@@ -17,7 +17,7 @@ fn finalize(fixture: &mut Fixture, value: &str) -> tokio::sync::mpsc::Receiver<R
 async fn completed_publication(fixture: &mut Fixture) {
     let work = tokio::time::timeout(Duration::from_secs(1), fixture.coordinator.work.recv()).await.unwrap().unwrap();
     assert!(matches!(work, Work::EnvironmentPublished(_)));
-    fixture.coordinator.completed(work).unwrap();
+    fixture.coordinator.completed(work).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -183,10 +183,10 @@ async fn cancelling_logout_preserves_an_accepted_startup_finalize_until_readines
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Starting);
     assert_eq!(fixture.coordinator.finalize_replies.len(), 1);
     state.ready.store(true, Ordering::SeqCst);
-    fixture.coordinator.completed(Work::Ready(Ok(false))).unwrap();
+    fixture.coordinator.completed(Work::Ready(Ok(false))).await.unwrap();
     fixture.coordinator.start_observation();
     let work = tokio::time::timeout(Duration::from_secs(2), fixture.coordinator.work.recv()).await.unwrap().unwrap();
-    fixture.coordinator.completed(work).unwrap();
+    fixture.coordinator.completed(work).await.unwrap();
     assert!(response.try_recv().unwrap().is_ok());
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Running);
     assert_eq!(fixture.coordinator.workers, 0);

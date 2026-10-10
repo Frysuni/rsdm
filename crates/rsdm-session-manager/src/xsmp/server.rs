@@ -21,7 +21,7 @@ pub(super) struct Server {
     announced: HashSet<String>,
 }
 
-pub(super) fn run(
+pub(super) async fn run(
     manager: UserManager, runtime: Runtime, messages: Receiver<Message>, notices: Sender<Notice>,
     ready: Sender<Result<Vec<(String, String)>, SessionError>>,
 ) {
@@ -34,7 +34,7 @@ pub(super) fn run(
         ("ICEAUTHORITY".into(), server._authority.path.to_string_lossy().into_owned()),
     ];
     if ready.send(Ok(environment)).is_err() { return; }
-    if let Err(error) = server.run() {
+    if let Err(error) = server.run().await {
         let _ = server.notices.send(Notice::Failed(error.to_string()));
     }
 }
@@ -67,12 +67,12 @@ impl Server {
             messages, notices, cancellable: true, announced: HashSet::new() })
     }
 
-    fn run(&mut self) -> Result<(), SessionError> {
+    async fn run(&mut self) -> Result<(), SessionError> {
         loop {
             while let Ok(message) = self.messages.try_recv() {
                 match message {
                     Message::Prepare { units, cancellable, reply } => {
-                        let result = self.prepare(&units, cancellable).map_err(|error| error.to_string());
+                        let result = self.prepare(&units, cancellable).await.map_err(|error| error.to_string());
                         let _ = reply.try_send(result);
                     }
                     Message::Cancel => self.cancel(),
@@ -80,13 +80,14 @@ impl Server {
                 }
             }
             self.advance()?;
-            self.poll()?;
+            self.poll().await?;
             self.remove_closed();
             self.announce();
+            tokio::task::yield_now().await;
         }
     }
 
-    fn poll(&mut self) -> Result<(), SessionError> {
+    async fn poll(&mut self) -> Result<(), SessionError> {
         let mut descriptors: Vec<_> = (0..self.listeners.count()).map(|index| descriptor(self.listeners.fd(index)))
             .chain(self.peers.iter().map(|peer| descriptor(peer.fd()))).collect();
         // SAFETY: the vector contains all live listener/connection descriptors.
@@ -107,7 +108,7 @@ impl Server {
         }
         for (index, descriptor) in descriptors.iter().take(listeners).enumerate() {
             if descriptor.revents & libc::POLLIN != 0 {
-                match Peer::accept(self.listeners.object(index), &self.manager, &self.runtime) {
+                match Peer::accept(self.listeners.object(index), &self.manager, &self.runtime).await {
                     Ok(peer) if self.peers.len() < 256 => self.peers.push(peer),
                     Ok(_) => {},
                     Err(error) => tracing::debug!(%error, "rejected ICE peer"),

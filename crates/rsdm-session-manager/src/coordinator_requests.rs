@@ -1,6 +1,6 @@
 //! Requests admitted by the coordinator's current lifecycle state.
 
-use std::{sync::atomic::Ordering, thread, time::Instant};
+use std::{sync::atomic::Ordering, time::Instant};
 
 use rsdm_core::domain::{SessionPhase, ShutdownMethod};
 
@@ -146,9 +146,9 @@ impl Coordinator {
         let anchor = self.record.anchor_unit.clone();
         let events = self.events.clone();
         self.workers += 1;
-        thread::spawn(move || {
+        tokio::spawn(async move {
             let unit = app.unit.clone();
-            let result = apps::launch(&manager, &runtime, &anchor, &request, app);
+            let result = apps::launch(&manager, &runtime, &anchor, &request, app).await;
             let _ = events.send(Work::Launched(unit, reply, result));
         });
         Ok(())

@@ -1,6 +1,6 @@
 //! Shutdown decisions on private records and an isolated peer-to-peer bus.
 
-use std::{fs, os::unix::{fs::PermissionsExt, net::UnixStream}, sync::atomic::AtomicUsize};
+use std::{fs, os::unix::{fs::PermissionsExt, net::UnixStream}, sync::atomic::AtomicUsize, thread};
 
 use super::*;
 use rsdm_system::logind::ShutdownNotice;
@@ -207,14 +207,14 @@ mod replies;
 #[path = "coordinator_environment_tests.rs"]
 mod environment;
 
-#[test]
-fn a_rejected_logout_helper_never_stops_or_unrefs_a_conflicting_unit() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rejected_logout_helper_never_stops_or_unrefs_a_conflicting_unit() {
     use crate::helper_start_fixture::{self, Mode};
     let record = helper_start_fixture::record();
     let provider = Provider { kind: ProviderKind::External, native_unit: None, logout_command: helper_start_fixture::command() };
     for mode in [Mode::Collision, Mode::Denied] {
         let fixture = helper_start_fixture::Fixture::new(format!("rsdm-logout-{GENERATION}.service"), mode);
-        assert!(matches!(run_logout_command(&fixture.manager, &record, &provider, Path::new("/")),
+        assert!(matches!(run_logout_command(&fixture.manager, &record, &provider, Path::new("/")).await,
             Err(SessionError::StartRejected { .. })));
         assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
         assert!(!fixture.state.lifetime_bound.load(Ordering::SeqCst));
@@ -224,28 +224,28 @@ fn a_rejected_logout_helper_never_stops_or_unrefs_a_conflicting_unit() {
     }
 }
 
-#[test]
-fn an_accepted_logout_helper_with_an_inspection_error_still_attempts_cleanup() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_accepted_logout_helper_with_an_inspection_error_still_attempts_cleanup() {
     use crate::helper_start_fixture::{self, Mode};
     let record = helper_start_fixture::record();
     let provider = Provider { kind: ProviderKind::External, native_unit: None, logout_command: helper_start_fixture::command() };
     let fixture = helper_start_fixture::Fixture::new(format!("rsdm-logout-{GENERATION}.service"), Mode::InspectionDenied);
-    assert!(run_logout_command(&fixture.manager, &record, &provider, Path::new("/")).is_err());
+    assert!(run_logout_command(&fixture.manager, &record, &provider, Path::new("/")).await.is_err());
     assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
     assert!(!fixture.state.lifetime_bound.load(Ordering::SeqCst));
     assert_eq!(fixture.state.runtime_limit_usec.load(Ordering::SeqCst), 15_000_000);
     assert_eq!(fixture.state.unrefs.load(Ordering::SeqCst), 1);
 }
 
-#[test]
-fn logout_does_not_launch_a_command_for_another_session_generation() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn logout_does_not_launch_a_command_for_another_session_generation() {
     use crate::helper_start_fixture::{self, Mode};
     let mut record = helper_start_fixture::record();
     record.identity.generation = "ffffffffffffffffffffffffffffffff".into();
     let provider = Provider { kind: ProviderKind::External, native_unit: None, logout_command: helper_start_fixture::command() };
     let fixture = helper_start_fixture::Fixture::new("unused.service".into(), Mode::Collision);
 
-    let error = run_logout_command(&fixture.manager, &record, &provider, Path::new("/")).unwrap_err();
+    let error = run_logout_command(&fixture.manager, &record, &provider, Path::new("/")).await.unwrap_err();
     assert!(error.to_string().contains("stale session generation"));
     assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 0);
     assert_eq!(fixture.state.stops.load(Ordering::SeqCst), 0);

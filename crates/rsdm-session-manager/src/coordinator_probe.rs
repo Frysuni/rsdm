@@ -43,7 +43,7 @@ pub(super) struct Readiness {
     pub(super) provider_ready: Option<bool>,
 }
 
-pub(super) fn observe_external(
+pub(super) async fn observe_external(
     manager: &super::bus::UserManager,
     runtime: &Runtime,
     provider: &Provider,
@@ -58,19 +58,19 @@ pub(super) fn observe_external(
     anchor_unit: &str,
 ) -> ObservationResult {
     let mut process = process;
-    let result = (|| {
+    let result = async {
         if reaped_apps {
-            apps::release_closed(manager, runtime)?;
+            apps::release_closed(manager, runtime).await?;
         }
 
         let boot = if pending_boot {
-            Some(verify_boot_external(manager, runtime, process.as_ref(), phase)?)
+            Some(verify_boot_external(manager, runtime, process.as_ref(), phase).await?)
         } else {
             None
         };
         let readiness_check = if pending_ready {
             Some(if matches!(phase, SessionPhase::Starting | SessionPhase::Running) {
-                Ok(manager.active(anchor_unit)?)
+                Ok(manager.active(anchor_unit).await?)
             } else {
                 Ok(false)
             })
@@ -83,13 +83,13 @@ pub(super) fn observe_external(
             process.as_mut(),
             phase,
             ready_deadline,
-        )?;
+        ).await?;
         let (anchor_active, session_target_active) = if ready_once
             && matches!(phase, SessionPhase::Starting | SessionPhase::Running)
         {
             (
-                Some(manager.active(anchor_unit)?),
-                Some(manager.active(units::SESSION_TARGET)?),
+                Some(manager.active(anchor_unit).await?),
+                Some(manager.active(units::SESSION_TARGET).await?),
             )
         } else {
             (None, None)
@@ -100,10 +100,10 @@ pub(super) fn observe_external(
             && !process.as_ref().is_some_and(|process| process.booting)
             && Instant::now() < ready_deadline
         {
-            let target_active = manager.active(units::SESSION_TARGET)?;
-            let display_published = activation::published_display(manager)?;
+            let target_active = manager.active(units::SESSION_TARGET).await?;
+            let display_published = activation::published_display(manager).await?;
             let provider_ready = if provider.kind != ProviderKind::Managed {
-                Some(provider.ready(manager)?)
+                Some(provider.ready(manager).await?)
             } else {
                 None
             };
@@ -125,11 +125,11 @@ pub(super) fn observe_external(
             session_target_active,
             readiness,
         })
-    })();
+    }.await;
     ObservationResult { process, result }
 }
 
-fn verify_boot_external(
+async fn verify_boot_external(
     manager: &super::bus::UserManager,
     runtime: &Runtime,
     process: Option<&SessionProcess>,
@@ -145,11 +145,11 @@ fn verify_boot_external(
         unit,
         "org.freedesktop.systemd1.Unit",
         "Job",
-    )?;
+    ).await?;
     if job.0 != 0 {
         return Ok(BootCheck::Pending);
     }
-    let result = match super::processes::generation_invocation(manager, unit, &runtime.generation)? {
+    let result = match super::processes::generation_invocation(manager, unit, &runtime.generation).await? {
         Some(id) if id.iter().any(|byte| *byte != 0) => Ok(id),
         Some(_) => Err(SessionError::State("compositor start did not create an invocation".into())),
         None => Err(SessionError::State("compositor start unit disappeared".into())),
@@ -157,7 +157,7 @@ fn verify_boot_external(
     Ok(BootCheck::Completed(result))
 }
 
-fn observe_process(
+async fn observe_process(
     manager: &super::bus::UserManager,
     provider: &Provider,
     process: Option<&mut SessionProcess>,
@@ -167,13 +167,13 @@ fn observe_process(
     let Some(process) = process else {
         return Ok(None);
     };
-    let code = process.exited(manager)?;
+    let code = process.exited(manager).await?;
     let Some(code) = code else {
         return Ok(None);
     };
     let detached = provider.native_desktop()
         || (provider.kind == ProviderKind::External && provider.native_unit.is_none());
-    let native_running = detached && code == 0 && provider.ready(manager)?;
+    let native_running = detached && code == 0 && provider.ready(manager).await?;
     let native_starting = detached
         && code == 0
         && phase == SessionPhase::Starting

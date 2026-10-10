@@ -10,7 +10,7 @@ enum Operation {
 
 pub(super) async fn start(
     manager: &UserManager, unit: &str, properties: &UnitProperties, timeout: Duration,
-    submitted: &Cell<bool>,
+    submitted: &AtomicBool,
 ) -> Result<(), SessionError> {
     let deadline = Instant::now().checked_add(timeout)
         .ok_or_else(|| SessionError::State("systemd job deadline overflow".into()))?;
@@ -30,7 +30,7 @@ pub(super) async fn start(
             generation.as_ref().map(|generation| manager.transport.stage_reference(unit, generation.clone()))
         } else { None };
         if let Some(reference) = &mut reference { reference.submitted(); }
-        submitted.set(true);
+        submitted.store(true, Ordering::Relaxed);
         let reply = proxy.call("StartTransientUnit", &(unit, "fail", properties, auxiliary)).await;
         if let Err(error) = &reply
             && rejected_start(manager, unit, error).await

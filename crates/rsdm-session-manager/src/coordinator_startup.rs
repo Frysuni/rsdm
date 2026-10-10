@@ -1,6 +1,6 @@
 //! Prepare session ownership before spawning the compositor.
 
-use std::{collections::VecDeque, sync::{Arc, atomic::AtomicBool}, thread, time::{Duration, Instant}};
+use std::{collections::VecDeque, sync::{Arc, atomic::AtomicBool}, time::{Duration, Instant}};
 
 use rsdm_core::domain::{SessionManagerConfig, SessionPhase};
 use rsdm_system::logind::ShutdownMonitor;
@@ -24,9 +24,9 @@ impl Coordinator {
         let (endpoint, requests) = control::Endpoint::channel(identity.uid);
         // Acquire the one-session lease before changing shared manager state.
         let bus = control::ControlServer::start(endpoint).await?;
-        let manager = UserManager::connect()?;
+        let manager = UserManager::connect().await?;
         super::processes::require_pidfds()?;
-        if manager.active(units::SESSION_TARGET)? {
+        if manager.active(units::SESSION_TARGET).await? {
             return Err(SessionError::SessionAlreadyActive);
         }
         let provider = Provider::select(argv, &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(), options)?;
@@ -53,11 +53,11 @@ impl Coordinator {
             None
         };
 
-        super::startup::publish(&manager, &runtime, &record)?;
+        super::startup::publish(&manager, &runtime, &record).await?;
         let process = match SessionProcess::launch(argv, &environment, &directory, &provider, managed_unit) {
             Ok(process) => process,
             Err(error) => {
-                super::startup::rollback(&manager, &runtime, &record);
+                super::startup::rollback(&manager, &runtime, &record).await;
                 return Err(error);
             }
         };
@@ -67,8 +67,11 @@ impl Coordinator {
             let manager = manager.clone();
             let unit = process.unit.clone().expect("managed compositor unit");
             let events = events.clone();
-            thread::spawn(move || {
-                let result = manager.start_service(&unit, &properties).and_then(|()| manager.invocation_id(&unit));
+            tokio::spawn(async move {
+                let result = async {
+                    manager.start_service(&unit, &properties).await?;
+                    manager.invocation_id(&unit).await
+                }.await;
                 let _ = events.send(Work::Boot(result));
             });
         }

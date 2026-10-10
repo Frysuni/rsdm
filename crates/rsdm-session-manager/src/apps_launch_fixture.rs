@@ -155,8 +155,8 @@ impl Fixture {
             _server: server.join().unwrap(), directory }
     }
 
-    pub(super) fn launch(&self) -> Result<String, SessionError> {
-        launch(&self.manager, &self.runtime, &format!("rsdm-session-{GENERATION}.service"), &self.request, self.app.clone())
+    pub(super) async fn launch(&self) -> Result<String, SessionError> {
+        launch(&self.manager, &self.runtime, &format!("rsdm-session-{GENERATION}.service"), &self.request, self.app.clone()).await
     }
 
     pub(super) fn missing_command(&mut self) {

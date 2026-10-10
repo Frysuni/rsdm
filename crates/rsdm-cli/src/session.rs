@@ -107,12 +107,10 @@ pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
             Ok(())
         }
         SessionAction::AppStop { generation, unit } => {
-            tokio::task::spawn_blocking(move || session_manager::stop_hook(&generation, &unit))
-                .await.context("application shutdown worker failed")?.context("completing application shutdown")
+            session_manager::stop_hook(&generation, &unit).await.context("completing application shutdown")
         }
         SessionAction::Cleanup { generation } => {
-            tokio::task::spawn_blocking(move || session_manager::cleanup(&generation))
-                .await.context("session recovery worker failed")?.context("recovering the graphical session")
+            session_manager::cleanup(&generation).await.context("recovering the graphical session")
         }
     }
 }

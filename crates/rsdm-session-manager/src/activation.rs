@@ -4,13 +4,13 @@ use std::{path::Path, sync::atomic::{AtomicBool, Ordering}};
 
 use super::{SessionError, bus::UserManager, env, provider::{Provider, ProviderKind}, runtime::SessionRecord, units};
 
-pub(super) fn activate(
+pub(super) async fn activate(
     manager: &UserManager, provider: &Provider, anchor: &str, compositor: Option<&str>,
     environment: &[(String, String)], directory: &Path, stopping: &AtomicBool,
 ) -> Result<bool, SessionError> {
     if stopping.load(Ordering::SeqCst) { return Ok(false); }
-    let external_target = manager.active(units::SESSION_TARGET)?;
-    if provider.kind != ProviderKind::Managed && (!external_target || !provider.ready(manager)?) {
+    let external_target = manager.active(units::SESSION_TARGET).await?;
+    if provider.kind != ProviderKind::Managed && (!external_target || !provider.ready(manager).await?) {
         return Err(SessionError::State("native session manager is not ready".into()));
     }
     let mut properties = units::anchor_properties(compositor, environment, directory)?;
@@ -31,12 +31,12 @@ pub(super) fn activate(
         ])));
     }
     if stopping.load(Ordering::SeqCst) { return Ok(false); }
-    manager.start_service(anchor, &properties)?;
+    manager.start_service(anchor, &properties).await?;
     Ok(!external_target && provider.kind == ProviderKind::Managed)
 }
 
-pub(super) fn published_display(manager: &UserManager) -> Result<bool, SessionError> {
-    let current = manager.environment()?.into_iter().find(|entry| entry.starts_with("WAYLAND_DISPLAY="));
+pub(super) async fn published_display(manager: &UserManager) -> Result<bool, SessionError> {
+    let current = manager.environment().await?.into_iter().find(|entry| entry.starts_with("WAYLAND_DISPLAY="));
     // Startup clears the previous display before the compositor is launched.
     Ok(current.is_some_and(|value| value != "WAYLAND_DISPLAY="))
 }

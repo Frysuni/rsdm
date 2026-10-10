@@ -44,13 +44,13 @@ fn a_new_recovery_attempt_has_one_five_second_budget() {
     assert!(recovery_deadline(Some(after + 30_000_000), after + 60_000_000).unwrap() <= after + 5_100_000);
 }
 
-#[test]
-fn acquiring_a_bus_name_observes_the_recovery_deadline() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn acquiring_a_bus_name_observes_the_recovery_deadline() {
     let (connection, _server, calls) = bus_fixture();
     let manager = UserManager::with_connection(connection);
     manager.deadline.set(super::super::processes::monotonic_usec().unwrap() + 50_000);
     let before = std::time::Instant::now();
-    let result = acquire_lease(&manager);
+    let result = acquire_lease(&manager).await;
     assert!(matches!(result, Err(SessionError::Bus(error)) if super::super::bus::retryable_error(&error)));
     assert!(before.elapsed() < Duration::from_secs(1));
     assert_eq!(calls.load(Ordering::SeqCst), 1);

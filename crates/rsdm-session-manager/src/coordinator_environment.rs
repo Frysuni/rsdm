@@ -1,7 +1,5 @@
 //! Serialize environment publication while lifecycle decisions stay responsive.
 
-use std::thread;
-
 use rsdm_core::domain::SessionPhase;
 
 use super::{SessionError, activation, control::Reply, coordinator::{Coordinator, Work}, env};
@@ -33,13 +31,13 @@ impl Coordinator {
         let manager = self.manager.clone();
         let events = self.events.clone();
         self.workers += 1;
-        thread::spawn(move || {
-            let _ = events.send(Work::EnvironmentPublished(env::publish(&manager, &environment)));
+        tokio::spawn(async move {
+            let _ = events.send(Work::EnvironmentPublished(env::publish(&manager, &environment).await));
         });
         Ok(())
     }
 
-    pub(super) fn environment_published(&mut self, result: Result<(), SessionError>) -> Result<(), SessionError> {
+    pub(super) async fn environment_published(&mut self, result: Result<(), SessionError>) -> Result<(), SessionError> {
         let reply = self.environment_reply.take()
             .ok_or_else(|| SessionError::State("environment publication completed without a request".into()))?;
         // No app preparation can start while this publication is outstanding.
@@ -54,7 +52,7 @@ impl Coordinator {
             Ok(()) if self.lifecycle.phase == SessionPhase::Running => { let _ = reply.try_send(Ok(())); }
             Ok(()) => {
                 self.finalize_replies.push(reply);
-                self.activate();
+                self.activate().await;
             }
         }
         self.publish_next_environment()

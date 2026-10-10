@@ -18,7 +18,7 @@ async fn observation_preserves_the_process_until_the_start_worker_completes() {
     fixture.coordinator.start_observation();
     assert!(!fixture.coordinator.observation_busy);
     assert!(fixture.coordinator.process.is_some());
-    fixture.coordinator.completed(Work::Boot(Ok(vec![3; 16]))).unwrap();
+    fixture.coordinator.completed(Work::Boot(Ok(vec![3; 16]))).await.unwrap();
     assert!(!fixture.coordinator.booting());
     assert_eq!(fixture.coordinator.process.as_ref().unwrap().invocation, vec![3; 16]);
     assert_eq!(fixture.coordinator.record.compositor_invocation, vec![3; 16]);
@@ -48,7 +48,7 @@ async fn stale_readiness_cannot_acknowledge_or_restart_a_stopping_session() {
     fixture.coordinator.begin_stop("logout", None).unwrap();
 
     fixture.coordinator.complete_readiness(true).unwrap();
-    fixture.coordinator.activate();
+    fixture.coordinator.activate().await;
     assert!(response.try_recv().unwrap().is_err());
     assert!(!fixture.coordinator.ready_once);
     assert!(!fixture.coordinator.ready_busy);
@@ -67,7 +67,7 @@ async fn an_inflight_observation_returns_ownership_before_shutdown_advances() {
     assert!(!fixture.coordinator.preparing);
 
     let work = tokio::time::timeout(Duration::from_secs(8), fixture.coordinator.work.recv()).await.unwrap().unwrap();
-    fixture.coordinator.completed(work).unwrap();
+    fixture.coordinator.completed(work).await.unwrap();
     fixture.coordinator.start_observation();
     fixture.coordinator.advance().unwrap();
     assert!(!fixture.coordinator.observation_busy);

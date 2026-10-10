@@ -97,8 +97,9 @@ Coordinator startup awaits logind identity verification; connection setup and
 session queries share one five-second budget.
 GNOME and Plasma shutdown delegation runs in an asynchronous worker under the
 shared deadline; a failed or lost reply does not trigger a repeated request.
-Session Manager clients await typed D-Bus requests; compatibility stop hooks
-and recovery run in blocking workers while their internals are migrated.
+Session Manager clients, stop hooks, and recovery await typed D-Bus requests.
+User-manager operations stay on the caller's runtime; compositor startup,
+application launches, preparation, observation, and teardown use Tokio tasks.
 Control endpoint registration and health checks run as Tokio tasks; dropping
 the server aborts its pending reconnection task.
 The workspace disables zbus's blocking API, including in CLI bus fixtures.
@@ -113,8 +114,9 @@ logind notices, and periodic observation. Reply delivery and recovery worker
 draining share their original budgets through asynchronous waits.
 Deadline revisions use Tokio watch so every pending operation observes both
 shortening and revocation without retaining watchers after completion.
-Observation and readiness still perform synchronous manager reads;
-their timeouts can delay cancellation. Registration and
+The actor still awaits target ownership checks during readiness, and record
+operations remain synchronous while persistence is migrated; either can delay
+cancellation. Registration and
 recovery records precede side effects. InvocationID and pidfd checks keep
 cleanup/signals attached to the recorded processes.
 

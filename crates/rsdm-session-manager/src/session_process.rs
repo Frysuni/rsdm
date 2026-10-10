@@ -34,14 +34,14 @@ impl SessionProcess {
             child_exit: None, native_unit_seen: false, launched: std::time::Instant::now() })
     }
 
-    pub fn exited(&mut self, manager: &UserManager) -> Result<Option<i32>, SessionError> {
+    pub async fn exited(&mut self, manager: &UserManager) -> Result<Option<i32>, SessionError> {
         if self.booting { return Ok(None); }
         if let Some(child) = &mut self.child {
             if self.child_exit.is_none() { self.child_exit = child.try_wait().map_err(SessionError::Wait)?.map(exit_status_code); }
             let Some(unit) = &self.unit else { return Ok(self.child_exit); };
-            if manager.active(unit)? {
+            if manager.active(unit).await? {
                 self.native_unit_seen = true;
-                if self.invocation.is_empty() { self.invocation = manager.invocation_id(unit)?; }
+                if self.invocation.is_empty() { self.invocation = manager.invocation_id(unit).await?; }
                 return Ok(None);
             }
             if self.native_unit_seen || self.launched.elapsed() > Duration::from_secs(10) {
@@ -50,27 +50,27 @@ impl SessionProcess {
             return Ok(None);
         }
         let Some(unit) = &self.unit else { return Ok(None); };
-        if manager.active(unit)? { return Ok(None); }
-        let code: i32 = manager.unit_property(unit, "org.freedesktop.systemd1.Service", "ExecMainCode")?;
-        let status: i32 = manager.unit_property(unit, "org.freedesktop.systemd1.Service", "ExecMainStatus")?;
+        if manager.active(unit).await? { return Ok(None); }
+        let code: i32 = manager.unit_property(unit, "org.freedesktop.systemd1.Service", "ExecMainCode").await?;
+        let status: i32 = manager.unit_property(unit, "org.freedesktop.systemd1.Service", "ExecMainStatus").await?;
         Ok(Some(if code == libc::CLD_EXITED { status } else { 128 + status }))
     }
 
-    pub fn stop(&mut self, manager: &UserManager, provider: &Provider, generation: &str) -> Result<(), SessionError> {
+    pub async fn stop(&mut self, manager: &UserManager, provider: &Provider, generation: &str) -> Result<(), SessionError> {
         let mut failure = None;
         if let Some(unit) = &self.unit {
-            let result = (|| {
+            let result = async {
                 if self.invocation.is_empty() && provider.kind == ProviderKind::Managed {
-                    self.invocation = super::processes::generation_invocation(manager, unit, generation)?.unwrap_or_default();
+                    self.invocation = super::processes::generation_invocation(manager, unit, generation).await?.unwrap_or_default();
                 }
-                super::processes::stop_invocation(manager, unit, &self.invocation)?;
-                if provider.kind == ProviderKind::Managed { manager.unref(unit)?; }
+                super::processes::stop_invocation(manager, unit, &self.invocation).await?;
+                if provider.kind == ProviderKind::Managed { manager.unref(unit).await?; }
                 Ok(())
-            })();
+            }.await;
             if let Err(error) = result { failure = Some(error); }
         }
         if let Some(child) = &mut self.child {
-            if let Err(error) = async_io::block_on(stop_launcher(child, &manager.deadline)) {
+            if let Err(error) = stop_launcher(child, &manager.deadline).await {
                 failure.get_or_insert(error);
             }
         }

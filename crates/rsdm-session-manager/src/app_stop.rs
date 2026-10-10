@@ -1,9 +1,8 @@
-//! Application shutdown, shared by preflight and the synchronous ExecStop hook.
+//! Application shutdown, shared by preflight and the ExecStop hook.
 
 use std::{
     path::Path,
     sync::{Arc, OnceLock, atomic::{AtomicBool, Ordering}},
-    thread,
     time::Duration,
 };
 
@@ -53,13 +52,13 @@ pub(super) enum AppOutcome {
     Forced,
 }
 
-pub(super) fn prepare_apps(
+pub(super) async fn prepare_apps(
     manager: &UserManager, runtime: &Runtime, apps: Vec<AppRecord>, control: Arc<ShutdownControl>,
 ) -> Result<Vec<String>, SessionError> {
     let phase_manager = preparation_manager(manager, &control)?;
     let selected = prepare_xsmp(
         &phase_manager, runtime, &apps.iter().map(|app| app.unit.clone()).collect::<Vec<_>>(), &control,
-    )?;
+    ).await?;
     // Keep one protocol selection for the batch. Reissuing Prepare from each
     // app worker could start a new save after the server already cancelled it.
     let _ = control.xsmp_units.set(selected);
@@ -70,21 +69,21 @@ pub(super) fn prepare_apps(
             let manager = manager.clone();
             let runtime = runtime.clone();
             let control = control.clone();
-            thread::spawn(move || {
-                let result = prepare_app(&manager, &runtime, &app.unit, &control);
+            tokio::spawn(async move {
+                let result = prepare_app(&manager, &runtime, &app.unit, &control).await;
                 (app.unit, result)
             })
         }).collect();
         for worker in workers {
-            match worker.join() {
+            match worker.await {
                 Ok((unit, Ok(AppOutcome::Forced))) => forced.push(unit),
                 Ok((_, Ok(_))) => {}
                 Ok((_, Err(error))) => {
                     control.cancelled.store(true, Ordering::SeqCst);
                     failure.get_or_insert(error);
                 }
-                Err(_) => {
-                    failure.get_or_insert(SessionError::State("application shutdown worker panicked".into()));
+                Err(error) => {
+                    failure.get_or_insert(SessionError::State(format!("application shutdown worker failed: {error}")));
                 }
             }
         }
@@ -95,11 +94,11 @@ pub(super) fn prepare_apps(
     Ok(forced)
 }
 
-pub(super) fn prepare_app(
+pub(super) async fn prepare_app(
     manager: &UserManager, runtime: &Runtime, unit: &str, control: &ShutdownControl,
 ) -> Result<AppOutcome, SessionError> {
     let phase_manager = preparation_manager(manager, control)?;
-    let prepared = begin_preparation(&phase_manager, runtime, unit, control);
+    let prepared = begin_preparation(&phase_manager, runtime, unit, control).await;
     let (app, quit_unit) = match prepared {
         Ok(Preparation::Finished(outcome)) => return Ok(outcome),
         Ok(Preparation::Waiting(app, quit_unit)) => (app, quit_unit),
@@ -107,16 +106,16 @@ pub(super) fn prepare_app(
             && control.noncancelable.load(Ordering::SeqCst) => {
                 let mut force_manager = manager.clone();
                 force_manager.deadline = control.hard_deadline.reserving(Duration::from_secs(1))?;
-                if !super::apps::pin_pending(&force_manager, runtime, unit)? { return Ok(AppOutcome::Closed); }
-                return wait::force_exit(&force_manager, &runtime.app(unit)?, control, &phase_manager.deadline);
+                if !super::apps::pin_pending(&force_manager, runtime, unit).await? { return Ok(AppOutcome::Closed); }
+                return wait::force_exit(&force_manager, &runtime.app(unit)?, control, &phase_manager.deadline).await;
             }
         Err(error) => return Err(error),
     };
-    let result = wait::await_exit(&phase_manager, &app, control);
+    let result = wait::await_exit(&phase_manager, &app, control).await;
     if let Some(unit) = quit_unit {
         let mut cleanup_manager = manager.clone();
         cleanup_manager.deadline = control.hard_deadline.reserving(Duration::from_secs(1))?;
-        release_quit(&cleanup_manager, &unit);
+        release_quit(&cleanup_manager, &unit).await;
     }
     if matches!(result, Ok(AppOutcome::Cancelled)) {
         reset_preparation(runtime, &app, &control.hard_deadline)?;
@@ -135,14 +134,14 @@ fn preparation_manager(manager: &UserManager, control: &ShutdownControl) -> Resu
     Ok(manager)
 }
 
-fn begin_preparation(
+async fn begin_preparation(
     manager: &UserManager, runtime: &Runtime, unit: &str, control: &ShutdownControl,
 ) -> Result<Preparation, SessionError> {
-    if !super::apps::pin_pending(manager, runtime, unit)? {
+    if !super::apps::pin_pending(manager, runtime, unit).await? {
         return Ok(Preparation::Finished(AppOutcome::Closed));
     }
     let app = runtime.app(unit)?;
-    if app_processes(manager, &app)?.is_empty() {
+    if app_processes(manager, &app).await?.is_empty() {
         return Ok(Preparation::Finished(AppOutcome::Closed));
     }
     if control.cancelled() {
@@ -150,7 +149,7 @@ fn begin_preparation(
     }
 
     let (app, claimed) = claim_preparation(runtime, unit, control, &manager.deadline)?;
-    let quit_unit = if claimed { request_quit(manager, runtime, &app, control)? } else { None };
+    let quit_unit = if claimed { request_quit(manager, runtime, &app, control).await? } else { None };
     Ok(Preparation::Waiting(app, quit_unit))
 }
 
@@ -182,41 +181,41 @@ fn reset_preparation(runtime: &Runtime, prepared: &AppRecord, deadline: &Deadlin
     Ok(())
 }
 
-fn request_quit(manager: &UserManager, runtime: &Runtime, app: &AppRecord, control: &ShutdownControl) -> Result<Option<String>, SessionError> {
+async fn request_quit(manager: &UserManager, runtime: &Runtime, app: &AppRecord, control: &ShutdownControl) -> Result<Option<String>, SessionError> {
     if !app.policy.quit_command.is_empty() {
-        return launch_quit(manager, app, &runtime.generation).map(Some);
+        return launch_quit(manager, app, &runtime.generation).await.map(Some);
     }
     if app.policy.method != ShutdownMethod::Term {
         let selected = match control.xsmp_units.get() {
             Some(selected) => selected.clone(),
-            None => prepare_xsmp(manager, runtime, std::slice::from_ref(&app.unit), control)?,
+            None => prepare_xsmp(manager, runtime, std::slice::from_ref(&app.unit), control).await?,
         };
         if selected.contains(&app.unit) {
             return Ok(None);
         }
         if app.policy.method == ShutdownMethod::Xsmp && !control.noncancelable.load(Ordering::SeqCst)
-            && !app_processes(manager, app)?.is_empty()
+            && !app_processes(manager, app).await?.is_empty()
         {
             return Err(SessionError::State("this application has no XSMP connection".into()));
         }
     }
-    terminate_main(manager, app)?;
+    terminate_main(manager, app).await?;
     Ok(None)
 }
 
-fn prepare_xsmp(
+async fn prepare_xsmp(
     manager: &UserManager, runtime: &Runtime, units: &[String], control: &ShutdownControl,
 ) -> Result<Vec<String>, SessionError> {
     if !cfg!(feature = "xsmp") || units.is_empty() || control.recovery.load(Ordering::SeqCst) {
         return Ok(Vec::new());
     }
-    let result = async_io::block_on(manager.deadline.bound(async {
+    let result = manager.deadline.bound(async {
         let connection = manager.connection();
         let proxy = zbus::Proxy::new(&connection, super::control::BUS_NAME,
             super::control::OBJECT_PATH, super::control::BUS_NAME).await?;
         let selected = proxy.call("XsmpPrepare", &(&runtime.generation, units, !control.noncancelable.load(Ordering::SeqCst))).await?;
         Ok::<Vec<String>, SessionError>(selected)
-    }));
+    }).await;
     match result {
         Err(error) if control.noncancelable.load(Ordering::SeqCst) => {
             tracing::warn!(%error, "XSMP is unavailable during noncancellable cleanup; using application signals");
@@ -226,12 +225,12 @@ fn prepare_xsmp(
     }
 }
 
-fn launch_quit(manager: &UserManager, app: &AppRecord, generation: &str) -> Result<String, SessionError> {
+async fn launch_quit(manager: &UserManager, app: &AppRecord, generation: &str) -> Result<String, SessionError> {
     let unit = app.unit.replacen("app-rsdm-", "rsdm-quit-", 1);
-    let environment: Vec<String> = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Service", "Environment")?;
+    let environment: Vec<String> = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Service", "Environment").await?;
     let environment: Vec<_> = environment.iter().filter_map(|entry| entry.split_once('=')
         .map(|(name, value)| (name.to_string(), value.to_string()))).collect();
-    let directory: String = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Service", "WorkingDirectory")?;
+    let directory: String = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Service", "WorkingDirectory").await?;
     let mut properties = command_properties(&app.policy.quit_command, &environment, Path::new(&directory))?;
     properties.extend([
         ("Slice", Value::from(super::units::APP_SLICE)),
@@ -239,20 +238,20 @@ fn launch_quit(manager: &UserManager, app: &AppRecord, generation: &str) -> Resu
         ("PartOf", Value::new(vec![format!("rsdm-session-{generation}.service")])),
         ("Requisite", Value::new(vec![format!("rsdm-session-{generation}.service")])),
     ]);
-    if let Err(error) = manager.start_service(&unit, &properties) {
+    if let Err(error) = manager.start_service(&unit, &properties).await {
         if !matches!(error, SessionError::StartRejected { .. }) {
-            release_quit(manager, &unit);
+            release_quit(manager, &unit).await;
         }
         return Err(error);
     }
     Ok(unit)
 }
 
-fn release_quit(manager: &UserManager, unit: &str) {
-    if let Err(error) = manager.stop(unit, Duration::from_secs(3)) {
+async fn release_quit(manager: &UserManager, unit: &str) {
+    if let Err(error) = manager.stop(unit, Duration::from_secs(3)).await {
         tracing::warn!(unit, %error, "quit command cleanup failed");
     }
-    let _ = manager.unref(unit);
+    let _ = manager.unref(unit).await;
 }
 
 #[cfg(test)]

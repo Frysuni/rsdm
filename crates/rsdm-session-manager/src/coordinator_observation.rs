@@ -1,6 +1,6 @@
 //! Apply asynchronous observations to the current session lifecycle.
 
-use std::{thread, time::{Duration, Instant}};
+use std::time::{Duration, Instant};
 
 use rsdm_core::domain::SessionPhase;
 
@@ -14,7 +14,7 @@ use super::{
 
 impl Coordinator {
     #[cfg(test)]
-    pub fn observe(&mut self) -> Result<(), SessionError> {
+    pub async fn observe(&mut self) -> Result<(), SessionError> {
         let process = self.process.take();
         let result = observe_external(
             &self.manager,
@@ -30,8 +30,8 @@ impl Coordinator {
             self.pending_boot,
             self.pending_ready,
             &self.record.anchor_unit,
-        );
-        self.observation_completed(result)
+        ).await;
+        self.observation_completed(result).await
     }
 
     pub fn start_observation(&mut self) {
@@ -72,7 +72,7 @@ impl Coordinator {
         self.observation_busy = true;
         self.workers += 1;
 
-        thread::spawn(move || {
+        tokio::spawn(async move {
             let result = observe_external(
                 &manager,
                 &runtime,
@@ -86,12 +86,12 @@ impl Coordinator {
                 pending_boot,
                 pending_ready,
                 &anchor_unit,
-            );
+            ).await;
             let _ = events.send(Work::Observed(result));
         });
     }
 
-    pub fn observation_completed(
+    pub async fn observation_completed(
         &mut self,
         result: ObservationResult,
     ) -> Result<(), SessionError> {
@@ -115,7 +115,7 @@ impl Coordinator {
                         process.booting = false;
                     }
                 }
-                BootCheck::Completed(result) => self.boot_completed(result)?,
+                BootCheck::Completed(result) => self.boot_completed(result).await?,
             }
         }
         if let Some(result) = observation.readiness_check {
@@ -175,14 +175,14 @@ impl Coordinator {
                 readiness.target_active || display_ready
             };
             if ready {
-                self.activate();
+                self.activate().await;
             }
         }
 
         // Explicit finalize may have published its environment while this
         // worker owned the process. Retry that deferred activation now.
         if self.lifecycle.phase == SessionPhase::Starting && !self.finalize_replies.is_empty() {
-            self.activate();
+            self.activate().await;
         }
 
         while self.queued.front().is_some_and(|(_, _, accepted)| {
