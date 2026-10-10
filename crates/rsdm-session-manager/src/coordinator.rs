@@ -3,12 +3,13 @@
 use std::{
     collections::VecDeque,
     path::PathBuf,
-    sync::{Arc, atomic::AtomicBool, mpsc::{self, Receiver, Sender}},
+    sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant},
 };
 
 use rsdm_core::domain::{SessionManagerConfig, SessionPhase};
 use rsdm_system::logind::{ShutdownMonitor, ShutdownNotice};
+use tokio::sync::mpsc::{Receiver, UnboundedReceiver, UnboundedSender};
 
 use super::{
     SessionError, app_stop::ShutdownControl, bus::UserManager,
@@ -42,8 +43,8 @@ pub(super) struct Coordinator {
     pub environment: Vec<(String, String)>,
     pub directory: PathBuf,
     pub requests: Receiver<Request>,
-    pub work: Receiver<Work>,
-    pub events: Sender<Work>,
+    pub work: UnboundedReceiver<Work>,
+    pub events: UnboundedSender<Work>,
     pub queued: VecDeque<(LaunchRequest, Reply<String>, Instant)>,
     pub finalize_replies: Vec<Reply<()>>,
     pub pending_environment: VecDeque<(Vec<(String, String)>, Reply<()>)>,
@@ -74,50 +75,59 @@ pub(super) struct Coordinator {
 
 pub(super) async fn start(argv: &[String], cfg: &SessionManagerConfig, options: &StartOptions) -> Result<i32, SessionError> {
     let mut coordinator = Coordinator::create(argv, cfg, options).await?;
-    tokio::task::spawn_blocking(move || {
-        super::signals::install();
-        let result = coordinator.run();
-        if result.as_ref().map_or(true, |code| *code != 0) {
-            coordinator.recover();
-        }
-        result
-    }).await.map_err(|error| SessionError::State(format!("coordinator worker failed: {error}")))?
+    super::signals::install();
+    let result = coordinator.run().await;
+    if result.as_ref().map_or(true, |code| *code != 0) {
+        coordinator.recover().await;
+    }
+    result
 }
 
 impl Coordinator {
-    fn run(&mut self) -> Result<i32, SessionError> {
+    async fn run(&mut self) -> Result<i32, SessionError> {
+        let mut tick = tokio::time::interval(Duration::from_millis(100));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut notices_open = true;
         loop {
-            self.notifications()?;
-            self.control_bus.maintain();
-            while let Ok(work) = self.work.try_recv() {
-                self.completed(work)?;
-            }
-            match self.requests.recv_timeout(Duration::from_millis(100)) {
-                Ok(request) => self.request(request)?,
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(SessionError::State("session control channel closed".into()));
+            tokio::select! {
+                request = self.requests.recv() => {
+                    let request = request.ok_or_else(|| SessionError::State("session control channel closed".into()))?;
+                    self.request(request)?;
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                work = self.work.recv() => {
+                    let work = work.ok_or_else(|| SessionError::State("session work channel closed".into()))?;
+                    self.completed(work)?;
+                }
+                notice = self.notices.recv(), if notices_open => match notice {
+                    Some(notice) => self.shutdown_notice(notice)?,
+                    None => notices_open = false,
+                },
+                _ = tick.tick() => {
+                    self.notifications()?;
+                    self.control_bus.maintain();
+                    self.start_observation();
+                }
             }
             if self.lifecycle.phase == SessionPhase::Closed {
                 break;
             }
             self.publish_next_environment()?;
-            self.start_observation();
             self.advance()?;
         }
-        self.finish_reply_delivery()?;
+        self.finish_reply_delivery().await?;
         Ok(self.exit_code)
     }
 
-    pub(super) fn finish_reply_delivery(&mut self) -> Result<(), SessionError> {
+    pub(super) async fn finish_reply_delivery(&mut self) -> Result<(), SessionError> {
         let limit = Instant::now() + Duration::from_secs(2);
         while self.replies_pending > 0 {
             let local = limit.saturating_duration_since(Instant::now());
             if local.is_zero() { break; }
             let Ok(wait) = self.manager.deadline.remaining(local.min(Duration::from_millis(50))) else { break; };
-            if let Ok(request) = self.requests.recv_timeout(wait) {
-                self.request(request)?;
+            match tokio::time::timeout(wait, self.requests.recv()).await {
+                Ok(Some(request)) => self.request(request)?,
+                Ok(None) => break,
+                Err(_) => {}
             }
         }
         Ok(())

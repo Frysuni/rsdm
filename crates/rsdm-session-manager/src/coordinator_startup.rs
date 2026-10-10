@@ -1,6 +1,6 @@
 //! Prepare session ownership before spawning the compositor.
 
-use std::{collections::VecDeque, sync::{Arc, atomic::AtomicBool, mpsc}, thread, time::{Duration, Instant}};
+use std::{collections::VecDeque, sync::{Arc, atomic::AtomicBool}, thread, time::{Duration, Instant}};
 
 use rsdm_core::domain::{SessionManagerConfig, SessionPhase};
 use rsdm_system::logind::ShutdownMonitor;
@@ -61,7 +61,7 @@ impl Coordinator {
                 return Err(error);
             }
         };
-        let (events, work) = mpsc::channel();
+        let (events, work) = tokio::sync::mpsc::unbounded_channel();
         let workers = usize::from(properties.is_some());
         if let Some(properties) = properties {
             let manager = manager.clone();

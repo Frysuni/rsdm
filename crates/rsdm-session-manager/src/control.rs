@@ -1,8 +1,9 @@
 //! User-bus requests; lifecycle decisions are serialized by the coordinator.
 
-use std::sync::{Arc, mpsc::{self, Receiver, SyncSender, TrySendError}};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::{self, Receiver, Sender, error::TrySendError};
 use zbus::{Connection, message::Header, object_server::ResponseDispatchNotifier, zvariant::Type};
 
 use super::SessionError;
@@ -65,28 +66,28 @@ pub(super) enum Request {
 
 #[derive(Clone)]
 pub(super) struct Endpoint {
-    requests: SyncSender<Request>,
+    requests: Sender<Request>,
     uid: u32,
     admission: Admission,
 }
 
 impl Endpoint {
     pub fn channel(uid: u32) -> (Self, Receiver<Request>) {
-        let (requests, received) = mpsc::sync_channel(admission::QUEUE_CAPACITY);
+        let (requests, received) = mpsc::channel(admission::QUEUE_CAPACITY);
         (Self { requests, uid, admission: Admission::default() }, received)
     }
 
     async fn request<T: Send + 'static>(
         &self, permit: Arc<Permit>, make_request: impl FnOnce(Reply<T>) -> Request + Send,
     ) -> zbus::fdo::Result<T> {
-        let (sender, result) = async_channel::bounded(1);
+        let (sender, mut result) = mpsc::channel(1);
         let reply = Reply::new(sender, permit.clone());
         self.requests.try_send(make_request(reply)).map_err(|error| match error {
             TrySendError::Full(_) => zbus::fdo::Error::LimitsExceeded("session coordinator queue is full".into()),
-            TrySendError::Disconnected(_) => zbus::fdo::Error::Failed("session coordinator stopped".into()),
+            TrySendError::Closed(_) => zbus::fdo::Error::Failed("session coordinator stopped".into()),
         })?;
         let outcome = result.recv().await
-            .map_err(|_| zbus::fdo::Error::Failed("session request was interrupted".into()))?;
+            .ok_or_else(|| zbus::fdo::Error::Failed("session request was interrupted".into()))?;
         drop(permit);
         outcome.map_err(zbus::fdo::Error::Failed)
     }

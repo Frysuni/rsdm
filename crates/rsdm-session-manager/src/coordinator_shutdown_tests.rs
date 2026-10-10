@@ -59,7 +59,7 @@ impl Fixture {
         };
         runtime.save_session(&record).unwrap();
         let (endpoint, requests) = crate::control::Endpoint::channel(uid);
-        let (events, work) = std::sync::mpsc::channel();
+        let (events, work) = tokio::sync::mpsc::unbounded_channel();
         let (notices, received) = tokio::sync::mpsc::unbounded_channel();
         let mut lifecycle = Lifecycle::new();
         lifecycle.ready();

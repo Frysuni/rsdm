@@ -1,8 +1,8 @@
-use std::{os::unix::net::UnixStream, sync::mpsc, time::Duration};
+use std::{os::unix::net::UnixStream, time::Duration};
 
 use super::*;
 
-async fn connect(uid: u32) -> (Connection, Connection, mpsc::Receiver<Request>) {
+async fn connect(uid: u32) -> (Connection, Connection, tokio::sync::mpsc::Receiver<Request>) {
     let (server_socket, client_socket) = UnixStream::pair().unwrap();
     let (endpoint, receiver) = Endpoint::channel(uid);
     let server = tokio::spawn(async move {
@@ -31,20 +31,20 @@ fn launch() -> LaunchRequest {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_pending_launch_does_not_block_a_cancel_request() {
     // SAFETY: geteuid has no preconditions.
-    let (_server, connection, requests) = connect(unsafe { libc::geteuid() }).await;
+    let (_server, connection, mut requests) = connect(unsafe { libc::geteuid() }).await;
     let launching = connection.clone();
     let worker = tokio::spawn(async move {
         proxy(&launching).await.unwrap().call::<_, _, String>("Launch", &(launch(),)).await.unwrap()
     });
-    let Request::Launch(_, pending) = requests.recv_timeout(Duration::from_secs(2)).unwrap() else { panic!("expected launch"); };
+    let Request::Launch(_, pending) = tokio::time::timeout(Duration::from_secs(2), requests.recv()).await.unwrap().unwrap() else { panic!("expected launch"); };
     let cancelling = connection.clone();
     let cancel = tokio::spawn(async move {
         proxy(&cancelling).await.unwrap().call::<_, _, ()>("Cancel", &(launch().generation,)).await.unwrap()
     });
-    let Request::Cancel { reply, .. } = requests.recv_timeout(Duration::from_secs(2)).unwrap() else { panic!("expected cancel"); };
-    reply.send_blocking(Ok(())).unwrap();
+    let Request::Cancel { reply, .. } = tokio::time::timeout(Duration::from_secs(2), requests.recv()).await.unwrap().unwrap() else { panic!("expected cancel"); };
+    reply.try_send(Ok(())).unwrap();
     cancel.await.unwrap();
-    pending.send_blocking(Ok("example.service".into())).unwrap();
+    pending.try_send(Ok("example.service".into())).unwrap();
     assert_eq!(worker.await.unwrap(), "example.service");
 }
 
@@ -52,7 +52,7 @@ async fn a_pending_launch_does_not_block_a_cancel_request() {
 async fn another_uid_cannot_submit_session_requests() {
     // SAFETY: geteuid has no preconditions.
     let other_uid = unsafe { libc::geteuid() }.wrapping_add(1);
-    let (_server, connection, requests) = connect(other_uid).await;
+    let (_server, connection, mut requests) = connect(other_uid).await;
     let result = proxy(&connection).await.unwrap().call::<_, _, SessionStatus>("Status", &()).await;
     assert!(result.unwrap_err().to_string().contains("another user"));
     assert!(requests.try_recv().is_err());
@@ -61,20 +61,20 @@ async fn another_uid_cannot_submit_session_requests() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stop_completion_is_dispatched_before_the_coordinator_can_exit() {
     // SAFETY: geteuid has no preconditions.
-    let (_server, connection, requests) = connect(unsafe { libc::geteuid() }).await;
+    let (_server, connection, mut requests) = connect(unsafe { libc::geteuid() }).await;
     let worker = tokio::spawn(async move {
         proxy(&connection).await.unwrap().call::<_, _, StopOutcome>("Stop", &(launch().generation, "logout")).await.unwrap()
     });
-    let Request::Stop { reply, .. } = requests.recv_timeout(Duration::from_secs(2)).unwrap() else { panic!("expected stop"); };
-    reply.send_blocking(Ok(StopOutcome { result: "completed".into(), forced_units: Vec::new(), message: String::new() })).unwrap();
-    assert!(matches!(requests.recv_timeout(Duration::from_secs(2)).unwrap(), Request::StopReplySent(_)));
+    let Request::Stop { reply, .. } = tokio::time::timeout(Duration::from_secs(2), requests.recv()).await.unwrap().unwrap() else { panic!("expected stop"); };
+    reply.try_send(Ok(StopOutcome { result: "completed".into(), forced_units: Vec::new(), message: String::new() })).unwrap();
+    assert!(matches!(tokio::time::timeout(Duration::from_secs(2), requests.recv()).await.unwrap().unwrap(), Request::StopReplySent(_)));
     assert_eq!(worker.await.unwrap().result, "completed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn oversized_payloads_do_not_reach_the_coordinator() {
     // SAFETY: geteuid has no preconditions.
-    let (_server, connection, requests) = connect(unsafe { libc::geteuid() }).await;
+    let (_server, connection, mut requests) = connect(unsafe { libc::geteuid() }).await;
     let mut request = launch();
     request.argv.push("x".repeat(64 * 1024 + 1));
     let error = proxy(&connection).await.unwrap().call::<_, _, String>("Launch", &(request,)).await.unwrap_err();
@@ -90,14 +90,14 @@ async fn oversized_payloads_do_not_reach_the_coordinator() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn launch_saturation_returns_busy_but_still_admits_cancellation() {
     // SAFETY: geteuid has no preconditions.
-    let (_server, connection, requests) = connect(unsafe { libc::geteuid() }).await;
+    let (_server, connection, mut requests) = connect(unsafe { libc::geteuid() }).await;
     let mut pending = Vec::new();
     for _ in 0..admission::MAX_REGULAR_REQUESTS {
         let launching = connection.clone();
         let worker = tokio::spawn(async move {
             proxy(&launching).await.unwrap().call::<_, _, String>("Launch", &(launch(),)).await.unwrap()
         });
-        let Request::Launch(_, reply) = requests.recv_timeout(Duration::from_secs(2)).unwrap() else {
+        let Request::Launch(_, reply) = tokio::time::timeout(Duration::from_secs(2), requests.recv()).await.unwrap().unwrap() else {
             panic!("expected launch");
         };
         pending.push((reply, worker));
@@ -110,13 +110,13 @@ async fn launch_saturation_returns_busy_but_still_admits_cancellation() {
     let cancel = tokio::spawn(async move {
         proxy(&cancelling).await.unwrap().call::<_, _, ()>("Cancel", &(launch().generation,)).await.unwrap()
     });
-    let Request::Cancel { reply, .. } = requests.recv_timeout(Duration::from_secs(2)).unwrap() else {
+    let Request::Cancel { reply, .. } = tokio::time::timeout(Duration::from_secs(2), requests.recv()).await.unwrap().unwrap() else {
         panic!("expected reserved cancellation");
     };
-    reply.send_blocking(Ok(())).unwrap();
+    reply.try_send(Ok(())).unwrap();
     cancel.await.unwrap();
     for (reply, worker) in pending {
-        reply.send_blocking(Ok("example.service".into())).unwrap();
+        reply.try_send(Ok("example.service".into())).unwrap();
         assert_eq!(worker.await.unwrap(), "example.service");
     }
 }

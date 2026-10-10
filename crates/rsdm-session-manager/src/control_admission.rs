@@ -2,6 +2,8 @@
 
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
+use tokio::sync::mpsc::{Sender, error::TrySendError};
+
 pub(crate) const MAX_REGULAR_REQUESTS: usize = 64;
 const MAX_STOP_REQUESTS: usize = 4;
 const MAX_CANCEL_REQUESTS: usize = 2;
@@ -51,26 +53,21 @@ impl Drop for Permit {
 }
 
 pub(crate) struct Reply<T> {
-    sender: async_channel::Sender<Result<T, String>>,
+    sender: Sender<Result<T, String>>,
     _permit: Arc<Permit>,
 }
 
 impl<T> Reply<T> {
-    pub(super) fn new(sender: async_channel::Sender<Result<T, String>>, permit: Arc<Permit>) -> Self {
+    pub(super) fn new(sender: Sender<Result<T, String>>, permit: Arc<Permit>) -> Self {
         Self { sender, _permit: permit }
     }
 
-    pub fn try_send(&self, result: Result<T, String>) -> Result<(), async_channel::TrySendError<Result<T, String>>> {
+    pub fn try_send(&self, result: Result<T, String>) -> Result<(), TrySendError<Result<T, String>>> {
         self.sender.try_send(result)
     }
 
     #[cfg(test)]
-    pub fn send_blocking(&self, result: Result<T, String>) -> Result<(), async_channel::SendError<Result<T, String>>> {
-        self.sender.send_blocking(result)
-    }
-
-    #[cfg(test)]
-    pub fn for_test(sender: async_channel::Sender<Result<T, String>>) -> Self {
+    pub fn for_test(sender: Sender<Result<T, String>>) -> Self {
         let permit = Admission::default().acquire(Class::Regular).unwrap();
         Self::new(sender, permit)
     }

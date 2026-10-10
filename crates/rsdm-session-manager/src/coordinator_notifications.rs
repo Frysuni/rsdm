@@ -22,21 +22,23 @@ impl Coordinator {
             }
         }
         while let Ok(notice) = self.notices.try_recv() {
-            if notice.preparing {
-                // Time spent queued behind actor work is already spent budget.
-                let proposed = notice.deadline_usec;
-                self.begin_stop("external-shutdown", Some(proposed))?;
-                let control = self.shutdown.as_ref().expect("shutdown control");
-                let old = control.hard_deadline.get();
-                let deadline = if old == 0 { proposed } else { old.min(proposed) };
-                control.force(deadline);
-                self.record.shutdown_deadline_usec = Some(deadline);
-                self.save()?;
-            } else {
-                self.system_shutdown_cancelled()?;
-            }
+            self.shutdown_notice(notice)?;
         }
         Ok(())
+    }
+
+    pub(super) fn shutdown_notice(&mut self, notice: rsdm_system::logind::ShutdownNotice) -> Result<(), SessionError> {
+        if !notice.preparing { return self.system_shutdown_cancelled(); }
+
+        // Time spent queued behind actor work is already spent budget.
+        let proposed = notice.deadline_usec;
+        self.begin_stop("external-shutdown", Some(proposed))?;
+        let control = self.shutdown.as_ref().expect("shutdown control");
+        let old = control.hard_deadline.get();
+        let deadline = if old == 0 { proposed } else { old.min(proposed) };
+        control.force(deadline);
+        self.record.shutdown_deadline_usec = Some(deadline);
+        self.save()
     }
 
     fn system_shutdown_cancelled(&mut self) -> Result<(), SessionError> {

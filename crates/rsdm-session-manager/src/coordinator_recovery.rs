@@ -5,7 +5,7 @@ use std::{sync::atomic::Ordering, time::Duration};
 use super::{control::Request, coordinator::{Coordinator, Work}};
 
 impl Coordinator {
-    pub fn recover(&mut self) {
+    pub async fn recover(&mut self) {
         self.stopping.store(true, Ordering::SeqCst);
         self.lifecycle.prepare();
         self.xsmp.cancel();
@@ -38,7 +38,7 @@ impl Coordinator {
         if let Err(error) = self.save() {
             tracing::warn!(%error, "could not persist recovery deadline");
         }
-        self.drain_workers();
+        self.drain_workers().await;
         if let Err(error) = self.save() {
             tracing::warn!(%error, "could not persist recovery state");
         }
@@ -52,33 +52,48 @@ impl Coordinator {
         }
     }
 
-    fn drain_workers(&mut self) {
+    async fn drain_workers(&mut self) {
         // Drain accepted work only inside the same budget as recovery. Its
         // ownership intent remains recorded when completion is unconfirmed.
-        while self.workers > 0 && self.manager.deadline.remaining(Duration::from_millis(100)).is_ok() {
+        let mut requests_open = true;
+        while self.workers > 0 && self.manager.deadline.remaining(Duration::MAX).is_ok() {
+            // Reject requests already accepted before failure even when the
+            // last worker completion is ready in the same iteration.
             while let Ok(request) = self.requests.try_recv() {
                 reject(request);
-                if self.manager.deadline.remaining(Duration::from_millis(100)).is_err() { break; }
+                if self.manager.deadline.remaining(Duration::MAX).is_err() { break; }
             }
             let Ok(wait) = self.manager.deadline.remaining(Duration::from_millis(100)) else { break; };
-            if let Ok(work) = self.work.recv_timeout(wait) {
-                self.workers = self.workers.saturating_sub(1);
-                match work {
-                    Work::Observed(result) => {
-                        self.observation_busy = false;
-                        self.process = result.process;
-                    }
-                    Work::Boot(Ok(id)) => self.record.compositor_invocation = id,
-                    Work::Ready(Ok(owns)) => self.record.owns_targets |= owns,
-                    Work::Launched(_, reply, _) => {
-                        let _ = reply.try_send(Err("session coordinator failed".into()));
-                    }
-                    _ => {}
-                }
+            tokio::select! {
+                request = self.requests.recv(), if requests_open => match request {
+                    Some(request) => reject(request),
+                    None => requests_open = false,
+                },
+                work = self.work.recv() => match work {
+                    Some(work) => self.recovered(work),
+                    None => break,
+                },
+                _ = tokio::time::sleep(wait) => {}
             }
         }
         if self.workers > 0 {
             tracing::error!(workers = self.workers, "session workers did not drain before recovery");
+        }
+    }
+
+    fn recovered(&mut self, work: Work) {
+        self.workers = self.workers.saturating_sub(1);
+        match work {
+            Work::Observed(result) => {
+                self.observation_busy = false;
+                self.process = result.process;
+            }
+            Work::Boot(Ok(id)) => self.record.compositor_invocation = id,
+            Work::Ready(Ok(owns)) => self.record.owns_targets |= owns,
+            Work::Launched(_, reply, _) => {
+                let _ = reply.try_send(Err("session coordinator failed".into()));
+            }
+            _ => {}
         }
     }
 }

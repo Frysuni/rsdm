@@ -77,15 +77,15 @@ pub(super) fn install_manager(fixture: &Fixture) -> Arc<ManagerState> {
     state
 }
 
-fn complete_observation(fixture: &mut Fixture) {
+async fn complete_observation(fixture: &mut Fixture) {
     fixture.coordinator.start_observation();
-    let work = fixture.coordinator.work.recv_timeout(Duration::from_secs(8)).unwrap();
+    let work = tokio::time::timeout(Duration::from_secs(8), fixture.coordinator.work.recv()).await.unwrap().unwrap();
     assert!(matches!(work, Work::Observed(_)));
     fixture.coordinator.completed(work).unwrap();
 }
 
-#[test]
-fn a_lost_invocation_read_after_start_does_not_stop_or_restart_the_compositor() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lost_invocation_read_after_start_does_not_stop_or_restart_the_compositor() {
     let mut fixture = Fixture::new();
     let state = install_manager(&fixture);
     fixture.coordinator.lifecycle.phase = SessionPhase::Starting;
@@ -100,17 +100,17 @@ fn a_lost_invocation_read_after_start_does_not_stop_or_restart_the_compositor() 
     assert!(fixture.coordinator.pending_boot);
     assert!(fixture.coordinator.booting());
     assert_eq!(fixture.coordinator.exit_code, 0);
-    complete_observation(&mut fixture);
+    complete_observation(&mut fixture).await;
     assert!(fixture.coordinator.pending_boot);
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Starting);
 
     state.unavailable.store(false, Ordering::SeqCst);
     state.pending.store(true, Ordering::SeqCst);
-    complete_observation(&mut fixture);
+    complete_observation(&mut fixture).await;
     assert!(fixture.coordinator.pending_boot);
     assert!(fixture.coordinator.booting());
     state.pending.store(false, Ordering::SeqCst);
-    complete_observation(&mut fixture);
+    complete_observation(&mut fixture).await;
     assert!(!fixture.coordinator.pending_boot);
     assert!(!fixture.coordinator.booting());
     assert_eq!(fixture.coordinator.record.compositor_invocation, vec![1; 16]);
@@ -121,19 +121,19 @@ fn a_lost_invocation_read_after_start_does_not_stop_or_restart_the_compositor() 
     fixture.coordinator.process.as_mut().unwrap().booting = true;
     state.reads.store(0, Ordering::SeqCst);
     fixture.coordinator.begin_stop("logout", None).unwrap();
-    complete_observation(&mut fixture);
+    complete_observation(&mut fixture).await;
     assert!(!fixture.coordinator.booting());
     assert_eq!(state.reads.load(Ordering::SeqCst), 0);
 }
 
-#[test]
-fn readiness_completion_waits_for_reads_without_repeating_activation() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn readiness_completion_waits_for_reads_without_repeating_activation() {
     let mut fixture = Fixture::new();
     let state = install_manager(&fixture);
     fixture.coordinator.lifecycle.phase = SessionPhase::Starting;
     fixture.coordinator.ready_once = false;
     fixture.coordinator.ready_busy = true;
-    let (reply, received) = async_channel::bounded(1);
+    let (reply, mut received) = tokio::sync::mpsc::channel(1);
     fixture.coordinator.finalize_replies.push(Reply::for_test(reply));
 
     fixture.coordinator.ready_completed(Ok(true)).unwrap();
@@ -142,11 +142,11 @@ fn readiness_completion_waits_for_reads_without_repeating_activation() {
     assert!(fixture.coordinator.record.owns_targets);
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Starting);
     assert!(received.try_recv().is_err());
-    complete_observation(&mut fixture);
+    complete_observation(&mut fixture).await;
     assert_eq!(state.starts.load(Ordering::SeqCst), 0);
 
     state.unavailable.store(false, Ordering::SeqCst);
-    complete_observation(&mut fixture);
+    complete_observation(&mut fixture).await;
     assert!(!fixture.coordinator.pending_ready);
     assert!(!fixture.coordinator.ready_busy);
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Running);
@@ -156,18 +156,18 @@ fn readiness_completion_waits_for_reads_without_repeating_activation() {
     assert_eq!(fixture.coordinator.runtime.session().unwrap().phase, SessionPhase::Running);
 }
 
-#[test]
-fn shutdown_releases_pending_readiness_even_during_an_outage() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_releases_pending_readiness_even_during_an_outage() {
     let mut fixture = Fixture::new();
     let state = install_manager(&fixture);
     fixture.coordinator.lifecycle.phase = SessionPhase::Starting;
     fixture.coordinator.ready_busy = true;
     fixture.coordinator.pending_ready = true;
-    let (reply, received) = async_channel::bounded(1);
+    let (reply, mut received) = tokio::sync::mpsc::channel(1);
     fixture.coordinator.finalize_replies.push(Reply::for_test(reply));
 
     fixture.coordinator.begin_stop("logout", None).unwrap();
-    complete_observation(&mut fixture);
+    complete_observation(&mut fixture).await;
     assert!(received.try_recv().unwrap().is_err());
     assert!(!fixture.coordinator.ready_busy);
     assert!(!fixture.coordinator.pending_ready);
@@ -176,8 +176,8 @@ fn shutdown_releases_pending_readiness_even_during_an_outage() {
     assert_eq!(state.reads.load(Ordering::SeqCst), 0);
 }
 
-#[test]
-fn preparation_failure_and_native_delegation_resume_without_manager_reads() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn preparation_failure_and_native_delegation_resume_without_manager_reads() {
     for delegated in [false, true] {
         for ready_once in [false, true] {
             let mut fixture = Fixture::new();
@@ -186,7 +186,7 @@ fn preparation_failure_and_native_delegation_resume_without_manager_reads() {
             fixture.coordinator.ready_once = ready_once;
             fixture.coordinator.begin_stop("logout", None).unwrap();
             fixture.coordinator.preparing = true;
-            let (reply, received) = async_channel::bounded(1);
+            let (reply, mut received) = tokio::sync::mpsc::channel(1);
             fixture.coordinator.stop_replies.push(Reply::for_test(reply));
 
             if delegated {
@@ -205,8 +205,8 @@ fn preparation_failure_and_native_delegation_resume_without_manager_reads() {
     }
 }
 
-#[test]
-fn observation_still_detects_a_real_stop_after_resuming() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn observation_still_detects_a_real_stop_after_resuming() {
     let mut fixture = Fixture::new();
     let state = install_manager(&fixture);
     fixture.coordinator.begin_stop("logout", None).unwrap();
@@ -222,8 +222,8 @@ fn observation_still_detects_a_real_stop_after_resuming() {
     assert!(fixture.coordinator.stopping.load(Ordering::SeqCst));
 }
 
-#[test]
-fn explicit_finalize_retries_activation_after_observation_returns_the_process() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn explicit_finalize_retries_activation_after_observation_returns_the_process() {
     let mut fixture = Fixture::new();
     let state = install_manager(&fixture);
     state.unavailable.store(false, Ordering::SeqCst);
@@ -235,17 +235,17 @@ fn explicit_finalize_retries_activation_after_observation_returns_the_process() 
     fixture.coordinator.ready_deadline = Instant::now();
     fixture.coordinator.start_observation();
     assert!(fixture.coordinator.observation_busy);
-    let (reply, response) = async_channel::bounded(1);
+    let (reply, mut response) = tokio::sync::mpsc::channel(1);
     fixture.coordinator.environment_reply = Some(Reply::for_test(reply));
     fixture.coordinator.environment_published(Ok(())).unwrap();
     assert!(!fixture.coordinator.ready_busy);
     assert_eq!(fixture.coordinator.finalize_replies.len(), 1);
 
-    let observation = fixture.coordinator.work.recv_timeout(Duration::from_secs(2)).unwrap();
+    let observation = tokio::time::timeout(Duration::from_secs(2), fixture.coordinator.work.recv()).await.unwrap().unwrap();
     assert!(matches!(observation, Work::Observed(_)));
     fixture.coordinator.completed(observation).unwrap();
     assert!(fixture.coordinator.ready_busy);
-    let activation = fixture.coordinator.work.recv_timeout(Duration::from_secs(2)).unwrap();
+    let activation = tokio::time::timeout(Duration::from_secs(2), fixture.coordinator.work.recv()).await.unwrap().unwrap();
     assert!(matches!(activation, Work::Ready(Err(_))));
     assert_eq!(state.starts.load(Ordering::SeqCst), 1);
     fixture.coordinator.completed(activation).unwrap();

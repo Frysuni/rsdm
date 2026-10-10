@@ -104,7 +104,10 @@ When `session_manager.enabled` is set, step 8 wraps the original command in
 coordinator owns one generation, separate from logind and desktop-entry IDs.
 Typed D-Bus handlers feed a serial lifecycle actor. Start/stop jobs, app
 preparation, control-bus maintenance and serialized finalize publication run in
-workers. Observation and readiness still perform synchronous manager reads;
+workers. The actor uses Tokio channels and `select!` for requests, completions,
+logind notices, and periodic observation. Reply delivery and recovery worker
+draining share their original budgets through asynchronous waits.
+Observation and readiness still perform synchronous manager reads;
 their timeouts can delay cancellation. Registration and
 recovery records precede side effects. InvocationID and pidfd checks keep
 cleanup/signals attached to the recorded processes.
