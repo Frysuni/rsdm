@@ -74,8 +74,8 @@ impl Provider {
         }
     }
 
-    pub fn delegate(&self, manager: &UserManager, action: &str) -> Result<(), SessionError> {
-        async_io::block_on(manager.deadline.bound(async {
+    pub async fn delegate(&self, manager: &UserManager, action: &str) -> Result<(), SessionError> {
+        manager.deadline.bound(async {
             let connection = manager.connection();
             match self.kind {
                 ProviderKind::Gnome => {
@@ -100,7 +100,7 @@ impl Provider {
                 _ => return Err(SessionError::State("this provider does not delegate desktop shutdown".into())),
             }
             Ok(())
-        }))
+        }).await
     }
 }
 
@@ -133,6 +133,10 @@ fn validate_native_unit(unit: &str) -> Result<(), SessionError> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "provider_delegate_tests.rs"]
+mod delegate_tests;
 
 #[cfg(test)]
 mod tests {

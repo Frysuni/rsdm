@@ -95,6 +95,8 @@ create their own runtime while the Wayland event loop keeps running. Logind
 capability queries, request timeouts, and shutdown notifications use Tokio.
 Coordinator startup awaits logind identity verification; connection setup and
 session queries share one five-second budget.
+GNOME and Plasma shutdown delegation runs in an asynchronous worker under the
+shared deadline; a failed or lost reply does not trigger a repeated request.
 Session Manager clients await typed D-Bus requests; compatibility stop hooks
 and recovery run in blocking workers while their internals are migrated.
 Control endpoint registration and health checks run as Tokio tasks; dropping

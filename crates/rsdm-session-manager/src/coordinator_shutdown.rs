@@ -88,7 +88,7 @@ impl Coordinator {
             let action = self.action.clone();
             let events = self.events.clone();
             self.workers += 1;
-            thread::spawn(move || { let _ = events.send(Work::Delegated(provider.delegate(&manager, &action))); });
+            tokio::spawn(async move { let _ = events.send(Work::Delegated(provider.delegate(&manager, &action).await)); });
             return Ok(());
         }
         if matches!(self.action.as_str(), "reboot" | "poweroff") {
