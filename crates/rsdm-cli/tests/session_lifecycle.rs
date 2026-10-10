@@ -86,13 +86,13 @@ impl Session {
 struct SessionTools {
     root: PathBuf,
     bus: Child,
-    connection: zbus::blocking::Connection,
+    connection: zbus::Connection,
     address: String,
     calls: Calls,
 }
 
 impl SessionTools {
-    fn new(finalize_fails: bool) -> Self {
+    async fn new(finalize_fails: bool) -> Self {
         let root = std::env::temp_dir().join(format!("rsdm-session-test-{}-{}", std::process::id(), SEQUENCE.fetch_add(1, Ordering::Relaxed)));
         fs::create_dir(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
@@ -103,11 +103,11 @@ impl SessionTools {
         BufReader::new(bus.stdout.take().unwrap()).read_line(&mut address).unwrap();
         let address = address.trim().to_string();
         let calls = Calls::default();
-        let connection = zbus::blocking::connection::Builder::address(address.as_str()).unwrap()
+        let connection = zbus::connection::Builder::address(address.as_str()).unwrap()
             .serve_at("/org/freedesktop/login1", Login { calls: calls.clone() }).unwrap()
             .serve_at("/org/freedesktop/login1/session/test", LoginSession).unwrap()
             .serve_at("/org/rsdm/Session1", Session { calls: calls.clone(), finalize_fails }).unwrap()
-            .name("org.freedesktop.login1").unwrap().name("org.rsdm.Session1").unwrap().build().unwrap();
+            .name("org.freedesktop.login1").unwrap().name("org.rsdm.Session1").unwrap().build().await.unwrap();
         Self { root, bus, connection, address, calls }
     }
 
@@ -136,10 +136,10 @@ impl Drop for SessionTools {
     }
 }
 
-#[test]
-fn greeter_helper_uses_logind_once_and_returns_authorization_errors() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn greeter_helper_uses_logind_once_and_returns_authorization_errors() {
     for (action, accepted) in [("reboot", true), ("poweroff", false)] {
-        let tools = SessionTools::new(false);
+        let tools = SessionTools::new(false).await;
         let output = tools.run(&["logind-request", action]);
         assert_eq!(output.status.success(), accepted, "{output:?}");
         assert_eq!(*tools.calls.lock().unwrap(), [format!("logind {action}")]);
@@ -149,34 +149,34 @@ fn greeter_helper_uses_logind_once_and_returns_authorization_errors() {
     }
 }
 
-#[test]
-fn starting_a_second_session_does_not_stop_or_modify_the_first() {
-    let tools = SessionTools::new(false);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn starting_a_second_session_does_not_stop_or_modify_the_first() {
+    let tools = SessionTools::new(false).await;
     let output = tools.run(&["session", "start", "--", "compositor"]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("name already taken"), "{:?}", output);
     assert!(tools.calls.lock().unwrap().is_empty());
 }
 
-#[test]
-fn failed_finalize_returns_the_coordinator_failure_to_the_caller() {
-    let tools = SessionTools::new(true);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_finalize_returns_the_coordinator_failure_to_the_caller() {
+    let tools = SessionTools::new(true).await;
     let output = tools.run(&["session", "finalize"]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("session is shutting down"));
     assert_eq!(*tools.calls.lock().unwrap(), [format!("finalize {GENERATION}")]);
 }
 
-#[test]
-fn finalize_is_routed_to_the_current_coordinator() {
-    let tools = SessionTools::new(false);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn finalize_is_routed_to_the_current_coordinator() {
+    let tools = SessionTools::new(false).await;
     assert!(tools.run(&["session", "finalize"]).status.success());
     assert_eq!(*tools.calls.lock().unwrap(), [format!("finalize {GENERATION}")]);
 }
 
-#[test]
-fn app_options_preserve_literal_arguments_and_parse_quit_argv_without_a_shell() {
-    let tools = SessionTools::new(false);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn app_options_preserve_literal_arguments_and_parse_quit_argv_without_a_shell() {
+    let tools = SessionTools::new(false).await;
     let output = tools.run(&["app", "--shutdown-timeout", "8", "--on-timeout", "cancel",
         "--quit-command", "examplectl \"quit now\"", "--", "example", "$HOME", "", "--on-timeout"]);
     assert!(output.status.success(), "{:?}", output);
@@ -184,9 +184,9 @@ fn app_options_preserve_literal_arguments_and_parse_quit_argv_without_a_shell() 
     assert_eq!(*tools.calls.lock().unwrap(), ["launch [\"example\", \"$HOME\", \"\", \"--on-timeout\"] 8 cancel [\"examplectl\", \"quit now\"]"]);
 }
 
-#[test]
-fn cancelled_logout_is_not_reported_as_success() {
-    let tools = SessionTools::new(false);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_logout_is_not_reported_as_success() {
+    let tools = SessionTools::new(false).await;
     let output = tools.run(&["session", "stop"]);
     assert!(!output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout), "cancelled: application timed out\n");
@@ -194,9 +194,9 @@ fn cancelled_logout_is_not_reported_as_success() {
     assert!(!output.stdout.contains(&0x1b) && !output.stderr.contains(&0x1b));
 }
 
-#[test]
-fn session_status_preserves_the_plain_application_list() {
-    let tools = SessionTools::new(false);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_status_preserves_the_plain_application_list() {
+    let tools = SessionTools::new(false).await;
     let output = tools.run(&["session", "status"]);
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout), format!(
@@ -204,9 +204,9 @@ fn session_status_preserves_the_plain_application_list() {
     assert!(output.stderr.is_empty());
 }
 
-#[test]
-fn session_confirmations_and_registered_apps_are_styled_in_a_terminal() {
-    let tools = SessionTools::new(false);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_confirmations_and_registered_apps_are_styled_in_a_terminal() {
+    let tools = SessionTools::new(false).await;
     for (args, title) in [
         (&["session", "finalize"][..], "ENVIRONMENT PUBLISHED"),
         (&["session", "cancel"][..], "CANCELLATION REQUESTED"),
@@ -225,9 +225,9 @@ fn session_confirmations_and_registered_apps_are_styled_in_a_terminal() {
     assert!(tools.calls.lock().unwrap().contains(&format!("cancel {GENERATION}")));
 }
 
-#[test]
-fn cancelled_session_and_power_requests_keep_failure_status_in_a_terminal() {
-    let tools = SessionTools::new(false);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_session_and_power_requests_keep_failure_status_in_a_terminal() {
+    let tools = SessionTools::new(false).await;
     for (args, action) in [
         (&["session", "stop"][..], "logout"),
         (&["power", "reboot"][..], "reboot"),
@@ -243,9 +243,9 @@ fn cancelled_session_and_power_requests_keep_failure_status_in_a_terminal() {
     }
 }
 
-#[test]
-fn expired_stop_hook_and_recovery_budgets_skip_the_bus_handshake() {
-    let tools = SessionTools::new(false);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn expired_stop_hook_and_recovery_budgets_skip_the_bus_handshake() {
+    let tools = SessionTools::new(false).await;
     let session = tools.root.join("rsdm/sessions").join(GENERATION);
     for path in [tools.root.join("rsdm"), tools.root.join("rsdm/sessions"), session.clone(), session.join("apps")] {
         fs::create_dir(&path).unwrap();

@@ -97,6 +97,7 @@ Session Manager clients await typed D-Bus requests; compatibility stop hooks
 and recovery run in blocking workers while their internals are migrated.
 Control endpoint registration and health checks run as Tokio tasks; dropping
 the server aborts its pending reconnection task.
+The workspace disables zbus's blocking API, including in CLI bus fixtures.
 
 When `session_manager.enabled` is set, step 8 wraps the original command in
 `rsdm session start`, with the selected config and desktop metadata. Its user
