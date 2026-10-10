@@ -117,10 +117,13 @@ async fn waiting_for_an_app_does_not_hold_its_record_lease() {
 async fn competing_preparations_claim_quit_once_and_preserve_the_deadline() {
     let fixture = Fixture::new().await;
     let control = ShutdownControl::default();
-    let (first, claimed) = claim_preparation(&fixture.runtime, &fixture.app.unit, &control, &control.hard_deadline).unwrap();
-    assert!(claimed);
-    let (second, claimed) = claim_preparation(&fixture.runtime, &fixture.app.unit, &control, &control.hard_deadline).unwrap();
-    assert!(!claimed);
+    let (first, second) = tokio::join!(
+        claim_preparation(&fixture.runtime, &fixture.app.unit, &control, &control.hard_deadline),
+        claim_preparation(&fixture.runtime, &fixture.app.unit, &control, &control.hard_deadline),
+    );
+    let (first, first_claimed) = first.unwrap();
+    let (second, second_claimed) = second.unwrap();
+    assert_ne!(first_claimed, second_claimed);
     assert_eq!(first.deadline_usec, second.deadline_usec);
 }
 
@@ -131,8 +134,49 @@ async fn a_contended_preparation_lease_preserves_the_teardown_budget() {
     let control = ShutdownControl::for_manager(&fixture.manager);
     control.force(monotonic_usec().unwrap() + 200_000);
     let manager = preparation_manager(&fixture.manager, &control).unwrap();
-    assert!(claim_preparation(&fixture.runtime, &fixture.app.unit, &control, &manager.deadline).is_err());
+    assert!(claim_preparation(&fixture.runtime, &fixture.app.unit, &control, &manager.deadline).await.is_err());
     assert!(control.hard_deadline.remaining(Duration::MAX).is_ok());
+    let saved = fixture.runtime.app(&fixture.app.unit).unwrap();
+    assert!(!saved.quit_started);
+    assert_eq!(saved.deadline_usec, None);
+}
+
+#[tokio::test]
+async fn a_contended_record_claim_keeps_the_callers_runtime_responsive() {
+    let fixture = Fixture::new().await;
+    let lease = fixture.runtime.app_lease(&fixture.app.unit).unwrap();
+    let control = ShutdownControl::default();
+    let mut claim = Box::pin(claim_preparation(
+        &fixture.runtime, &fixture.app.unit, &control, &control.hard_deadline,
+    ));
+    tokio::select! {
+        biased;
+        _ = tokio::time::sleep(Duration::from_millis(10)) => {},
+        result = &mut claim => panic!("contended claim completed before the timer: {result:?}"),
+    }
+    drop(lease);
+    let (app, claimed) = claim.await.unwrap();
+    assert!(claimed);
+    assert!(fixture.runtime.app(&app.unit).unwrap().quit_started);
+}
+
+#[tokio::test]
+async fn cancellation_while_waiting_for_a_record_lease_does_not_dispatch_quit() {
+    let fixture = Fixture::new().await;
+    let lease = fixture.runtime.app_lease(&fixture.app.unit).unwrap();
+    let control = ShutdownControl::default();
+    let mut preparation = Box::pin(begin_preparation(
+        &fixture.manager, &fixture.runtime, &fixture.app.unit, &control,
+    ));
+    tokio::select! {
+        biased;
+        _ = tokio::time::sleep(Duration::from_millis(20)) => {},
+        result = &mut preparation => panic!("contended preparation completed: {}", result.is_ok()),
+    }
+    assert_eq!(fixture.queries.load(Ordering::SeqCst), 1);
+    control.cancelled.store(true, Ordering::SeqCst);
+    drop(lease);
+    assert!(matches!(preparation.await.unwrap(), Preparation::Finished(AppOutcome::Cancelled)));
     let saved = fixture.runtime.app(&fixture.app.unit).unwrap();
     assert!(!saved.quit_started);
     assert_eq!(saved.deadline_usec, None);
@@ -141,11 +185,11 @@ async fn a_contended_preparation_lease_preserves_the_teardown_budget() {
 #[tokio::test]
 async fn cancellation_does_not_reset_a_replacement_invocation() {
     let fixture = Fixture::new().await;
-    let (prepared, _) = claim_preparation(&fixture.runtime, &fixture.app.unit, &ShutdownControl::default(), &Deadline::default()).unwrap();
+    let (prepared, _) = claim_preparation(&fixture.runtime, &fixture.app.unit, &ShutdownControl::default(), &Deadline::default()).await.unwrap();
     let mut replacement = prepared.clone();
     replacement.invocation_id = vec![2; 16];
     fixture.runtime.save_app(&replacement).unwrap();
-    reset_preparation(&fixture.runtime, &prepared, &Deadline::default()).unwrap();
+    reset_preparation(&fixture.runtime, &prepared, &Deadline::default()).await.unwrap();
     let saved = fixture.runtime.app(&fixture.app.unit).unwrap();
     assert_eq!(saved.invocation_id, replacement.invocation_id);
     assert_eq!(saved.deadline_usec, replacement.deadline_usec);

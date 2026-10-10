@@ -107,7 +107,7 @@ async fn a_restored_peer_reference_keeps_its_registration_for_recovery() {
         error: Box::new(SessionError::State("rejected after peer replacement".into())),
         reference_retained: true,
     };
-    let error = rollback_launch(&fixture.manager, &fixture.runtime, &fixture.app, error);
+    let error = rollback_launch(&fixture.manager, &fixture.runtime, &fixture.app, error).await;
     assert!(matches!(error, SessionError::StartRejected { reference_retained: true, .. }));
     assert!(fixture.runtime.app(&fixture.app.unit).unwrap().invocation_id.is_empty());
     assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 0);

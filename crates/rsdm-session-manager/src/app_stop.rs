@@ -12,7 +12,7 @@ use zbus::zvariant::Value;
 use super::{
     SessionError, bus::UserManager, deadline::Deadline,
     processes::{app_processes, monotonic_usec, terminate_main},
-    runtime::{AppRecord, Runtime}, units::command_properties,
+    runtime::{blocking, AppRecord, Runtime}, units::command_properties,
 };
 
 const MAX_APP_SHUTDOWN_WORKERS: usize = 4;
@@ -107,7 +107,10 @@ pub(super) async fn prepare_app(
                 let mut force_manager = manager.clone();
                 force_manager.deadline = control.hard_deadline.reserving(Duration::from_secs(1))?;
                 if !super::apps::pin_pending(&force_manager, runtime, unit).await? { return Ok(AppOutcome::Closed); }
-                return wait::force_exit(&force_manager, &runtime.app(unit)?, control, &phase_manager.deadline).await;
+                let records = runtime.clone();
+                let unit = unit.to_string();
+                let app = blocking(move || records.app(&unit)).await?;
+                return wait::force_exit(&force_manager, &app, control, &phase_manager.deadline).await;
             }
         Err(error) => return Err(error),
     };
@@ -118,7 +121,7 @@ pub(super) async fn prepare_app(
         release_quit(&cleanup_manager, &unit).await;
     }
     if matches!(result, Ok(AppOutcome::Cancelled)) {
-        reset_preparation(runtime, &app, &control.hard_deadline)?;
+        reset_preparation(runtime, &app, &control.hard_deadline).await?;
     }
     result
 }
@@ -140,7 +143,9 @@ async fn begin_preparation(
     if !super::apps::pin_pending(manager, runtime, unit).await? {
         return Ok(Preparation::Finished(AppOutcome::Closed));
     }
-    let app = runtime.app(unit)?;
+    let records = runtime.clone();
+    let app_unit = unit.to_string();
+    let app = blocking(move || records.app(&app_unit)).await?;
     if app_processes(manager, &app).await?.is_empty() {
         return Ok(Preparation::Finished(AppOutcome::Closed));
     }
@@ -148,37 +153,50 @@ async fn begin_preparation(
         return Ok(Preparation::Finished(AppOutcome::Cancelled));
     }
 
-    let (app, claimed) = claim_preparation(runtime, unit, control, &manager.deadline)?;
+    let (app, claimed) = claim_preparation(runtime, unit, control, &manager.deadline).await?;
+    if control.cancelled() {
+        if claimed { reset_preparation(runtime, &app, &control.hard_deadline).await?; }
+        return Ok(Preparation::Finished(AppOutcome::Cancelled));
+    }
     let quit_unit = if claimed { request_quit(manager, runtime, &app, control).await? } else { None };
     Ok(Preparation::Waiting(app, quit_unit))
 }
 
-fn claim_preparation(runtime: &Runtime, unit: &str, control: &ShutdownControl, phase_deadline: &Deadline) -> Result<(AppRecord, bool), SessionError> {
-    let _lease = runtime.app_lease_until(unit, phase_deadline)?;
-    let mut app = runtime.app(unit)?;
-    let deadline = app.deadline_usec.get_or_insert(
-        monotonic_usec()?.checked_add(app.policy.timeout_secs * 1_000_000)
-            .ok_or_else(|| SessionError::State("shutdown deadline overflow".into()))?
-    );
-    let hard = control.hard_deadline.get();
-    if hard != 0 {
-        *deadline = (*deadline).min(hard);
-    }
-    let claimed = !app.quit_started;
-    app.quit_started = true;
-    runtime.save_app(&app)?;
-    Ok((app, claimed))
+async fn claim_preparation(runtime: &Runtime, unit: &str, control: &ShutdownControl, phase_deadline: &Deadline) -> Result<(AppRecord, bool), SessionError> {
+    let runtime = runtime.clone();
+    let unit = unit.to_string();
+    let phase_deadline = phase_deadline.clone();
+    let hard_deadline = control.hard_deadline.clone();
+    blocking(move || {
+        let _lease = runtime.app_lease_until(&unit, &phase_deadline)?;
+        let mut app = runtime.app(&unit)?;
+        let deadline = app.deadline_usec.get_or_insert(
+            monotonic_usec()?.checked_add(app.policy.timeout_secs * 1_000_000)
+                .ok_or_else(|| SessionError::State("shutdown deadline overflow".into()))?
+        );
+        let hard = hard_deadline.get();
+        if hard != 0 { *deadline = (*deadline).min(hard); }
+        let claimed = !app.quit_started;
+        app.quit_started = true;
+        runtime.save_app(&app)?;
+        Ok((app, claimed))
+    }).await
 }
 
-fn reset_preparation(runtime: &Runtime, prepared: &AppRecord, deadline: &Deadline) -> Result<(), SessionError> {
-    let _lease = runtime.app_lease_until(&prepared.unit, deadline)?;
-    let mut app = runtime.app(&prepared.unit)?;
-    if app.invocation_id == prepared.invocation_id && app.deadline_usec == prepared.deadline_usec {
-        app.deadline_usec = None;
-        app.quit_started = false;
-        runtime.save_app(&app)?;
-    }
-    Ok(())
+async fn reset_preparation(runtime: &Runtime, prepared: &AppRecord, deadline: &Deadline) -> Result<(), SessionError> {
+    let runtime = runtime.clone();
+    let prepared = prepared.clone();
+    let deadline = deadline.clone();
+    blocking(move || {
+        let _lease = runtime.app_lease_until(&prepared.unit, &deadline)?;
+        let mut app = runtime.app(&prepared.unit)?;
+        if app.invocation_id == prepared.invocation_id && app.deadline_usec == prepared.deadline_usec {
+            app.deadline_usec = None;
+            app.quit_started = false;
+            runtime.save_app(&app)?;
+        }
+        Ok(())
+    }).await
 }
 
 async fn request_quit(manager: &UserManager, runtime: &Runtime, app: &AppRecord, control: &ShutdownControl) -> Result<Option<String>, SessionError> {

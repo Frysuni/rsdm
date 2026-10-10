@@ -13,6 +13,15 @@ use super::{SessionError, deadline::Deadline, identity::{SessionIdentity, valid_
 
 const MAX_RECORD_BYTES: usize = 1_048_576;
 
+pub(super) async fn blocking<T: Send + 'static>(
+    operation: impl FnOnce() -> Result<T, SessionError> + Send + 'static,
+) -> Result<T, SessionError> {
+    // Await the filesystem result before dispatching any dependent action.
+    // Dropping this future does not undo a write already accepted by the worker.
+    tokio::task::spawn_blocking(operation).await
+        .map_err(|error| SessionError::State(format!("recovery record worker failed: {error}")))?
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SessionRecord {

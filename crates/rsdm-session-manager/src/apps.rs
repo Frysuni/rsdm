@@ -8,7 +8,7 @@ use zbus::zvariant::Value;
 use super::{
     SessionError, bus::{UnitProperties, UserManager}, control::LaunchRequest, deadline::Deadline, env::valid_environment_name,
     identity::GENERATION_ENV, provider::Provider,
-    runtime::{AppRecord, Runtime}, unit_name::app_unit_name, units::app_properties,
+    runtime::{blocking, AppRecord, Runtime}, unit_name::app_unit_name, units::app_properties,
 };
 
 pub(super) fn register(
@@ -55,20 +55,26 @@ pub(super) async fn launch(
 ) -> Result<String, SessionError> {
     let properties = match launch_properties(runtime, anchor, request, &app) {
         Ok(properties) => properties,
-        Err(error) => return Err(rollback_launch(manager, runtime, &app, error)),
+        Err(error) => return Err(rollback_launch(manager, runtime, &app, error).await),
     };
     let started = manager.start_service(&app.unit, &properties).await;
     if let Err(error @ SessionError::StartRejected { .. }) = started {
-        return Err(rollback_launch(manager, runtime, &app, error));
+        return Err(rollback_launch(manager, runtime, &app, error).await);
     }
     let invocation = super::processes::generation_invocation(manager, &app.unit, &runtime.generation).await
         .and_then(|id| id.ok_or_else(|| SessionError::State("application invocation is unavailable after start".into())));
     match invocation {
         Ok(id) => {
-            let _lease = runtime.app_lease_until(&app.unit, &manager.deadline)?;
-            app = runtime.app(&app.unit)?;
-            app.invocation_id = id;
-            runtime.save_app(&app)?;
+            let runtime = runtime.clone();
+            let deadline = manager.deadline.clone();
+            let unit = app.unit.clone();
+            app = blocking(move || {
+                let _lease = runtime.app_lease_until(&unit, &deadline)?;
+                let mut app = runtime.app(&unit)?;
+                app.invocation_id = id;
+                runtime.save_app(&app)?;
+                Ok(app)
+            }).await?;
         }
         Err(error) => {
             if started.is_ok() { return Err(error); }
@@ -97,10 +103,13 @@ fn launch_properties(
     Ok(properties)
 }
 
-fn rollback_launch(manager: &UserManager, runtime: &Runtime, app: &AppRecord, error: SessionError) -> SessionError {
+async fn rollback_launch(manager: &UserManager, runtime: &Runtime, app: &AppRecord, error: SessionError) -> SessionError {
     if matches!(error, SessionError::StartRejected { reference_retained: true, .. }) { return error; }
-    let rollback = (|| {
-        let _lease = runtime.app_lease_until(&app.unit, &manager.deadline)?;
+    let runtime = runtime.clone();
+    let app = app.clone();
+    let deadline = manager.deadline.clone();
+    let rollback = blocking(move || {
+        let _lease = runtime.app_lease_until(&app.unit, &deadline)?;
         let current = match runtime.app(&app.unit) {
             Ok(current) => current,
             Err(SessionError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -110,7 +119,7 @@ fn rollback_launch(manager: &UserManager, runtime: &Runtime, app: &AppRecord, er
             return Err(SessionError::State("application registration changed before rollback".into()));
         }
         runtime.remove_app(&app.unit)
-    })();
+    }).await;
     match rollback {
         Ok(()) => error,
         Err(cleanup) => SessionError::State(format!("{error}; could not roll back application registration: {cleanup}")),
@@ -118,7 +127,9 @@ fn rollback_launch(manager: &UserManager, runtime: &Runtime, app: &AppRecord, er
 }
 
 pub(super) async fn release_closed(manager: &UserManager, runtime: &Runtime) -> Result<(), SessionError> {
-    for app in runtime.apps()? {
+    let records = runtime.clone();
+    let apps = blocking(move || records.apps()).await?;
+    for app in apps {
         if app.invocation_id.is_empty() {
             continue;
         }
@@ -130,7 +141,8 @@ pub(super) async fn release_closed(manager: &UserManager, runtime: &Runtime) -> 
         };
         if stopped && super::processes::app_processes(manager, &app).await?.is_empty() {
             let _ = manager.unref(&app.unit).await;
-            runtime.remove_app(&app.unit)?;
+            let records = runtime.clone();
+            blocking(move || records.remove_app(&app.unit)).await?;
         }
     }
     Ok(())
@@ -148,9 +160,14 @@ pub(super) fn reset_preparation(runtime: &Runtime) -> Result<(), SessionError> {
 }
 
 pub async fn stop_hook(generation: &str, unit: &str) -> Result<(), SessionError> {
-    let runtime = Runtime::open(generation)?.ok_or_else(|| SessionError::State("session recovery record is missing".into()))?;
+    let generation = generation.to_string();
+    let (runtime, saved) = blocking(move || {
+        let runtime = Runtime::open(&generation)?.ok_or_else(|| SessionError::State("session recovery record is missing".into()))?;
+        let saved = runtime.session()?.shutdown_deadline_usec;
+        Ok((runtime, saved))
+    }).await?;
     let deadline = Deadline::default();
-    if let Some(saved) = runtime.session()?.shutdown_deadline_usec { deadline.set(saved); }
+    if let Some(saved) = saved { deadline.set(saved); }
     let manager = UserManager::connect_until(deadline).await?;
     let control = super::app_stop::ShutdownControl::for_manager(&manager);
     control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -160,29 +177,41 @@ pub async fn stop_hook(generation: &str, unit: &str) -> Result<(), SessionError>
 }
 
 pub(super) async fn pin_pending(manager: &UserManager, runtime: &Runtime, unit: &str) -> Result<bool, SessionError> {
-    if !runtime.app(unit)?.invocation_id.is_empty() {
+    let records = runtime.clone();
+    let app_unit = unit.to_string();
+    if !blocking(move || records.app(&app_unit)).await?.invocation_id.is_empty() {
         return Ok(true);
     }
     let Some(id) = super::processes::generation_invocation(manager, unit, &runtime.generation).await? else {
         return Ok(false);
     };
-    let _lease = runtime.app_lease_until(unit, &manager.deadline)?;
-    let mut app = runtime.app(unit)?;
-    if app.invocation_id.is_empty() {
-        app.invocation_id = id;
-        runtime.save_app(&app)?;
-    }
-    Ok(true)
+    let runtime = runtime.clone();
+    let unit = unit.to_string();
+    let deadline = manager.deadline.clone();
+    blocking(move || {
+        let _lease = runtime.app_lease_until(&unit, &deadline)?;
+        let mut app = runtime.app(&unit)?;
+        if app.invocation_id.is_empty() {
+            app.invocation_id = id;
+            runtime.save_app(&app)?;
+        }
+        Ok(true)
+    }).await
 }
 
 pub(super) async fn finish(manager: &UserManager, runtime: &Runtime, app: &AppRecord) -> Result<(), SessionError> {
-    if pin_pending(manager, runtime, &app.unit).await?
-        && super::processes::verify_invocation(manager, &runtime.app(&app.unit)?).await?
-    {
-        manager.stop(&app.unit, Duration::from_secs(10)).await?;
-        manager.unref(&app.unit).await?;
+    if pin_pending(manager, runtime, &app.unit).await? {
+        let records = runtime.clone();
+        let unit = app.unit.clone();
+        let current = blocking(move || records.app(&unit)).await?;
+        if super::processes::verify_invocation(manager, &current).await? {
+            manager.stop(&app.unit, Duration::from_secs(10)).await?;
+            manager.unref(&app.unit).await?;
+        }
     }
-    runtime.remove_app(&app.unit)
+    let runtime = runtime.clone();
+    let unit = app.unit.clone();
+    blocking(move || runtime.remove_app(&unit)).await
 }
 
 #[cfg(test)]
