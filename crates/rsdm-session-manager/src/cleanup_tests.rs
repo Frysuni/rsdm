@@ -1,4 +1,4 @@
-use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicUsize, Ordering}}, thread};
+use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicUsize, Ordering}}};
 
 use super::*;
 
@@ -14,16 +14,16 @@ impl Bus {
     }
 }
 
-fn bus_fixture() -> (zbus::Connection, zbus::Connection, Arc<AtomicUsize>) {
+async fn bus_fixture() -> (zbus::Connection, zbus::Connection, Arc<AtomicUsize>) {
     let (server_socket, client_socket) = UnixStream::pair().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let state = calls.clone();
-    let server = thread::spawn(move || async_io::block_on(async {
+    let server = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
             .serve_at("/org/freedesktop/DBus", Bus(state)).unwrap().build().await.unwrap()
-    }));
-    let connection = async_io::block_on(zbus::connection::Builder::unix_stream(client_socket).build()).unwrap();
-    (connection, server.join().unwrap(), calls)
+    });
+    let connection = zbus::connection::Builder::unix_stream(client_socket).build().await.unwrap();
+    (connection, server.await.unwrap(), calls)
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn a_new_recovery_attempt_has_one_five_second_budget() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn acquiring_a_bus_name_observes_the_recovery_deadline() {
-    let (connection, _server, calls) = bus_fixture();
+    let (connection, _server, calls) = bus_fixture().await;
     let manager = UserManager::with_connection(connection);
     manager.deadline.set(super::super::processes::monotonic_usec().unwrap() + 50_000);
     let before = std::time::Instant::now();

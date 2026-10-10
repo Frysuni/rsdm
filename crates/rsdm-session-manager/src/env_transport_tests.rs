@@ -1,4 +1,4 @@
-use std::{collections::HashMap, os::unix::net::UnixStream, sync::{Arc, Mutex}, thread};
+use std::{collections::HashMap, os::unix::net::UnixStream, sync::{Arc, Mutex}};
 
 use super::*;
 use crate::bus::UserManager;
@@ -43,27 +43,25 @@ impl Activation {
     }
 }
 
-fn connect(reject: bool) -> (UserManager, zbus::Connection, Effects) {
+async fn connect(reject: bool) -> (UserManager, zbus::Connection, Effects) {
     let (server_socket, client_socket) = UnixStream::pair().unwrap();
     let effects = Effects::default();
     let manager = Manager(effects.clone());
     let activation = Activation { effects: effects.clone(), reject };
-    let server = thread::spawn(move || async_io::block_on(async {
+    let server = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket)
             .p2p().server(zbus::Guid::generate()).unwrap()
             .serve_at("/org/freedesktop/systemd1", manager).unwrap()
             .serve_at("/org/freedesktop/DBus", activation).unwrap()
             .build().await.unwrap()
-    }));
-    let connection = async_io::block_on(async {
-        zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()
     });
-    (UserManager::with_connection(connection), server.join().unwrap(), effects)
+    let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    (UserManager::with_connection(connection), server.await.unwrap(), effects)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cleanup_clears_activation_before_unsetting_owned_manager_values() {
-    let (manager, _server, effects) = connect(false);
+    let (manager, _server, effects) = connect(false).await;
     let previous = vec![
         ("WAYLAND_DISPLAY".into(), "wayland-old".into()),
         ("DISPLAY".into(), ":old".into()),
@@ -78,7 +76,7 @@ async fn cleanup_clears_activation_before_unsetting_owned_manager_values() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_failed_activation_update_preserves_manager_ownership_for_recovery() {
-    let (manager, _server, effects) = connect(true);
+    let (manager, _server, effects) = connect(true).await;
     assert!(clear_names(&manager, &["DISPLAY".into()]).await.is_err());
     assert!(effects.lock().unwrap().is_empty());
 }

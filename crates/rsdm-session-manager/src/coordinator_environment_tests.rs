@@ -20,10 +20,10 @@ async fn completed_publication(fixture: &mut Fixture) {
     fixture.coordinator.completed(work).await.unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn repeated_finalize_updates_environment_without_reactivating_a_running_session() {
-    let mut fixture = Fixture::new();
-    let state = install(&fixture);
+    let mut fixture = Fixture::new().await;
+    let state = install(&fixture).await;
     for value in ["wayland-1", "wayland-2"] {
         let mut response = finalize(&mut fixture, value);
         completed_publication(&mut fixture).await;
@@ -41,15 +41,15 @@ async fn repeated_finalize_updates_environment_without_reactivating_a_running_se
     assert_eq!(state.reads.load(Ordering::SeqCst), 0);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn a_paused_publication_does_not_block_status_or_cancellation() {
-    let mut fixture = Fixture::new();
-    let state = install(&fixture);
+    let mut fixture = Fixture::new().await;
+    let state = install(&fixture).await;
     let (entered, resume) = pause(&state);
     let before = Instant::now();
     let mut response = finalize(&mut fixture, "wayland-new");
     assert!(before.elapsed() < Duration::from_secs(1));
-    entered.recv_timeout(Duration::from_secs(1)).unwrap();
+    tokio::time::timeout(Duration::from_secs(1), entered.notified()).await.unwrap();
     assert_eq!(fixture.coordinator.workers, 1);
     assert!(fixture.coordinator.runtime.session().unwrap().exported_environment.contains(&(
         "WAYLAND_DISPLAY".into(), "wayland-new".into(),
@@ -65,7 +65,7 @@ async fn a_paused_publication_does_not_block_status_or_cancellation() {
     fixture.coordinator.advance().unwrap();
     assert!(!fixture.coordinator.preparing, "teardown must drain the accepted publication first");
 
-    resume.try_send(()).unwrap();
+    resume.notify_one();
     completed_publication(&mut fixture).await;
     assert!(response.try_recv().unwrap().is_ok());
     assert_eq!(fixture.coordinator.runtime.session().unwrap().phase, SessionPhase::Running);
@@ -73,13 +73,13 @@ async fn a_paused_publication_does_not_block_status_or_cancellation() {
     assert_eq!(fixture.coordinator.workers, 0);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn queued_publications_run_serially_without_overwriting_recorded_intent() {
-    let mut fixture = Fixture::new();
-    let state = install(&fixture);
+    let mut fixture = Fixture::new().await;
+    let state = install(&fixture).await;
     let (entered, resume) = pause(&state);
     let mut first = finalize(&mut fixture, "wayland-first");
-    entered.recv_timeout(Duration::from_secs(1)).unwrap();
+    tokio::time::timeout(Duration::from_secs(1), entered.notified()).await.unwrap();
     let mut second = finalize(&mut fixture, "wayland-second");
     assert_eq!(fixture.coordinator.workers, 1);
     assert_eq!(fixture.coordinator.pending_environment.len(), 1);
@@ -87,7 +87,7 @@ async fn queued_publications_run_serially_without_overwriting_recorded_intent() 
     assert!(fixture.coordinator.runtime.session().unwrap().exported_environment.contains(&(
         "WAYLAND_DISPLAY".into(), "wayland-first".into(),
     )));
-    resume.try_send(()).unwrap();
+    resume.notify_one();
     completed_publication(&mut fixture).await;
     assert!(first.try_recv().unwrap().is_ok());
     assert_eq!(fixture.coordinator.workers, 1);
@@ -101,28 +101,28 @@ async fn queued_publications_run_serially_without_overwriting_recorded_intent() 
     )));
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn shutdown_rejects_queued_environment_without_publishing_it() {
-    let mut fixture = Fixture::new();
-    let state = install(&fixture);
+    let mut fixture = Fixture::new().await;
+    let state = install(&fixture).await;
     let (entered, resume) = pause(&state);
     let mut first = finalize(&mut fixture, "wayland-first");
-    entered.recv_timeout(Duration::from_secs(1)).unwrap();
+    tokio::time::timeout(Duration::from_secs(1), entered.notified()).await.unwrap();
     let mut second = finalize(&mut fixture, "wayland-second");
     fixture.coordinator.begin_stop("logout", None).unwrap();
     assert!(second.try_recv().unwrap().unwrap_err().contains("before environment publication"));
     assert!(fixture.coordinator.pending_environment.is_empty());
-    resume.try_send(()).unwrap();
+    resume.notify_one();
     completed_publication(&mut fixture).await;
     assert!(first.try_recv().unwrap().is_err());
     assert_eq!(*state.writes.lock().unwrap(), [vec!["WAYLAND_DISPLAY=wayland-first"]]);
     assert_eq!(fixture.coordinator.workers, 0);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn partial_publication_failure_preserves_environment_ownership_for_recovery() {
-    let mut fixture = Fixture::new();
-    let state = install(&fixture);
+    let mut fixture = Fixture::new().await;
+    let state = install(&fixture).await;
     state.fail_activation.store(true, Ordering::SeqCst);
     let mut failed = finalize(&mut fixture, "wayland-failed");
     completed_publication(&mut fixture).await;
@@ -138,13 +138,13 @@ async fn partial_publication_failure_preserves_environment_ownership_for_recover
     assert_eq!(fixture.coordinator.workers, 0);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn recovery_interrupts_pending_publication_and_never_publishes_queued_values() {
-    let mut fixture = Fixture::new();
-    let state = install(&fixture);
+    let mut fixture = Fixture::new().await;
+    let state = install(&fixture).await;
     let (entered, resume) = pause(&state);
     let mut first = finalize(&mut fixture, "wayland-first");
-    entered.recv_timeout(Duration::from_secs(1)).unwrap();
+    tokio::time::timeout(Duration::from_secs(1), entered.notified()).await.unwrap();
     let mut second = finalize(&mut fixture, "wayland-second");
     fixture.coordinator.manager.deadline.set(monotonic_usec().unwrap() + 50_000);
     let before = Instant::now();
@@ -159,25 +159,25 @@ async fn recovery_interrupts_pending_publication_and_never_publishes_queued_valu
     assert!(record.exported_environment.contains(&("WAYLAND_DISPLAY".into(), "wayland-first".into())));
     assert!(!record.exported_environment.contains(&("WAYLAND_DISPLAY".into(), "wayland-second".into())));
     assert_eq!(*state.writes.lock().unwrap(), [vec!["WAYLAND_DISPLAY=wayland-first"]]);
-    resume.try_send(()).unwrap();
+    resume.notify_one();
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn cancelling_logout_preserves_an_accepted_startup_finalize_until_readiness() {
-    let mut fixture = Fixture::new();
-    let state = install(&fixture);
+    let mut fixture = Fixture::new().await;
+    let state = install(&fixture).await;
     fixture.coordinator.lifecycle.phase = SessionPhase::Starting;
     fixture.coordinator.ready_once = false;
     fixture.coordinator.ready_busy = true;
     fixture.coordinator.workers = 1;
     let (entered, resume) = pause(&state);
     let mut response = finalize(&mut fixture, "wayland-startup");
-    entered.recv_timeout(Duration::from_secs(1)).unwrap();
+    tokio::time::timeout(Duration::from_secs(1), entered.notified()).await.unwrap();
     fixture.coordinator.begin_stop("logout", None).unwrap();
     let (reply, mut cancelled) = tokio::sync::mpsc::channel(1);
     fixture.coordinator.request(Request::Cancel { generation: GENERATION.into(), reply: Reply::for_test(reply) }).unwrap();
     assert!(cancelled.try_recv().unwrap().is_ok());
-    resume.try_send(()).unwrap();
+    resume.notify_one();
     completed_publication(&mut fixture).await;
     assert!(response.try_recv().is_err());
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Starting);
@@ -192,10 +192,10 @@ async fn cancelling_logout_preserves_an_accepted_startup_finalize_until_readines
     assert_eq!(fixture.coordinator.workers, 0);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn failed_record_publication_prevents_all_environment_side_effects() {
-    let mut fixture = Fixture::new();
-    let state = install(&fixture);
+    let mut fixture = Fixture::new().await;
+    let state = install(&fixture).await;
     let record = fixture.coordinator.runtime.path.join("session.toml");
     std::fs::remove_file(&record).unwrap();
     std::fs::create_dir(&record).unwrap();

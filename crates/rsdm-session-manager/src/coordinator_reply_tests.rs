@@ -3,7 +3,7 @@ use crate::control::{Endpoint, Reply, Request};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn expired_shutdown_does_not_wait_for_a_reply_acknowledgement() {
-    let mut fixture = Fixture::new();
+    let mut fixture = Fixture::new().await;
     fixture.coordinator.replies_pending = 1;
     fixture.coordinator.manager.deadline.set(1);
     let before = Instant::now();
@@ -14,7 +14,7 @@ async fn expired_shutdown_does_not_wait_for_a_reply_acknowledgement() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reply_delivery_uses_the_remaining_shutdown_budget() {
-    let mut fixture = Fixture::new();
+    let mut fixture = Fixture::new().await;
     fixture.coordinator.replies_pending = 1;
     fixture.coordinator.manager.deadline.set(monotonic_usec().unwrap() + 50_000);
     let before = Instant::now();
@@ -25,7 +25,7 @@ async fn reply_delivery_uses_the_remaining_shutdown_budget() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_delivered_acknowledgement_finishes_without_waiting_out_the_budget() {
-    let mut fixture = Fixture::new();
+    let mut fixture = Fixture::new().await;
     // Let the real endpoint send its delivery acknowledgement over the private
     // channel; its permit must stay alive until the coordinator consumes it.
     let (endpoint, requests) = Endpoint::channel(fixture.coordinator.record.identity.uid);
@@ -52,7 +52,7 @@ async fn a_delivered_acknowledgement_finishes_without_waiting_out_the_budget() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn queued_status_requests_still_receive_a_reply_before_the_ack_budget_expires() {
-    let mut fixture = Fixture::new();
+    let mut fixture = Fixture::new().await;
     let (sender, requests) = tokio::sync::mpsc::channel(1);
     fixture.coordinator.requests = requests;
     let (reply, mut response) = tokio::sync::mpsc::channel(1);

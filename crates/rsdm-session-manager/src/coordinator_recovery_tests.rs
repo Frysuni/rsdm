@@ -3,7 +3,7 @@ use crate::control::{Reply, Request};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn recovery_worker_drain_cannot_extend_an_active_shutdown_deadline() {
-    let mut fixture = Fixture::new();
+    let mut fixture = Fixture::new().await;
     let deadline = monotonic_usec().unwrap() + 50_000;
     fixture.coordinator.begin_stop("external-shutdown", Some(deadline)).unwrap();
     fixture.coordinator.workers = 1;
@@ -20,7 +20,7 @@ async fn recovery_worker_drain_cannot_extend_an_active_shutdown_deadline() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_saved_budget_bounds_worker_drain_before_shutdown_control_exists() {
-    let mut fixture = Fixture::new();
+    let mut fixture = Fixture::new().await;
     let deadline = monotonic_usec().unwrap() + 50_000;
     fixture.coordinator.record.shutdown_deadline_usec = Some(deadline);
     fixture.coordinator.workers = 1;
@@ -34,7 +34,7 @@ async fn a_saved_budget_bounds_worker_drain_before_shutdown_control_exists() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn expired_recovery_skips_worker_waits_and_preserves_owned_state() {
-    let mut fixture = Fixture::new();
+    let mut fixture = Fixture::new().await;
     fixture.coordinator.record.compositor_invocation = vec![7; 16];
     fixture.coordinator.record.owns_targets = true;
     fixture.coordinator.manager.deadline.set(1);
@@ -51,7 +51,7 @@ async fn expired_recovery_skips_worker_waits_and_preserves_owned_state() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn recovery_consumes_completed_work_and_rejects_pending_requests_inside_its_budget() {
-    let mut fixture = Fixture::new();
+    let mut fixture = Fixture::new().await;
     let (sender, received) = tokio::sync::mpsc::channel(1);
     fixture.coordinator.requests = received;
     let (reply, mut response) = tokio::sync::mpsc::channel(1);

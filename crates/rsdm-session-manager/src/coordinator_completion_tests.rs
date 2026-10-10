@@ -65,15 +65,13 @@ impl FakeService {
     fn environment(&self) -> Vec<String> { vec![format!("RSDM_SESSION_GENERATION={GENERATION}")] }
 }
 
-pub(super) fn install_manager(fixture: &Fixture) -> Arc<ManagerState> {
+pub(super) async fn install_manager(fixture: &Fixture) -> Arc<ManagerState> {
     let state = Arc::new(ManagerState::default());
     state.unavailable.store(true, Ordering::SeqCst);
     state.active.store(true, Ordering::SeqCst);
-    async_io::block_on(async {
-        fixture._server.object_server().at("/org/freedesktop/systemd1", FakeManager(state.clone())).await.unwrap();
-        fixture._server.object_server().at("/org/freedesktop/systemd1/unit/anchor", FakeUnit(state.clone())).await.unwrap();
-        fixture._server.object_server().at("/org/freedesktop/systemd1/unit/anchor", FakeService).await.unwrap();
-    });
+    fixture._server.object_server().at("/org/freedesktop/systemd1", FakeManager(state.clone())).await.unwrap();
+    fixture._server.object_server().at("/org/freedesktop/systemd1/unit/anchor", FakeUnit(state.clone())).await.unwrap();
+    fixture._server.object_server().at("/org/freedesktop/systemd1/unit/anchor", FakeService).await.unwrap();
     state
 }
 
@@ -86,8 +84,8 @@ async fn complete_observation(fixture: &mut Fixture) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_lost_invocation_read_after_start_does_not_stop_or_restart_the_compositor() {
-    let mut fixture = Fixture::new();
-    let state = install_manager(&fixture);
+    let mut fixture = Fixture::new().await;
+    let state = install_manager(&fixture).await;
     fixture.coordinator.lifecycle.phase = SessionPhase::Starting;
     fixture.coordinator.ready_once = false;
     let provider = super::super::super::provider::Provider {
@@ -128,8 +126,8 @@ async fn a_lost_invocation_read_after_start_does_not_stop_or_restart_the_composi
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn readiness_completion_waits_for_reads_without_repeating_activation() {
-    let mut fixture = Fixture::new();
-    let state = install_manager(&fixture);
+    let mut fixture = Fixture::new().await;
+    let state = install_manager(&fixture).await;
     fixture.coordinator.lifecycle.phase = SessionPhase::Starting;
     fixture.coordinator.ready_once = false;
     fixture.coordinator.ready_busy = true;
@@ -158,8 +156,8 @@ async fn readiness_completion_waits_for_reads_without_repeating_activation() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shutdown_releases_pending_readiness_even_during_an_outage() {
-    let mut fixture = Fixture::new();
-    let state = install_manager(&fixture);
+    let mut fixture = Fixture::new().await;
+    let state = install_manager(&fixture).await;
     fixture.coordinator.lifecycle.phase = SessionPhase::Starting;
     fixture.coordinator.ready_busy = true;
     fixture.coordinator.pending_ready = true;
@@ -180,8 +178,8 @@ async fn shutdown_releases_pending_readiness_even_during_an_outage() {
 async fn preparation_failure_and_native_delegation_resume_without_manager_reads() {
     for delegated in [false, true] {
         for ready_once in [false, true] {
-            let mut fixture = Fixture::new();
-            let state = install_manager(&fixture);
+            let mut fixture = Fixture::new().await;
+            let state = install_manager(&fixture).await;
             fixture.coordinator.provider.kind = ProviderKind::Gnome;
             fixture.coordinator.ready_once = ready_once;
             fixture.coordinator.begin_stop("logout", None).unwrap();
@@ -207,8 +205,8 @@ async fn preparation_failure_and_native_delegation_resume_without_manager_reads(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn observation_still_detects_a_real_stop_after_resuming() {
-    let mut fixture = Fixture::new();
-    let state = install_manager(&fixture);
+    let mut fixture = Fixture::new().await;
+    let state = install_manager(&fixture).await;
     fixture.coordinator.begin_stop("logout", None).unwrap();
     fixture.coordinator.preparing = true;
     fixture.coordinator.prepared(Err(SessionError::State("preparation failed".into()))).unwrap();
@@ -224,8 +222,8 @@ async fn observation_still_detects_a_real_stop_after_resuming() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn explicit_finalize_retries_activation_after_observation_returns_the_process() {
-    let mut fixture = Fixture::new();
-    let state = install_manager(&fixture);
+    let mut fixture = Fixture::new().await;
+    let state = install_manager(&fixture).await;
     state.unavailable.store(false, Ordering::SeqCst);
     fixture.coordinator.provider.kind = ProviderKind::Managed;
     fixture.coordinator.environment = vec![("PATH".into(), std::env::var("PATH").unwrap())];

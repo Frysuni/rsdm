@@ -1,6 +1,6 @@
 //! Shutdown decisions on private records and an isolated peer-to-peer bus.
 
-use std::{fs, os::unix::{fs::PermissionsExt, net::UnixStream}, sync::atomic::AtomicUsize, thread};
+use std::{fs, os::unix::{fs::PermissionsExt, net::UnixStream}, sync::atomic::AtomicUsize};
 
 use super::*;
 use rsdm_system::logind::ShutdownNotice;
@@ -26,7 +26,7 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn new() -> Self {
+    async fn new() -> Self {
         let directory = std::env::temp_dir().join(format!("rsdm-shutdown-test-{}-{}",
             std::process::id(), NEXT_ID.fetch_add(1, Ordering::Relaxed)));
         fs::create_dir(&directory).unwrap();
@@ -35,16 +35,14 @@ impl Fixture {
         fs::set_permissions(directory.join("apps"), fs::Permissions::from_mode(0o700)).unwrap();
         let runtime = Runtime { path: directory.clone(), generation: GENERATION.into() };
         let (server_socket, client_socket) = UnixStream::pair().unwrap();
-        let server = thread::spawn(move || async_io::block_on(async {
+        let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server_socket).p2p()
                 .server(zbus::Guid::generate()).unwrap()
                 // Builder waits for the dispatcher's match stream to be ready;
                 // dynamically adding interfaces alone leaves the first call racing it.
                 .serve_at("/fixture", FixtureReady).unwrap().build().await.unwrap()
-        }));
-        let connection = async_io::block_on(async {
-            zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()
         });
+        let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
         let manager = UserManager::with_connection(connection.clone());
         let provider = Provider { kind: ProviderKind::External, native_unit: None, logout_command: Vec::new() };
         let xsmp = xsmp::Handle::start(&manager, &runtime, &provider).unwrap();
@@ -77,7 +75,7 @@ impl Fixture {
             _power_monitor: None, notices: received, last_reap: Instant::now(),
             _lease: crate::session_lease::SessionLease::acquire_in(&directory).unwrap(),
         };
-        Self { coordinator, notices, _server: server.join().unwrap(), directory }
+        Self { coordinator, notices, _server: server.await.unwrap(), directory }
     }
 
     fn notify(&mut self, preparing: bool, budget_usec: u64) {
@@ -96,9 +94,9 @@ impl Drop for Fixture {
 
 use crate::processes::monotonic_usec;
 
-#[test]
-fn logind_shutdown_uses_the_full_delay_budget() {
-    let mut fixture = Fixture::new();
+#[tokio::test]
+async fn logind_shutdown_uses_the_full_delay_budget() {
+    let mut fixture = Fixture::new().await;
     let before = monotonic_usec().unwrap();
     fixture.notify(true, 30_000_000);
     let after = monotonic_usec().unwrap();
@@ -108,9 +106,9 @@ fn logind_shutdown_uses_the_full_delay_budget() {
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Preparing);
 }
 
-#[test]
-fn repeated_notices_never_extend_the_original_deadline() {
-    let mut fixture = Fixture::new();
+#[tokio::test]
+async fn repeated_notices_never_extend_the_original_deadline() {
+    let mut fixture = Fixture::new().await;
     fixture.notify(true, 30_000_000);
     let original = fixture.deadline();
     fixture.notify(true, 60_000_000);
@@ -122,9 +120,9 @@ fn repeated_notices_never_extend_the_original_deadline() {
     assert!(fixture.deadline() < original);
 }
 
-#[test]
-fn queued_shutdown_keeps_the_receivers_original_deadline() {
-    let mut fixture = Fixture::new();
+#[tokio::test]
+async fn queued_shutdown_keeps_the_receivers_original_deadline() {
+    let mut fixture = Fixture::new().await;
     let notice = ShutdownNotice::new(true, 30_000_000);
     let deadline = notice.deadline_usec;
     fixture.notices.send(notice).unwrap();
@@ -133,9 +131,9 @@ fn queued_shutdown_keeps_the_receivers_original_deadline() {
     assert_eq!(fixture.coordinator.record.shutdown_deadline_usec, Some(deadline));
 }
 
-#[test]
-fn a_queued_expired_shutdown_cannot_receive_a_fresh_budget() {
-    let mut fixture = Fixture::new();
+#[tokio::test]
+async fn a_queued_expired_shutdown_cannot_receive_a_fresh_budget() {
+    let mut fixture = Fixture::new().await;
     let deadline = monotonic_usec().unwrap().saturating_sub(1);
     fixture.notices.send(ShutdownNotice { preparing: true, deadline_usec: deadline }).unwrap();
     fixture.coordinator.notifications().unwrap();
@@ -144,9 +142,9 @@ fn a_queued_expired_shutdown_cannot_receive_a_fresh_budget() {
     assert_eq!(fixture.coordinator.runtime.session().unwrap().shutdown_deadline_usec, Some(deadline));
 }
 
-#[test]
-fn wm_exit_does_not_replace_loginds_budget_or_prevent_its_cancellation() {
-    let mut fixture = Fixture::new();
+#[tokio::test]
+async fn wm_exit_does_not_replace_loginds_budget_or_prevent_its_cancellation() {
+    let mut fixture = Fixture::new().await;
     fixture.notify(true, 30_000_000);
     let original = fixture.deadline();
     for action in ["compositor-exited", "external-stop"] {
@@ -165,9 +163,9 @@ fn wm_exit_does_not_replace_loginds_budget_or_prevent_its_cancellation() {
     assert!(fixture.deadline() >= original);
 }
 
-#[test]
-fn compositor_cleanup_retains_its_explicit_five_second_deadline() {
-    let mut fixture = Fixture::new();
+#[tokio::test]
+async fn compositor_cleanup_retains_its_explicit_five_second_deadline() {
+    let mut fixture = Fixture::new().await;
     let deadline = monotonic_usec().unwrap() + 5_000_000;
     fixture.coordinator.begin_stop("compositor-exited", Some(deadline)).unwrap();
     assert_eq!(fixture.deadline(), deadline);
@@ -177,9 +175,9 @@ fn compositor_cleanup_retains_its_explicit_five_second_deadline() {
     assert_eq!(fixture.coordinator.action, "external-shutdown");
 }
 
-#[test]
-fn notices_during_infrastructure_stop_record_the_budget_without_reopening_preparation() {
-    let mut fixture = Fixture::new();
+#[tokio::test]
+async fn notices_during_infrastructure_stop_record_the_budget_without_reopening_preparation() {
+    let mut fixture = Fixture::new().await;
     fixture.coordinator.begin_stop("reboot", None).unwrap();
     fixture.coordinator.lifecycle.phase = SessionPhase::StoppingSession;
     let before = monotonic_usec().unwrap();
@@ -213,7 +211,7 @@ async fn a_rejected_logout_helper_never_stops_or_unrefs_a_conflicting_unit() {
     let record = helper_start_fixture::record();
     let provider = Provider { kind: ProviderKind::External, native_unit: None, logout_command: helper_start_fixture::command() };
     for mode in [Mode::Collision, Mode::Denied] {
-        let fixture = helper_start_fixture::Fixture::new(format!("rsdm-logout-{GENERATION}.service"), mode);
+        let fixture = helper_start_fixture::Fixture::new(format!("rsdm-logout-{GENERATION}.service"), mode).await;
         assert!(matches!(run_logout_command(&fixture.manager, &record, &provider, Path::new("/")).await,
             Err(SessionError::StartRejected { .. })));
         assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
@@ -229,7 +227,7 @@ async fn an_accepted_logout_helper_with_an_inspection_error_still_attempts_clean
     use crate::helper_start_fixture::{self, Mode};
     let record = helper_start_fixture::record();
     let provider = Provider { kind: ProviderKind::External, native_unit: None, logout_command: helper_start_fixture::command() };
-    let fixture = helper_start_fixture::Fixture::new(format!("rsdm-logout-{GENERATION}.service"), Mode::InspectionDenied);
+    let fixture = helper_start_fixture::Fixture::new(format!("rsdm-logout-{GENERATION}.service"), Mode::InspectionDenied).await;
     assert!(run_logout_command(&fixture.manager, &record, &provider, Path::new("/")).await.is_err());
     assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
     assert!(!fixture.state.lifetime_bound.load(Ordering::SeqCst));
@@ -243,7 +241,7 @@ async fn logout_does_not_launch_a_command_for_another_session_generation() {
     let mut record = helper_start_fixture::record();
     record.identity.generation = "ffffffffffffffffffffffffffffffff".into();
     let provider = Provider { kind: ProviderKind::External, native_unit: None, logout_command: helper_start_fixture::command() };
-    let fixture = helper_start_fixture::Fixture::new("unused.service".into(), Mode::Collision);
+    let fixture = helper_start_fixture::Fixture::new("unused.service".into(), Mode::Collision).await;
 
     let error = run_logout_command(&fixture.manager, &record, &provider, Path::new("/")).await.unwrap_err();
     assert!(error.to_string().contains("stale session generation"));

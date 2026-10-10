@@ -2,7 +2,7 @@
 
 use std::{
     fs, os::unix::{fs::PermissionsExt, net::UnixStream}, path::PathBuf,
-    sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}}, thread,
+    sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}},
 };
 
 use zbus::{Connection, zvariant::{OwnedObjectPath, OwnedValue}};
@@ -122,7 +122,7 @@ pub(super) struct Fixture {
 }
 
 impl Fixture {
-    pub(super) fn new(mode: Mode) -> Self {
+    pub(super) async fn new(mode: Mode) -> Self {
         let directory = std::env::temp_dir().join(format!("rsdm-app-launch-{}-{}",
             std::process::id(), NEXT_ID.fetch_add(1, Ordering::Relaxed)));
         fs::create_dir(&directory).unwrap();
@@ -142,17 +142,15 @@ impl Fixture {
             starts: AtomicUsize::new(0), invocation_reads: AtomicUsize::new(0), unrefs: AtomicUsize::new(0) });
         let shared = Arc::clone(&state);
         let (server_socket, client_socket) = UnixStream::pair().unwrap();
-        let server = thread::spawn(move || async_io::block_on(async {
+        let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
                 .serve_at("/org/freedesktop/systemd1", Manager(Arc::clone(&shared))).unwrap()
                 .serve_at("/unit", Unit(Arc::clone(&shared))).unwrap()
                 .serve_at("/unit", Service(shared)).unwrap().build().await.unwrap()
-        }));
-        let connection = async_io::block_on(async {
-            zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()
         });
+        let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
         Self { manager: UserManager::with_connection(connection), runtime, request, app, state,
-            _server: server.join().unwrap(), directory }
+            _server: server.await.unwrap(), directory }
     }
 
     pub(super) async fn launch(&self) -> Result<String, SessionError> {

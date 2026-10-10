@@ -1,4 +1,4 @@
-use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicUsize, Ordering}}, thread};
+use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicUsize, Ordering}}};
 
 use zbus::{Connection, zvariant::OwnedObjectPath};
 
@@ -41,51 +41,49 @@ impl Service {
     fn control_group(&self) -> &str { "/rsdm-test-app" }
 }
 
-fn manager(invocation: Vec<u8>, state: &'static str, processes: Vec<u32>) -> (UserManager, Connection, Arc<AtomicUsize>) {
+async fn manager(invocation: Vec<u8>, state: &'static str, processes: Vec<u32>) -> (UserManager, Connection, Arc<AtomicUsize>) {
     let queries = Arc::new(AtomicUsize::new(0));
     let shared = queries.clone();
     let (server_socket, client_socket) = UnixStream::pair().unwrap();
-    let worker = thread::spawn(move || async_io::block_on(async {
+    let worker = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p()
             .server(zbus::Guid::generate()).unwrap()
             .serve_at("/org/freedesktop/systemd1", Manager { processes, queries: shared }).unwrap()
             .serve_at("/org/freedesktop/systemd1/unit/native", Unit { invocation, state }).unwrap()
             .serve_at("/org/freedesktop/systemd1/unit/native", Service).unwrap()
             .build().await.unwrap()
-    }));
-    let connection = async_io::block_on(async {
-        zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()
     });
-    (UserManager::with_connection(connection), worker.join().unwrap(), queries)
+    let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    (UserManager::with_connection(connection), worker.await.unwrap(), queries)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn recovery_accepts_an_empty_native_unit_after_systemd_cleared_its_invocation() {
-    let (manager, _server, _) = manager(vec![0; 16], "inactive", Vec::new());
+    let (manager, _server, _) = manager(vec![0; 16], "inactive", Vec::new()).await;
     stop_invocation(&manager, "native.service", &[1; 16]).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cleared_invocation_cannot_hide_remaining_processes() {
-    let (manager, _server, _) = manager(vec![0; 16], "inactive", vec![42]);
+    let (manager, _server, _) = manager(vec![0; 16], "inactive", vec![42]).await;
     assert!(stop_invocation(&manager, "native.service", &[1; 16]).await.is_err());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cleared_invocation_cannot_hide_an_active_unit() {
-    let (manager, _server, _) = manager(vec![0; 16], "active", Vec::new());
+    let (manager, _server, _) = manager(vec![0; 16], "active", Vec::new()).await;
     assert!(stop_invocation(&manager, "native.service", &[1; 16]).await.is_err());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn recovery_does_not_stop_a_replacement_native_invocation() {
-    let (manager, _server, _) = manager(vec![2; 16], "inactive", Vec::new());
+    let (manager, _server, _) = manager(vec![2; 16], "inactive", Vec::new()).await;
     assert!(stop_invocation(&manager, "native.service", &[1; 16]).await.is_err());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn process_signaling_does_not_repeat_full_cgroup_snapshots() {
-    let (manager, _server, queries) = manager(vec![1; 16], "active", vec![std::process::id(); 128]);
+    let (manager, _server, queries) = manager(vec![1; 16], "active", vec![std::process::id(); 128]).await;
     let app = AppRecord { unit: "native.service".into(), invocation_id: vec![1; 16],
         policy: rsdm_core::domain::ShutdownPolicy::default(), deadline_usec: None, quit_started: false };
     signal_app(&manager, &app, 0).await.unwrap();
@@ -94,7 +92,7 @@ async fn process_signaling_does_not_repeat_full_cgroup_snapshots() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn process_signaling_rejects_a_replacement_before_taking_a_snapshot() {
-    let (manager, _server, queries) = manager(vec![2; 16], "active", vec![std::process::id()]);
+    let (manager, _server, queries) = manager(vec![2; 16], "active", vec![std::process::id()]).await;
     let app = AppRecord { unit: "native.service".into(), invocation_id: vec![1; 16],
         policy: rsdm_core::domain::ShutdownPolicy::default(), deadline_usec: None, quit_started: false };
     assert!(signal_app(&manager, &app, 0).await.is_err());

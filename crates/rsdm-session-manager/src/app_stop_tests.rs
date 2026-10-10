@@ -4,7 +4,6 @@ use std::{
     fs::{self, OpenOptions}, os::{fd::AsRawFd, unix::{fs::PermissionsExt, net::UnixStream}},
     sync::atomic::AtomicUsize, time::Instant,
 };
-use std::thread;
 
 use super::*;
 use rsdm_core::domain::ShutdownPolicy;
@@ -52,7 +51,7 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn new() -> Self {
+    async fn new() -> Self {
         let path = std::env::temp_dir().join(format!("rsdm-app-stop-test-{}-{}",
             std::process::id(), NEXT_ID.fetch_add(1, Ordering::Relaxed)));
         fs::create_dir(&path).unwrap();
@@ -67,17 +66,15 @@ impl Fixture {
         let queries = Arc::new(AtomicUsize::new(0));
         let shared = queries.clone();
         let (server_socket, client_socket) = UnixStream::pair().unwrap();
-        let server = thread::spawn(move || async_io::block_on(async {
+        let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server_socket).p2p()
                 .server(zbus::Guid::generate()).unwrap()
                 .serve_at("/org/freedesktop/systemd1", Manager(shared)).unwrap()
                 .serve_at("/unit", Unit).unwrap().serve_at("/unit", Service).unwrap()
                 .build().await.unwrap()
-        }));
-        let connection = async_io::block_on(async {
-            zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()
         });
-        Self { runtime, app, queries, manager: UserManager::with_connection(connection), _server: server.join().unwrap() }
+        let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+        Self { runtime, app, queries, manager: UserManager::with_connection(connection), _server: server.await.unwrap() }
     }
 }
 
@@ -87,7 +84,7 @@ impl Drop for Fixture {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn waiting_for_an_app_does_not_hold_its_record_lease() {
-    let fixture = Fixture::new();
+    let fixture = Fixture::new().await;
     let runtime = fixture.runtime.clone();
     let manager = fixture.manager.clone();
     let unit = fixture.app.unit.clone();
@@ -116,9 +113,9 @@ async fn waiting_for_an_app_does_not_hold_its_record_lease() {
     assert_eq!(saved.deadline_usec, None);
 }
 
-#[test]
-fn competing_preparations_claim_quit_once_and_preserve_the_deadline() {
-    let fixture = Fixture::new();
+#[tokio::test]
+async fn competing_preparations_claim_quit_once_and_preserve_the_deadline() {
+    let fixture = Fixture::new().await;
     let control = ShutdownControl::default();
     let (first, claimed) = claim_preparation(&fixture.runtime, &fixture.app.unit, &control, &control.hard_deadline).unwrap();
     assert!(claimed);
@@ -127,9 +124,9 @@ fn competing_preparations_claim_quit_once_and_preserve_the_deadline() {
     assert_eq!(first.deadline_usec, second.deadline_usec);
 }
 
-#[test]
-fn a_contended_preparation_lease_preserves_the_teardown_budget() {
-    let fixture = Fixture::new();
+#[tokio::test]
+async fn a_contended_preparation_lease_preserves_the_teardown_budget() {
+    let fixture = Fixture::new().await;
     let _lease = fixture.runtime.app_lease(&fixture.app.unit).unwrap();
     let control = ShutdownControl::for_manager(&fixture.manager);
     control.force(monotonic_usec().unwrap() + 200_000);
@@ -141,9 +138,9 @@ fn a_contended_preparation_lease_preserves_the_teardown_budget() {
     assert_eq!(saved.deadline_usec, None);
 }
 
-#[test]
-fn cancellation_does_not_reset_a_replacement_invocation() {
-    let fixture = Fixture::new();
+#[tokio::test]
+async fn cancellation_does_not_reset_a_replacement_invocation() {
+    let fixture = Fixture::new().await;
     let (prepared, _) = claim_preparation(&fixture.runtime, &fixture.app.unit, &ShutdownControl::default(), &Deadline::default()).unwrap();
     let mut replacement = prepared.clone();
     replacement.invocation_id = vec![2; 16];
@@ -160,7 +157,7 @@ async fn a_rejected_quit_helper_never_stops_or_unrefs_a_conflicting_unit() {
     use crate::helper_start_fixture::{self, Mode};
     let app = helper_start_fixture::app();
     for mode in [Mode::Collision, Mode::Denied] {
-        let fixture = helper_start_fixture::Fixture::new(app.unit.replacen("app-rsdm-", "rsdm-quit-", 1), mode);
+        let fixture = helper_start_fixture::Fixture::new(app.unit.replacen("app-rsdm-", "rsdm-quit-", 1), mode).await;
         assert!(matches!(launch_quit(&fixture.manager, &app, helper_start_fixture::GENERATION).await, Err(SessionError::StartRejected { .. })));
         assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
         assert!(fixture.state.lifetime_bound.load(Ordering::SeqCst));
@@ -173,7 +170,7 @@ async fn a_rejected_quit_helper_never_stops_or_unrefs_a_conflicting_unit() {
 async fn an_accepted_quit_helper_with_an_inspection_error_still_attempts_cleanup() {
     use crate::helper_start_fixture::{self, Mode};
     let app = helper_start_fixture::app();
-    let fixture = helper_start_fixture::Fixture::new(app.unit.replacen("app-rsdm-", "rsdm-quit-", 1), Mode::InspectionDenied);
+    let fixture = helper_start_fixture::Fixture::new(app.unit.replacen("app-rsdm-", "rsdm-quit-", 1), Mode::InspectionDenied).await;
     assert!(launch_quit(&fixture.manager, &app, helper_start_fixture::GENERATION).await.is_err());
     assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
     assert!(fixture.state.lifetime_bound.load(Ordering::SeqCst));

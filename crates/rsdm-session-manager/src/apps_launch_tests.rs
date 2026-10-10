@@ -9,7 +9,7 @@ use fixture::{Fixture, Mode};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_missing_executable_rolls_back_registration_without_contacting_systemd() {
-    let mut fixture = Fixture::new(Mode::Accepted);
+    let mut fixture = Fixture::new(Mode::Accepted).await;
     fixture.missing_command();
     let error = fixture.launch().await.unwrap_err();
     assert!(error.to_string().contains("was not found in the launch environment"));
@@ -21,7 +21,7 @@ async fn a_missing_executable_rolls_back_registration_without_contacting_systemd
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_rejected_start_removes_its_record_without_claiming_another_invocation() {
     for mode in [Mode::Denied, Mode::Collision] {
-        let fixture = Fixture::new(mode);
+        let fixture = Fixture::new(mode).await;
         assert!(matches!(fixture.launch().await, Err(SessionError::StartRejected { .. })));
         assert!(fixture.runtime.apps().unwrap().is_empty());
         assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
@@ -33,7 +33,7 @@ async fn a_rejected_start_removes_its_record_without_claiming_another_invocation
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn accepted_and_reconciled_lost_reply_launches_pin_the_owned_invocation() {
     for mode in [Mode::Accepted, Mode::LostReply] {
-        let fixture = Fixture::new(mode);
+        let fixture = Fixture::new(mode).await;
         assert_eq!(fixture.launch().await.unwrap(), fixture.app.unit);
         assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().invocation_id, vec![1; 16]);
         assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
@@ -44,7 +44,7 @@ async fn accepted_and_reconciled_lost_reply_launches_pin_the_owned_invocation() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn accepted_read_failures_keep_the_record_without_replaying_the_start() {
     for mode in [Mode::InvocationDenied, Mode::InspectionDenied] {
-        let fixture = Fixture::new(mode);
+        let fixture = Fixture::new(mode).await;
         assert!(fixture.launch().await.is_err());
         assert!(fixture.runtime.app(&fixture.app.unit).unwrap().invocation_id.is_empty());
         assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
@@ -54,7 +54,7 @@ async fn accepted_read_failures_keep_the_record_without_replaying_the_start() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_foreign_generation_after_start_cannot_be_pinned_for_later_cleanup() {
-    let fixture = Fixture::new(Mode::Foreign);
+    let fixture = Fixture::new(Mode::Foreign).await;
     assert!(fixture.launch().await.is_err());
     assert!(fixture.runtime.app(&fixture.app.unit).unwrap().invocation_id.is_empty());
     assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
@@ -63,7 +63,7 @@ async fn a_foreign_generation_after_start_cannot_be_pinned_for_later_cleanup() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_partially_created_unit_remains_registered_until_ordinary_cleanup() {
-    let fixture = Fixture::new(Mode::PartialDenied);
+    let fixture = Fixture::new(Mode::PartialDenied).await;
     assert!(fixture.launch().await.is_err());
     assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().invocation_id, vec![0; 16]);
     assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
@@ -74,7 +74,7 @@ async fn a_partially_created_unit_remains_registered_until_ordinary_cleanup() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rollback_never_removes_a_registration_claimed_by_another_invocation() {
-    let mut fixture = Fixture::new(Mode::Accepted);
+    let mut fixture = Fixture::new(Mode::Accepted).await;
     let mut pinned = fixture.app.clone();
     pinned.invocation_id = vec![1; 16];
     fixture.runtime.save_app(&pinned).unwrap();
@@ -87,7 +87,7 @@ async fn rollback_never_removes_a_registration_claimed_by_another_invocation() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn contended_rollback_reports_both_errors_and_can_be_retried_after_release() {
-    let mut fixture = Fixture::new(Mode::Accepted);
+    let mut fixture = Fixture::new(Mode::Accepted).await;
     fixture.missing_command();
     let lease = fixture.runtime.app_lease(&fixture.app.unit).unwrap();
     let error = fixture.launch().await.unwrap_err().to_string();
@@ -100,9 +100,9 @@ async fn contended_rollback_reports_both_errors_and_can_be_retried_after_release
     assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 0);
 }
 
-#[test]
-fn a_restored_peer_reference_keeps_its_registration_for_recovery() {
-    let fixture = Fixture::new(Mode::Accepted);
+#[tokio::test]
+async fn a_restored_peer_reference_keeps_its_registration_for_recovery() {
+    let fixture = Fixture::new(Mode::Accepted).await;
     let error = SessionError::StartRejected {
         error: Box::new(SessionError::State("rejected after peer replacement".into())),
         reference_retained: true,

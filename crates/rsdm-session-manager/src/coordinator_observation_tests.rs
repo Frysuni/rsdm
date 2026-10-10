@@ -5,7 +5,7 @@ use crate::{control::Reply, session_process::SessionProcess};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn observation_preserves_the_process_until_the_start_worker_completes() {
-    let mut fixture = Fixture::new();
+    let mut fixture = Fixture::new().await;
     fixture.coordinator.provider.kind = ProviderKind::Managed;
     fixture.coordinator.lifecycle.phase = SessionPhase::Starting;
     fixture.coordinator.ready_once = false;
@@ -26,7 +26,7 @@ async fn observation_preserves_the_process_until_the_start_worker_completes() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stopping_does_not_start_observations_that_starve_preparation() {
-    let mut fixture = Fixture::new();
+    let mut fixture = Fixture::new().await;
     fixture.coordinator.begin_stop("logout", None).unwrap();
 
     fixture.coordinator.start_observation();
@@ -39,7 +39,7 @@ async fn stopping_does_not_start_observations_that_starve_preparation() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stale_readiness_cannot_acknowledge_or_restart_a_stopping_session() {
-    let mut fixture = Fixture::new();
+    let mut fixture = Fixture::new().await;
     fixture.coordinator.ready_once = false;
     fixture.coordinator.ready_busy = true;
     fixture.coordinator.pending_ready = true;
@@ -58,8 +58,8 @@ async fn stale_readiness_cannot_acknowledge_or_restart_a_stopping_session() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_inflight_observation_returns_ownership_before_shutdown_advances() {
-    let mut fixture = Fixture::new();
-    completion::install_manager(&fixture);
+    let mut fixture = Fixture::new().await;
+    completion::install_manager(&fixture).await;
     fixture.coordinator.start_observation();
     assert!(fixture.coordinator.observation_busy);
     fixture.coordinator.begin_stop("logout", None).unwrap();
@@ -78,8 +78,8 @@ async fn an_inflight_observation_returns_ownership_before_shutdown_advances() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn recovery_reclaims_the_launcher_from_a_completed_observation() {
-    let mut fixture = Fixture::new();
-    completion::install_manager(&fixture);
+    let mut fixture = Fixture::new().await;
+    completion::install_manager(&fixture).await;
     fixture.coordinator.process = Some(SessionProcess::launch(
         &["true".into()], &[], &fixture.directory, &fixture.coordinator.provider,
         "unused.service".into(),

@@ -14,15 +14,15 @@ pub(super) struct State {
 }
 
 struct Pause {
-    entered: std::sync::mpsc::Sender<()>,
-    resume: async_channel::Receiver<()>,
+    entered: Arc<tokio::sync::Notify>,
+    resume: Arc<tokio::sync::Notify>,
 }
 
-pub(super) fn pause(state: &State) -> (std::sync::mpsc::Receiver<()>, async_channel::Sender<()>) {
-    let (entered, observed) = std::sync::mpsc::channel();
-    let (resume, resumed) = async_channel::bounded(1);
-    *state.pause.lock().unwrap() = Some(Pause { entered, resume: resumed });
-    (observed, resume)
+pub(super) fn pause(state: &State) -> (Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>) {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let resume = Arc::new(tokio::sync::Notify::new());
+    *state.pause.lock().unwrap() = Some(Pause { entered: entered.clone(), resume: resume.clone() });
+    (entered, resume)
 }
 
 struct Manager(Arc<State>);
@@ -36,8 +36,8 @@ impl Manager {
         self.0.writes.lock().unwrap().push(values.clone());
         let pause = self.0.pause.lock().unwrap().take();
         if let Some(pause) = pause {
-            let _ = pause.entered.send(());
-            let _ = pause.resume.recv().await;
+            pause.entered.notify_one();
+            pause.resume.notified().await;
         }
         let mut current = self.0.values.lock().unwrap();
         for value in values {
@@ -75,12 +75,10 @@ impl Bus {
     }
 }
 
-pub(super) fn install(fixture: &Fixture) -> Arc<State> {
+pub(super) async fn install(fixture: &Fixture) -> Arc<State> {
     let state = Arc::new(State::default());
-    async_io::block_on(async {
-        fixture._server.object_server().at("/org/freedesktop/systemd1", Manager(state.clone())).await.unwrap();
-        fixture._server.object_server().at("/org/freedesktop/DBus", Bus(state.clone())).await.unwrap();
-        fixture._server.object_server().at("/anchor", Unit).await.unwrap();
-    });
+    fixture._server.object_server().at("/org/freedesktop/systemd1", Manager(state.clone())).await.unwrap();
+    fixture._server.object_server().at("/org/freedesktop/DBus", Bus(state.clone())).await.unwrap();
+    fixture._server.object_server().at("/anchor", Unit).await.unwrap();
     state
 }

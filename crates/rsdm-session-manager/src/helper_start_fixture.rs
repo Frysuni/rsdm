@@ -1,6 +1,6 @@
 //! Private manager peer records cleanup attempts after helper start errors.
 
-use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering}}, thread};
+use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering}}};
 
 use rsdm_core::domain::{SessionPhase, ShutdownPolicy};
 use zbus::{Connection, zvariant::{OwnedObjectPath, OwnedValue}};
@@ -111,22 +111,20 @@ pub(super) struct Fixture {
 }
 
 impl Fixture {
-    pub(super) fn new(unit: String, mode: Mode) -> Self {
+    pub(super) async fn new(unit: String, mode: Mode) -> Self {
         let state = Arc::new(State { mode, unit, exists: AtomicBool::new(false),
             starts: AtomicUsize::new(0), stops: AtomicUsize::new(0), unrefs: AtomicUsize::new(0),
             lifetime_bound: AtomicBool::new(false), runtime_limit_usec: AtomicU64::new(0) });
         let shared = Arc::clone(&state);
         let (server_socket, client_socket) = UnixStream::pair().unwrap();
-        let server = thread::spawn(move || async_io::block_on(async {
+        let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
                 .serve_at("/org/freedesktop/systemd1", Manager(Arc::clone(&shared))).unwrap()
                 .serve_at("/app", Service).unwrap().serve_at("/helper", Unit(shared)).unwrap()
                 .build().await.unwrap()
-        }));
-        let connection = async_io::block_on(async {
-            zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap()
         });
-        Self { manager: UserManager::with_connection(connection), state, _server: server.join().unwrap() }
+        let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+        Self { manager: UserManager::with_connection(connection), state, _server: server.await.unwrap() }
     }
 }
 
