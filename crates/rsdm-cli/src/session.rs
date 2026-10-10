@@ -14,7 +14,7 @@ pub enum PowerAction { Reboot, Poweroff }
 pub async fn power(action: PowerAction) -> Result<()> {
     let action = match action { PowerAction::Reboot => "reboot", PowerAction::Poweroff => "poweroff" };
     if std::env::var_os("RSDM_SESSION_GENERATION").is_some() {
-        return print_outcome(session_manager::stop(action)?);
+        return print_outcome(session_manager::stop(action).await?);
     }
     rsdm_system::logind::request_direct(action).await?;
     print_outcome(session_manager::StopOutcome {
@@ -80,45 +80,49 @@ pub struct AppOptions {
     argv: Vec<String>,
 }
 
-pub fn run(path: &Path, action: SessionAction) -> Result<()> {
+pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
     match action {
         SessionAction::Start { mode, native_unit, logout_command, compositor } => {
             let config = load_config(path)?;
             let options = session_manager::StartOptions { mode, native_unit, logout_command: parse_command(logout_command)? };
-            let code = crate::runtime::run(async {
-                session_manager::start_with_options(&compositor, &config.session_manager, &options).await
-                    .context("running the graphical session")
-            })?;
+            let code = session_manager::start_with_options(&compositor, &config.session_manager, &options).await
+                .context("running the graphical session")?;
             std::process::exit(code);
         }
         SessionAction::Finalize { names } => {
             let config = load_config(path)?;
-            session_manager::finalize(&config.session_manager, &names).context("finalizing the graphical session")?;
+            session_manager::finalize(&config.session_manager, &names).await.context("finalizing the graphical session")?;
             output::notice("ENVIRONMENT PUBLISHED", "Session environment published.\n", output::SUCCESS).interactive_stdout()?;
             Ok(())
         }
-        SessionAction::Stop => print_outcome(session_manager::stop("logout")?),
+        SessionAction::Stop => print_outcome(session_manager::stop("logout").await?),
         SessionAction::Cancel => {
-            session_manager::cancel().context("cancelling session preparation")?;
+            session_manager::cancel().await.context("cancelling session preparation")?;
             output::notice("CANCELLATION REQUESTED", "Shutdown cancellation requested.\n", output::WARNING).interactive_stdout()?;
             Ok(())
         }
         SessionAction::Status => {
-            let status = session_manager::status()?;
+            let status = session_manager::status().await?;
             output::session_status(&status)?;
             Ok(())
         }
-        SessionAction::AppStop { generation, unit } => session_manager::stop_hook(&generation, &unit).context("completing application shutdown"),
-        SessionAction::Cleanup { generation } => session_manager::cleanup(&generation).context("recovering the graphical session"),
+        SessionAction::AppStop { generation, unit } => {
+            tokio::task::spawn_blocking(move || session_manager::stop_hook(&generation, &unit))
+                .await.context("application shutdown worker failed")?.context("completing application shutdown")
+        }
+        SessionAction::Cleanup { generation } => {
+            tokio::task::spawn_blocking(move || session_manager::cleanup(&generation))
+                .await.context("session recovery worker failed")?.context("recovering the graphical session")
+        }
     }
 }
 
-pub fn run_app(options: AppOptions) -> Result<()> {
+pub async fn run_app(options: AppOptions) -> Result<()> {
     let policy = ShutdownPolicy {
         timeout_secs: options.shutdown_timeout, on_timeout: options.on_timeout,
         method: options.shutdown_method, quit_command: parse_command(options.quit_command)?,
     };
-    let code = session_manager::run_app_with_policy(&options.argv, &policy).context("launching app")?;
+    let code = session_manager::run_app_with_policy(&options.argv, &policy).await.context("launching app")?;
     if code == 0 {
         output::application(&options.argv, &policy)?;
     }

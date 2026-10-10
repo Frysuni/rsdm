@@ -41,13 +41,15 @@ impl PowerJob {
 }
 
 fn request(verb: &str) -> Result<StopOutcome, SessionError> {
-    if matches!(verb, "reboot" | "poweroff") && std::env::var_os("RSDM_SESSION_GENERATION").is_some() {
-        return rsdm_session_manager::stop(verb);
-    }
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    runtime.block_on(rsdm_system::logind::request_direct(verb))?;
-    Ok(StopOutcome {
-        result: "accepted".into(), forced_units: Vec::new(), message: format!("logind accepted {verb}"),
+    runtime.block_on(async {
+        if matches!(verb, "reboot" | "poweroff") && std::env::var_os("RSDM_SESSION_GENERATION").is_some() {
+            return rsdm_session_manager::stop(verb).await;
+        }
+        rsdm_system::logind::request_direct(verb).await?;
+        Ok(StopOutcome {
+            result: "accepted".into(), forced_units: Vec::new(), message: format!("logind accepted {verb}"),
+        })
     })
 }
 

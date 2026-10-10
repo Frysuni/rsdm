@@ -157,8 +157,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
             component,
         } => logs::run(follow, lines, component),
         Command::Status => status::run(&cli.config),
-        Command::Session { action } => session::run(&cli.config, action),
-        Command::App(options) => session::run_app(options),
+        Command::Session { action } => runtime::run(session::run(&cli.config, action)),
+        Command::App(options) => runtime::run(session::run_app(options)),
         Command::Power { action } => runtime::run(session::power(action)),
         Command::ValidateConfig => validate_config(&cli.config),
     };

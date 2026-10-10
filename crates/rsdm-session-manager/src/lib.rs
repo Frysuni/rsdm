@@ -80,16 +80,16 @@ pub async fn start_with_options(argv: &[String], cfg: &SessionManagerConfig, opt
     coordinator::start(argv, cfg, options).await
 }
 
-pub fn run_app(argv: &[String]) -> Result<i32, SessionError> {
-    run_app_with_policy(argv, &ShutdownPolicy::default())
+pub async fn run_app(argv: &[String]) -> Result<i32, SessionError> {
+    run_app_with_policy(argv, &ShutdownPolicy::default()).await
 }
 
-pub fn run_app_with_policy(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, SessionError> {
-    client::run_app(argv, policy)
+pub async fn run_app_with_policy(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, SessionError> {
+    client::run_app(argv, policy).await
 }
 
-pub fn finalize(cfg: &SessionManagerConfig, names: &[String]) -> Result<(), SessionError> {
-    client::finalize(cfg, names)
+pub async fn finalize(cfg: &SessionManagerConfig, names: &[String]) -> Result<(), SessionError> {
+    client::finalize(cfg, names).await
 }
 
 impl From<rsdm_system::logind::LogindError> for SessionError {

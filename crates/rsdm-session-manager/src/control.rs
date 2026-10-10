@@ -176,8 +176,8 @@ impl Endpoint {
     }
 }
 
-pub(super) fn proxy(connection: &zbus::blocking::Connection) -> Result<zbus::blocking::Proxy<'_>, SessionError> {
-    Ok(zbus::blocking::Proxy::new(connection, BUS_NAME, OBJECT_PATH, BUS_NAME)?)
+pub(super) async fn proxy(connection: &Connection) -> Result<zbus::Proxy<'_>, SessionError> {
+    Ok(zbus::Proxy::new(connection, BUS_NAME, OBJECT_PATH, BUS_NAME).await?)
 }
 
 #[cfg(test)]

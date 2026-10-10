@@ -9,17 +9,22 @@ use super::{
     identity::{GENERATION_ENV, valid_generation}, unit_name::{ManagedUnitKind, unique_unit_name}, units,
 };
 
-pub fn generation() -> Result<String, SessionError> {
+pub async fn generation() -> Result<String, SessionError> {
     let generation = std::env::var(GENERATION_ENV)
         .map_err(|_| SessionError::State("this command requires an RSDM-coordinated session".into()))?;
     if !valid_generation(&generation) { return Err(SessionError::State("invalid session generation".into())); }
     Ok(generation)
 }
 
-pub fn run_app(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, SessionError> {
+pub async fn run_app(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, SessionError> {
     policy.validate().map_err(|error| SessionError::State(error.into()))?;
-    if std::env::var_os(GENERATION_ENV).is_none() { return basic_launch(argv, policy); }
-    let generation = generation()?;
+    if std::env::var_os(GENERATION_ENV).is_none() {
+        let argv = argv.to_vec();
+        let policy = policy.clone();
+        return tokio::task::spawn_blocking(move || basic_launch(&argv, &policy)).await
+            .map_err(|error| SessionError::State(format!("application launch worker failed: {error}")))?;
+    }
+    let generation = generation().await?;
     let request = LaunchRequest {
         generation, argv: argv.to_vec(), environment: env::command_environment(),
         directory: std::env::current_dir()?.to_string_lossy().into_owned(),
@@ -27,39 +32,39 @@ pub fn run_app(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, SessionE
         method: policy.method.to_string(), quit_command: policy.quit_command.clone(),
     };
     control::validate_launch(&request).map_err(SessionError::State)?;
-    let connection = zbus::blocking::connection::Builder::session()?.method_timeout(Duration::from_secs(25)).build()?;
-    let _: String = control::proxy(&connection)?.call("Launch", &(request,))?;
+    let connection = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(25)).build().await?;
+    let _: String = control::proxy(&connection).await?.call("Launch", &(request,)).await?;
     Ok(0)
 }
 
-pub fn finalize(cfg: &SessionManagerConfig, names: &[String]) -> Result<(), SessionError> {
-    let generation = generation()?;
+pub async fn finalize(cfg: &SessionManagerConfig, names: &[String]) -> Result<(), SessionError> {
+    let generation = generation().await?;
     let pairs = env::collect_present(&cfg.extra_env, names);
     control::validate_finalize(&generation, &pairs).map_err(SessionError::State)?;
-    let connection = zbus::blocking::connection::Builder::session()?.method_timeout(Duration::from_secs(25)).build()?;
-    control::proxy(&connection)?.call::<_, _, ()>("Finalize", &(generation, pairs))?;
+    let connection = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(25)).build().await?;
+    control::proxy(&connection).await?.call::<_, _, ()>("Finalize", &(generation, pairs)).await?;
     Ok(())
 }
 
-pub fn status() -> Result<SessionStatus, SessionError> {
-    let connection = zbus::blocking::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build()?;
-    Ok(control::proxy(&connection)?.call("Status", &())?)
+pub async fn status() -> Result<SessionStatus, SessionError> {
+    let connection = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await?;
+    Ok(control::proxy(&connection).await?.call("Status", &()).await?)
 }
 
-pub fn stop(action: &str) -> Result<StopOutcome, SessionError> {
-    let generation = generation()?;
-    let status = status()?;
+pub async fn stop(action: &str) -> Result<StopOutcome, SessionError> {
+    let generation = generation().await?;
+    let status = status().await?;
     if status.generation != generation { return Err(SessionError::State("session generation is stale".into())); }
     let longest = status.apps.iter().map(|(_, _, timeout, _)| *timeout).max().unwrap_or(30);
-    let connection = zbus::blocking::connection::Builder::session()?
-        .method_timeout(Duration::from_secs(longest.saturating_add(90))).build()?;
-    Ok(control::proxy(&connection)?.call("Stop", &(generation, action))?)
+    let connection = zbus::connection::Builder::session()?
+        .method_timeout(Duration::from_secs(longest.saturating_add(90))).build().await?;
+    Ok(control::proxy(&connection).await?.call("Stop", &(generation, action)).await?)
 }
 
-pub fn cancel() -> Result<(), SessionError> {
-    let generation = generation()?;
-    let connection = zbus::blocking::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build()?;
-    control::proxy(&connection)?.call::<_, _, ()>("Cancel", &(generation,))?;
+pub async fn cancel() -> Result<(), SessionError> {
+    let generation = generation().await?;
+    let connection = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await?;
+    control::proxy(&connection).await?.call::<_, _, ()>("Cancel", &(generation,)).await?;
     Ok(())
 }
 
