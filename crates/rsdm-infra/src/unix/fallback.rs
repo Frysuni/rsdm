@@ -29,14 +29,14 @@ pub enum FallbackError {
 ///
 /// On success this never returns (the process image is replaced). It only returns
 /// `Err` when the VT could not be attached or every candidate failed to exec.
-pub fn exec_fallback(tty_path: &str, primary: &[String]) -> Result<Infallible, FallbackError> {
+pub async fn exec_fallback(tty_path: &str, primary: &[String]) -> Result<Infallible, FallbackError> {
     super::shutdown::install_terminate_handler();
     let _vt = super::vt::acquire(tty_path)?;
     attach_vt(tty_path)?;
 
     // Resolve the distro's own console login before we exec, so an unconfigured
     // fallback reuses whatever getty systemd runs on this VT.
-    let system_getty = super::getty_query::discover_system_getty(tty_path);
+    let system_getty = super::getty_query::discover_system_getty(tty_path).await;
     let candidates = fallback_candidates(primary, system_getty.as_deref(), tty_path);
     let mut last_error = io::Error::from(io::ErrorKind::NotFound);
     for candidate in &candidates {

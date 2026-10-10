@@ -86,6 +86,8 @@ Greeter (`dm`) runtime path:
 Greeter power actions execute `rsdm logind-request` in a separate process.
 Its bus executor exits with the helper, so a denied request leaves no runtime
 threads in the Greeter before another PAM owner is forked.
+On terminal handover, the CLI creates a runtime after the Greeter has returned
+to query systemd's getty command; the fallback then replaces the process by exec.
 
 Session, app, and power commands own their Tokio runtime at the CLI boundary.
 The PAM owner creates its inhibitor runtime after fork; Lock power workers

@@ -20,5 +20,8 @@ tracing.workspace = true
 zeroize.workspace = true
 zbus.workspace = true
 
+[dev-dependencies]
+zbus = { workspace = true, features = ["p2p"] }
+
 [build-dependencies]
 pkg-config = "0.3.32"

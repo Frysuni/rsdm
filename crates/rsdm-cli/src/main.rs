@@ -230,7 +230,9 @@ fn fallback_or_error(
         error!(error = %format!("{error:#}"), "greeter failed; handing over to TTY fallback");
     }
 
-    match exec_fallback(tty_path, &fallback.command) {
+    // The Greeter has returned and will not fork another PAM owner. The
+    // terminal handover can now own a runtime until exec replaces this process.
+    match runtime::run(async { Ok(exec_fallback(tty_path, &fallback.command).await?) }) {
         Ok(never) => match never {},
         Err(fallback_error) => {
             Err(error.context(format!("TTY fallback also failed: {fallback_error}")))
