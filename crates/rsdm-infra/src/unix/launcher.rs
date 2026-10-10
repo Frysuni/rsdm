@@ -40,7 +40,7 @@ impl UnixSessionLauncher {
         let command = session.exec_argv.clone().unwrap_or(super::command::split_exec(&session.exec)?);
         let coordinated = !wrapper.is_empty() || super::command::is_session_manager_command(&command);
         let generation = if coordinated {
-            Some(crate::session_manager::new_generation().map_err(|error| SessionLaunchError::Setup(error.to_string()))?)
+            Some(rsdm_system::generation::new_generation().map_err(|error| SessionLaunchError::Setup(error.to_string()))?)
         } else { None };
         environment.retain(|(name, _)| name != "RSDM_SESSION_GENERATION");
         if let Some(generation) = &generation { environment.push(("RSDM_SESSION_GENERATION".into(), generation.clone())); }

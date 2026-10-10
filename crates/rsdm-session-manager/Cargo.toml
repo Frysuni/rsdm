@@ -1,0 +1,32 @@
+[package]
+name = "rsdm-session-manager"
+description = "Independent graphical session and application lifecycle manager."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[features]
+default = []
+xsmp = []
+
+[dependencies]
+async-channel.workspace = true
+async-io.workspace = true
+futures-lite.workspace = true
+libc.workspace = true
+rsdm-core = { path = "../rsdm-core" }
+rsdm-system = { path = "../rsdm-system" }
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+tracing.workspace = true
+zeroize.workspace = true
+zbus.workspace = true
+zbus_macros.workspace = true
+
+[dev-dependencies]
+zbus = { workspace = true, features = ["p2p"] }
+
+[build-dependencies]
+pkg-config = "0.3.32"

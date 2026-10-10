@@ -3,7 +3,8 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use rsdm_core::domain::{SessionMode, ShutdownMethod, ShutdownPolicy, TimeoutAction};
-use rsdm_infra::{config::load_config, session_manager, unix::split_exec};
+use rsdm_infra::{config::load_config, unix::split_exec};
+use rsdm_session_manager as session_manager;
 
 use crate::output;
 
@@ -12,7 +13,13 @@ pub enum PowerAction { Reboot, Poweroff }
 
 pub fn power(action: PowerAction) -> Result<()> {
     let action = match action { PowerAction::Reboot => "reboot", PowerAction::Poweroff => "poweroff" };
-    print_outcome(rsdm_infra::power::request(action)?)
+    if std::env::var_os("RSDM_SESSION_GENERATION").is_some() {
+        return print_outcome(session_manager::stop(action)?);
+    }
+    rsdm_system::logind::request_direct(action)?;
+    print_outcome(session_manager::StopOutcome {
+        result: "accepted".into(), forced_units: Vec::new(), message: format!("logind accepted {action}"),
+    })
 }
 
 #[derive(Debug, Subcommand)]

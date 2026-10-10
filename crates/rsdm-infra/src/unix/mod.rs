@@ -6,7 +6,6 @@ mod getty_query;
 mod group;
 mod launcher;
 mod nss;
-pub(crate) mod process_handle;
 mod session_environment;
 mod session_exec;
 mod session_exec_request;

@@ -2,6 +2,8 @@
 members = [
     "crates/rsdm-core",
     "crates/rsdm-infra",
+    "crates/rsdm-session-manager",
+    "crates/rsdm-system",
     "crates/rsdm-ui",
     "crates/rsdm-tui",
     "crates/rsdm-lock",

@@ -1699,6 +1699,8 @@ dependencies = [
  "rsdm-idle",
  "rsdm-infra",
  "rsdm-lock",
+ "rsdm-session-manager",
+ "rsdm-system",
  "rsdm-tui",
  "serde_json",
  "time",
@@ -1734,20 +1736,17 @@ dependencies = [
 name = "rsdm-infra"
 version = "2.3.0"
 dependencies = [
- "async-channel",
- "async-io",
  "camino",
- "futures-lite",
  "libc",
  "pkg-config",
  "rsdm-core",
+ "rsdm-system",
  "serde",
  "thiserror 2.0.18",
  "toml",
  "toml_edit 0.22.27",
  "tracing",
  "zbus",
- "zbus_macros",
  "zeroize",
 ]
 
@@ -1761,6 +1760,8 @@ dependencies = [
  "libc",
  "rsdm-core",
  "rsdm-infra",
+ "rsdm-session-manager",
+ "rsdm-system",
  "rsdm-ui",
  "smithay-client-toolkit",
  "thiserror 2.0.18",
@@ -1768,6 +1769,40 @@ dependencies = [
  "tracing",
  "wayland-protocols",
  "zeroize",
+]
+
+[[package]]
+name = "rsdm-session-manager"
+version = "2.3.0"
+dependencies = [
+ "async-channel",
+ "async-io",
+ "futures-lite",
+ "libc",
+ "pkg-config",
+ "rsdm-core",
+ "rsdm-system",
+ "serde",
+ "thiserror 2.0.18",
+ "toml",
+ "tracing",
+ "zbus",
+ "zbus_macros",
+ "zeroize",
+]
+
+[[package]]
+name = "rsdm-system"
+version = "2.3.0"
+dependencies = [
+ "async-channel",
+ "async-io",
+ "futures-lite",
+ "libc",
+ "thiserror 2.0.18",
+ "tracing",
+ "zbus",
+ "zbus_macros",
 ]
 
 [[package]]

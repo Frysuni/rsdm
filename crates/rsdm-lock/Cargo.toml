@@ -13,6 +13,8 @@ image.workspace = true
 libc.workspace = true
 rsdm-core = { path = "../rsdm-core" }
 rsdm-infra = { path = "../rsdm-infra" }
+rsdm-session-manager = { path = "../rsdm-session-manager" }
+rsdm-system = { path = "../rsdm-system" }
 rsdm-ui = { path = "../rsdm-ui" }
 smithay-client-toolkit.workspace = true
 thiserror.workspace = true

@@ -2,7 +2,7 @@ use std::io;
 
 use ratatui::{style::Style, text::{Line, Span}};
 use rsdm_core::domain::ShutdownPolicy;
-use rsdm_infra::session_manager::SessionStatus;
+use rsdm_session_manager::SessionStatus;
 
 use super::{ACCENT, MUTED, Report, SUCCESS, WARNING, badge, safe_text, state_color};
 

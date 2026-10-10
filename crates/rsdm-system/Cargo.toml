@@ -1,0 +1,20 @@
+[package]
+name = "rsdm-system"
+description = "Shared Linux process, clock and logind primitives for rsdm."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+async-channel.workspace = true
+async-io.workspace = true
+futures-lite.workspace = true
+libc.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+zbus.workspace = true
+
+[dev-dependencies]
+zbus = { workspace = true, features = ["p2p"] }
+zbus_macros.workspace = true

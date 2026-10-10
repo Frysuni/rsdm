@@ -4,7 +4,12 @@ The production tree is intentionally narrow:
 
 - `rsdm-core`: domain types, ports, config validation, login/runtime use cases
 - `rsdm-infra`: PAM, Unix user resolution, session discovery, state storage,
-  privilege dropping, session launch, and the systemd `--user` session manager
+  privilege dropping, and the DM session launcher
+- `rsdm-system`: shared Linux process handles, monotonic clocks, generation
+  identifiers, and logind transport; it contains no Session Manager policy
+- `rsdm-session-manager`: independent systemd `--user` session coordination,
+  application registration, shutdown, recovery, and optional libSM/libICE XSMP;
+  it depends on Core and System, without PAM, DM, Greeter, or Lock dependencies
 - `rsdm-ui`: the one, medium-independent design - theme palette, border styles,
   animated backgrounds, banner/clock, the runtime design switcher, and the whole
   screen composition. Everything draws against an abstract `Surface` (a grid of

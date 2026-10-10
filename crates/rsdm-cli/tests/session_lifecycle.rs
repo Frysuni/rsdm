@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}},
 };
 
-use rsdm_infra::session_manager::{SessionStatus, StopOutcome};
+use rsdm_session_manager::{SessionStatus, StopOutcome};
 use zbus::zvariant::OwnedObjectPath;
 
 #[path = "support/terminal.rs"]

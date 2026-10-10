@@ -2,7 +2,7 @@
 
 use std::{sync::mpsc::{self, Receiver, TryRecvError}, thread};
 
-use rsdm_infra::session_manager::{SessionError, StopOutcome};
+use rsdm_session_manager::{SessionError, StopOutcome};
 use rsdm_ui::LockPending;
 
 use super::App;
@@ -32,9 +32,19 @@ impl PowerJob {
             LockPending::Hibernate => "hibernate", LockPending::Sleep => "suspend",
         };
         let (sender, result) = mpsc::channel();
-        thread::spawn(move || { let _ = sender.send(rsdm_infra::power::request(verb)); });
+        thread::spawn(move || { let _ = sender.send(request(verb)); });
         Self { result }
     }
+}
+
+fn request(verb: &str) -> Result<StopOutcome, SessionError> {
+    if matches!(verb, "reboot" | "poweroff") && std::env::var_os("RSDM_SESSION_GENERATION").is_some() {
+        return rsdm_session_manager::stop(verb);
+    }
+    rsdm_system::logind::request_direct(verb)?;
+    Ok(StopOutcome {
+        result: "accepted".into(), forced_units: Vec::new(), message: format!("logind accepted {verb}"),
+    })
 }
 
 impl App {

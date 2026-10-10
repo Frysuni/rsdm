@@ -1,0 +1,148 @@
+//! Cgroup membership and signals that cannot hit a reused process ID.
+
+pub(super) use rsdm_system::{clock::monotonic_usec, process_handle::ProcessHandle};
+
+use super::{SessionError, bus::{UserManager, missing_unit}, runtime::AppRecord};
+
+const SERVICE: &str = "org.freedesktop.systemd1.Service";
+
+pub(super) fn verify_invocation(manager: &UserManager, app: &AppRecord) -> Result<bool, SessionError> {
+    match manager.invocation_id(&app.unit) {
+        Ok(id) => {
+            // An unreferenced unit can lose its invocation identity as its
+            // final processes exit. Require both stopped state and an empty
+            // cgroup before treating that terminal race as a closed app.
+            if id.iter().all(|byte| *byte == 0) && !manager.active(&app.unit)?
+                && manager.processes(&app.unit)?.is_empty()
+            { return Ok(false); }
+            if app.invocation_id.is_empty() || id != app.invocation_id {
+                return Err(SessionError::State(format!("{} invocation changed", app.unit)));
+            }
+            Ok(true)
+        }
+        Err(SessionError::Bus(error)) if missing_unit(&error) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+pub(super) fn app_processes(manager: &UserManager, app: &AppRecord) -> Result<Vec<u32>, SessionError> {
+    if !verify_invocation(manager, app)? { return Ok(Vec::new()); }
+    let control: u32 = match manager.unit_property(&app.unit, SERVICE, "ControlPID") {
+        Ok(pid) => pid,
+        Err(SessionError::Bus(error)) if missing_unit(&error) => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    Ok(manager.processes(&app.unit)?.into_iter()
+        .map(|(_, pid, _)| pid).filter(|pid| *pid != control).collect())
+}
+
+pub(super) fn generation_invocation(
+    manager: &UserManager, unit: &str, generation: &str,
+) -> Result<Option<Vec<u8>>, SessionError> {
+    let result = (|| {
+        let id = manager.invocation_id(unit)?;
+        let environment: Vec<String> = manager.unit_property(unit, SERVICE, "Environment")?;
+        if id.is_empty() || !environment.contains(&format!("{}={generation}", super::identity::GENERATION_ENV))
+            || manager.invocation_id(unit)? != id
+        {
+            return Err(SessionError::State(format!("{unit} does not belong to this generation")));
+        }
+        Ok(Some(id))
+    })();
+    match result {
+        Err(SessionError::Bus(error)) if missing_unit(&error) => Ok(None),
+        other => other,
+    }
+}
+
+pub(super) fn signal_app(manager: &UserManager, app: &AppRecord, signal: i32) -> Result<(), SessionError> {
+    let processes = app_processes(manager, app)?;
+    if processes.is_empty() { return Ok(()); }
+    let group: String = manager.unit_property(&app.unit, SERVICE, "ControlGroup")?;
+    if !group.starts_with('/') || group == "/" {
+        return Err(SessionError::State(format!("{} has no dedicated cgroup", app.unit)));
+    }
+    // Bound live descriptors even for large browser cgroups. Each batch is
+    // pinned before checking InvocationID, and membership uses procfs directly.
+    for batch in processes.chunks(32) {
+        let mut pinned = Vec::new();
+        for &pid in batch {
+            if let Some(handle) = ProcessHandle::open(pid)? { pinned.push((pid, handle)); }
+        }
+        if !verify_invocation(manager, app)? { return Ok(()); }
+        for (pid, handle) in pinned {
+            let membership = match std::fs::read_to_string(format!("/proc/{pid}/cgroup")) {
+                Ok(membership) => membership,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if belongs_to_cgroup(&membership, &group) { handle.signal(signal)?; }
+        }
+    }
+    Ok(())
+}
+
+fn belongs_to_cgroup(membership: &str, group: &str) -> bool {
+    membership.lines().any(|line| {
+        let mut fields = line.splitn(3, ':');
+        let (Some(hierarchy), Some(controllers), Some(path)) = (fields.next(), fields.next(), fields.next())
+        else { return false; };
+        let systemd = (hierarchy == "0" && controllers.is_empty())
+            || controllers.split(',').any(|name| name == "name=systemd");
+        systemd && (path == group || path.strip_prefix(group).is_some_and(|suffix| suffix.starts_with('/')))
+    })
+}
+
+pub(super) fn stop_invocation(manager: &UserManager, unit: &str, expected: &[u8]) -> Result<(), SessionError> {
+    match manager.invocation_id(unit) {
+        Ok(id) if !expected.is_empty() && id == expected => manager.stop(unit, std::time::Duration::from_secs(15)),
+        Ok(id) if id.iter().all(|byte| *byte == 0) && !manager.active(unit)?
+            && manager.processes(unit)?.is_empty() => Ok(()),
+        Ok(_) => Err(SessionError::State(format!("{unit} invocation changed or was never verified"))),
+        Err(SessionError::Bus(error)) if missing_unit(&error) => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+pub(super) fn terminate_main(manager: &UserManager, app: &AppRecord) -> Result<(), SessionError> {
+    if !verify_invocation(manager, app)? {
+        return Ok(());
+    }
+    let main: u32 = manager.unit_property(&app.unit, SERVICE, "MainPID")?;
+    if main == 0 {
+        return signal_app(manager, app, libc::SIGTERM);
+    }
+    let Some(handle) = ProcessHandle::open(main)? else {
+        return signal_app(manager, app, libc::SIGTERM);
+    };
+    if app_processes(manager, app)?.contains(&main) {
+        handle.signal(libc::SIGTERM)?;
+    }
+    Ok(())
+}
+
+
+pub(super) fn require_pidfds() -> Result<(), SessionError> {
+    let handle = ProcessHandle::open(std::process::id())?
+        .ok_or_else(|| SessionError::State("could not pin the session coordinator process".into()))?;
+    handle.signal(0).map_err(|error| SessionError::State(format!("Linux pidfd signals are required: {error}")))
+}
+
+#[cfg(test)]
+#[path = "processes_tests.rs"]
+mod invocation_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pidfd_remains_bound_to_the_original_child_after_exit() {
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let handle = ProcessHandle::open(child.id()).unwrap().unwrap();
+        handle.signal(libc::SIGTERM).unwrap();
+        assert!(!child.wait().unwrap().success());
+        handle.signal(libc::SIGTERM).unwrap();
+    }
+
+}

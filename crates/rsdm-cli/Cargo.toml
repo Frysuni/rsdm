@@ -11,7 +11,7 @@ version.workspace = true
 
 [features]
 default = ["xsmp"]
-xsmp = ["rsdm-infra/xsmp"]
+xsmp = ["rsdm-session-manager/xsmp"]
 
 [dependencies]
 anyhow.workspace = true
@@ -21,6 +21,8 @@ ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
 rsdm-core = { path = "../rsdm-core" }
 rsdm-idle = { path = "../rsdm-idle" }
 rsdm-infra = { path = "../rsdm-infra" }
+rsdm-session-manager = { path = "../rsdm-session-manager" }
+rsdm-system = { path = "../rsdm-system" }
 rsdm-lock = { path = "../rsdm-lock" }
 rsdm-tui = { path = "../rsdm-tui" }
 serde_json.workspace = true

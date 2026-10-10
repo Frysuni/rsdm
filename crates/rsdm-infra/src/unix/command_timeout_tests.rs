@@ -3,7 +3,7 @@
 use std::{io::{BufRead, BufReader}, os::{fd::OwnedFd, unix::net::UnixStream}, thread};
 
 use super::*;
-use crate::unix::process_handle::ProcessHandle;
+use rsdm_system::process_handle::ProcessHandle;
 
 #[test]
 fn a_foreground_command_preserves_its_nonzero_exit_status() {

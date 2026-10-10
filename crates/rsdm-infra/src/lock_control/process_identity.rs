@@ -2,7 +2,7 @@
 
 use std::{fs, path::PathBuf};
 
-use crate::unix::process_handle::ProcessHandle;
+use rsdm_system::process_handle::ProcessHandle;
 use super::{LockControlError, LockState};
 
 pub(super) fn pin(state: &LockState, uid: u32) -> Result<ProcessHandle, LockControlError> {
