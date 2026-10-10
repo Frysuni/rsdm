@@ -4,8 +4,6 @@ use std::{
     task::{Context, Poll, Wake, Waker},
 };
 
-use futures_lite::future;
-
 use super::*;
 use crate::processes::monotonic_usec;
 
@@ -16,15 +14,19 @@ impl Wake for Wakes {
     fn wake(self: Arc<Self>) { self.0.fetch_add(1, Ordering::SeqCst); }
 }
 
-#[test]
-fn an_expired_deadline_never_polls_a_new_operation() {
+fn assert_pending(future: Pin<&mut impl Future>) {
+    assert!(future.poll(&mut Context::from_waker(Waker::noop())).is_pending());
+}
+
+#[tokio::test]
+async fn an_expired_deadline_never_polls_a_new_operation() {
     let deadline = Deadline::default();
     deadline.set(1);
     let calls = AtomicUsize::new(0);
-    let result: zbus::Result<()> = async_io::block_on(deadline.bound(async {
+    let result: zbus::Result<()> = deadline.bound(async {
         calls.fetch_add(1, Ordering::SeqCst);
         Ok(())
-    }));
+    }).await;
     assert!(matches!(result, Err(error) if super::super::bus::retryable_error(&error)));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
@@ -47,38 +49,38 @@ fn installing_a_deadline_wakes_every_pending_operation() {
     }
 }
 
-#[test]
-fn shortening_a_deadline_interrupts_an_existing_wait() {
+#[tokio::test]
+async fn shortening_a_deadline_interrupts_an_existing_wait() {
     let deadline = Deadline::default();
     deadline.set(monotonic_usec().unwrap() + 10_000_000);
     let mut operation = Box::pin(deadline.bound(std::future::pending::<zbus::Result<()>>()));
-    assert!(async_io::block_on(future::poll_once(operation.as_mut())).is_none());
+    assert_pending(operation.as_mut());
     deadline.set(1);
-    assert!(async_io::block_on(operation).is_err());
+    assert!(operation.await.is_err());
 }
 
-#[test]
-fn revocation_removes_the_old_timer_without_cancelling_the_operation() {
+#[tokio::test]
+async fn revocation_removes_the_old_timer_without_cancelling_the_operation() {
     let deadline = Deadline::default();
     deadline.set(monotonic_usec().unwrap() + 50_000);
     let mut operation = Box::pin(deadline.bound(async {
-        async_io::Timer::after(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
         Ok::<_, zbus::Error>(7)
     }));
-    assert!(async_io::block_on(future::poll_once(operation.as_mut())).is_none());
+    assert_pending(operation.as_mut());
     deadline.set(0);
-    assert_eq!(async_io::block_on(operation).unwrap(), 7);
+    assert_eq!(operation.await.unwrap(), 7);
 }
 
-#[test]
-fn completed_and_dropped_operations_release_their_deadline_watchers() {
+#[tokio::test]
+async fn completed_and_dropped_operations_release_their_deadline_watchers() {
     let deadline = Deadline::default();
     for _ in 0..64 {
         let mut operation = Box::pin(deadline.bound(std::future::pending::<zbus::Result<()>>()));
-        assert!(async_io::block_on(future::poll_once(Pin::as_mut(&mut operation))).is_none());
+        assert_pending(Pin::as_mut(&mut operation));
         drop(operation);
         assert_eq!(deadline.state.receiver_count(), 0);
-        assert!(async_io::block_on(deadline.bound(async { Ok::<_, zbus::Error>(()) })).is_ok());
+        assert!(deadline.bound(async { Ok::<_, zbus::Error>(()) }).await.is_ok());
         assert_eq!(deadline.state.receiver_count(), 0);
     }
 }
@@ -95,8 +97,8 @@ fn remaining_time_is_shared_and_cannot_exceed_the_local_limit() {
     assert!(clone.remaining(Duration::from_secs(5)).is_err());
 }
 
-#[test]
-fn a_phase_reserves_time_without_changing_the_absolute_deadline() {
+#[tokio::test]
+async fn a_phase_reserves_time_without_changing_the_absolute_deadline() {
     let deadline = Deadline::default();
     let hard = monotonic_usec().unwrap() + 10_000_000;
     deadline.set(hard);
@@ -104,7 +106,7 @@ fn a_phase_reserves_time_without_changing_the_absolute_deadline() {
     assert_eq!(phase.get(), hard - 2_000_000);
     assert_eq!(deadline.get(), hard);
     deadline.set(monotonic_usec().unwrap() + 1_000_000);
-    assert!(async_io::block_on(phase.bound(async { Ok::<_, zbus::Error>(()) })).is_err());
+    assert!(phase.bound(async { Ok::<_, zbus::Error>(()) }).await.is_err());
     assert!(deadline.remaining(Duration::MAX).is_ok());
 }
 
@@ -119,36 +121,36 @@ fn a_short_budget_keeps_time_for_both_phases() {
     assert!(phase.remaining(Duration::MAX).is_ok());
 }
 
-#[test]
-fn a_phase_created_before_shutdown_tracks_installation_and_revocation() {
+#[tokio::test]
+async fn a_phase_created_before_shutdown_tracks_installation_and_revocation() {
     let deadline = Deadline::default();
     let phase = deadline.reserving(Duration::from_secs(2)).unwrap();
     assert_eq!(phase.get(), 0);
     let mut operation = Box::pin(phase.bound(std::future::pending::<zbus::Result<()>>()));
-    assert!(async_io::block_on(future::poll_once(operation.as_mut())).is_none());
+    assert_pending(operation.as_mut());
     deadline.set(monotonic_usec().unwrap() + 1_000_000);
-    assert!(async_io::block_on(operation).is_err());
+    assert!(operation.await.is_err());
     deadline.set(0);
     assert_eq!(phase.get(), 0);
-    assert!(async_io::block_on(phase.bound(async { Ok::<_, zbus::Error>(()) })).is_ok());
+    assert!(phase.bound(async { Ok::<_, zbus::Error>(()) }).await.is_ok());
 }
 
-#[test]
-fn revising_a_phase_interrupts_its_wait_and_revocation_removes_its_timer() {
+#[tokio::test]
+async fn revising_a_phase_interrupts_its_wait_and_revocation_removes_its_timer() {
     let deadline = Deadline::default();
     deadline.set(monotonic_usec().unwrap() + 10_000_000);
     let phase = deadline.reserving(Duration::from_secs(2)).unwrap();
     let mut operation = Box::pin(phase.bound(std::future::pending::<zbus::Result<()>>()));
-    assert!(async_io::block_on(future::poll_once(operation.as_mut())).is_none());
+    assert_pending(operation.as_mut());
     deadline.set(monotonic_usec().unwrap() + 1_000_000);
-    assert!(async_io::block_on(operation).is_err());
+    assert!(operation.await.is_err());
 
     deadline.set(monotonic_usec().unwrap() + 2_050_000);
     let mut operation = Box::pin(phase.bound(async {
-        async_io::Timer::after(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
         Ok::<_, zbus::Error>(())
     }));
-    assert!(async_io::block_on(future::poll_once(operation.as_mut())).is_none());
+    assert_pending(operation.as_mut());
     deadline.set(0);
-    assert!(async_io::block_on(operation).is_ok());
+    assert!(operation.await.is_ok());
 }

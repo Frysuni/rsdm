@@ -1,4 +1,4 @@
-use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicUsize, Ordering}}};
+use std::{sync::{Arc, atomic::{AtomicUsize, Ordering}}};
 
 use super::*;
 
@@ -15,7 +15,7 @@ impl Bus {
 }
 
 async fn bus_fixture() -> (zbus::Connection, zbus::Connection, Arc<AtomicUsize>) {
-    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let state = calls.clone();
     let server = tokio::spawn(async move {

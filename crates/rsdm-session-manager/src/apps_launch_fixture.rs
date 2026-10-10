@@ -1,7 +1,7 @@
 //! Launch persistence checks use private records and a private manager peer.
 
 use std::{
-    fs, os::unix::{fs::PermissionsExt, net::UnixStream}, path::PathBuf,
+    fs, os::unix::fs::PermissionsExt, path::PathBuf,
     sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}},
 };
 
@@ -141,7 +141,7 @@ impl Fixture {
         let state = Arc::new(State { unit: app.unit.clone(), mode, exists: AtomicBool::new(false),
             starts: AtomicUsize::new(0), invocation_reads: AtomicUsize::new(0), unrefs: AtomicUsize::new(0) });
         let shared = Arc::clone(&state);
-        let (server_socket, client_socket) = UnixStream::pair().unwrap();
+        let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
                 .serve_at("/org/freedesktop/systemd1", Manager(Arc::clone(&shared))).unwrap()

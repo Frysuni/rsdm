@@ -1,4 +1,4 @@
-use std::{os::unix::net::UnixStream, sync::{Arc, Mutex}};
+use std::{sync::{Arc, Mutex}};
 
 use zbus::{object_server::SignalEmitter, zvariant::OwnedValue};
 
@@ -47,7 +47,7 @@ impl FakeManager {
         let job = OwnedObjectPath::try_from("/org/freedesktop/systemd1/job/42").unwrap();
         Self::job_removed(&emitter, 42, &job, unit, self.result).await?;
         // Exercise completion before the method reply, not only after it.
-        async_io::Timer::after(Duration::from_millis(20)).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
         Ok(job)
     }
 
@@ -62,7 +62,7 @@ impl FakeManager {
 }
 
 async fn connect(version: &'static str, result: &'static str) -> (UserManager, Connection, Calls) {
-    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let calls = Calls::default();
     let manager = FakeManager { version, result, calls: calls.clone() };
     let server = tokio::spawn(async move {

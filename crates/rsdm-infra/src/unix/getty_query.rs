@@ -89,7 +89,7 @@ mod tests {
 
     #[tokio::test]
     async fn reads_typed_exec_start_without_retokenizing_arguments() {
-        let (server_socket, client_socket) = std::os::unix::net::UnixStream::pair().unwrap();
+        let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
         let server = Builder::unix_stream(server_socket).p2p()
             .server(zbus::Guid::generate()).unwrap()
             .serve_at("/org/freedesktop/systemd1", Manager).unwrap()

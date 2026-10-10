@@ -106,7 +106,7 @@ async fn wait_for_launcher(child: &mut Child, timeout: Duration) -> Result<bool,
         if child.try_wait()?.is_some() { return Ok(true); }
         let now = Instant::now();
         if now >= limit { return Ok(false); }
-        async_io::Timer::at((now + Duration::from_millis(50)).min(limit)).await;
+        tokio::time::sleep_until((now + Duration::from_millis(50)).min(limit).into()).await;
     }
 }
 

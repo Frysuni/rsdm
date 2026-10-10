@@ -1,4 +1,4 @@
-use std::{future, os::unix::net::UnixStream, time::Instant};
+use std::{future, time::Instant};
 
 use super::*;
 
@@ -28,7 +28,7 @@ async fn answer(answer: &Answer) -> zbus::fdo::Result<String> {
 }
 
 async fn connect(hibernate: Answer, suspend: Answer) -> (Connection, Connection) {
-    let (server, client) = UnixStream::pair().unwrap();
+    let (server, client) = tokio::net::UnixStream::pair().unwrap();
     let worker = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server).p2p()
             .server(zbus::Guid::generate()).unwrap()

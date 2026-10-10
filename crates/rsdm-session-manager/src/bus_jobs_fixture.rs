@@ -1,6 +1,6 @@
 //! Private user-manager fixture for job and start-ownership regressions.
 
-use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}}};
+use std::{sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}}};
 
 use super::*;
 
@@ -86,7 +86,7 @@ impl Manager {
         } else {
             self.0.inspection_delay
         };
-        if !delay.is_zero() { async_io::Timer::after(delay).await; }
+        if !delay.is_zero() { tokio::time::sleep(delay).await; }
         if !self.0.exists.load(Ordering::SeqCst) {
             return Err(ManagerError::NoSuchUnit("not loaded".into()));
         }
@@ -103,13 +103,13 @@ impl Manager {
             return Err(rejection.error());
         }
         self.0.exists.store(true, Ordering::SeqCst);
-        if !self.0.reply_delay.is_zero() { async_io::Timer::after(self.0.reply_delay).await; }
+        if !self.0.reply_delay.is_zero() { tokio::time::sleep(self.0.reply_delay).await; }
         self.reply()
     }
 
     async fn stop_unit(&self, _unit: &str, _mode: &str) -> Result<OwnedObjectPath, ManagerError> {
         self.0.calls.fetch_add(1, Ordering::SeqCst);
-        if !self.0.reply_delay.is_zero() { async_io::Timer::after(self.0.reply_delay).await; }
+        if !self.0.reply_delay.is_zero() { tokio::time::sleep(self.0.reply_delay).await; }
         self.reply()
     }
 
@@ -162,7 +162,7 @@ impl Service {
 pub(super) async fn fixture(state: State) -> (UserManager, Connection, Arc<State>) {
     let state = Arc::new(state);
     let shared = state.clone();
-    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let server = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
             .serve_at(MANAGER_PATH, Manager(shared.clone())).unwrap()

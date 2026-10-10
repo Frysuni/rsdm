@@ -1,6 +1,6 @@
 //! Private manager peer records cleanup attempts after helper start errors.
 
-use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering}}};
+use std::{sync::{Arc, atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering}}};
 
 use rsdm_core::domain::{SessionPhase, ShutdownPolicy};
 use zbus::{Connection, zvariant::{OwnedObjectPath, OwnedValue}};
@@ -116,7 +116,7 @@ impl Fixture {
             starts: AtomicUsize::new(0), stops: AtomicUsize::new(0), unrefs: AtomicUsize::new(0),
             lifetime_bound: AtomicBool::new(false), runtime_limit_usec: AtomicU64::new(0) });
         let shared = Arc::clone(&state);
-        let (server_socket, client_socket) = UnixStream::pair().unwrap();
+        let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
                 .serve_at("/org/freedesktop/systemd1", Manager(Arc::clone(&shared))).unwrap()

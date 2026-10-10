@@ -1,6 +1,6 @@
 //! Native shutdown methods are submitted once, including when a reply is lost.
 
-use std::{os::unix::net::UnixStream, sync::{Arc, Mutex}, time::Duration};
+use std::{sync::{Arc, Mutex}, time::Duration};
 
 use super::*;
 
@@ -57,7 +57,7 @@ async fn fixture(reply: Reply) -> (UserManager, zbus::Connection, Arc<State>) {
     let state = Arc::new(State { calls: Mutex::new(Vec::new()), accepted: tokio::sync::Notify::new(), reply });
     let gnome = Gnome(state.clone());
     let plasma = Plasma(state.clone());
-    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let server = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p()
             .server(zbus::Guid::generate()).unwrap()

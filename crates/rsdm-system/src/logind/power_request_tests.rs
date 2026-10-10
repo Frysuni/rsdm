@@ -1,4 +1,4 @@
-use std::{os::unix::net::UnixStream, sync::{Arc, Mutex}, time::Instant};
+use std::{sync::{Arc, Mutex}, time::Instant};
 
 use super::*;
 
@@ -38,7 +38,7 @@ impl Logind {
 }
 
 async fn fixture(answer: &'static str, hung: bool, lost_reply: bool) -> (Connection, Connection, Calls) {
-    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let calls = Calls::default();
     let state = calls.clone();
     let server = tokio::spawn(async move {

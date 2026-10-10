@@ -1,6 +1,6 @@
 //! Shutdown decisions on private records and an isolated peer-to-peer bus.
 
-use std::{fs, os::unix::{fs::PermissionsExt, net::UnixStream}, sync::atomic::AtomicUsize};
+use std::{fs, os::unix::fs::PermissionsExt, sync::atomic::AtomicUsize};
 
 use super::*;
 use rsdm_system::logind::ShutdownNotice;
@@ -34,7 +34,7 @@ impl Fixture {
         fs::create_dir(directory.join("apps")).unwrap();
         fs::set_permissions(directory.join("apps"), fs::Permissions::from_mode(0o700)).unwrap();
         let runtime = Runtime { path: directory.clone(), generation: GENERATION.into() };
-        let (server_socket, client_socket) = UnixStream::pair().unwrap();
+        let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server_socket).p2p()
                 .server(zbus::Guid::generate()).unwrap()

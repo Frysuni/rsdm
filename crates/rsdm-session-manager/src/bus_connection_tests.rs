@@ -1,6 +1,6 @@
 //! References are restored only for the same owned transient invocation.
 
-use std::{os::unix::net::UnixStream, sync::atomic::{AtomicUsize, Ordering}, time::Duration};
+use std::{sync::atomic::{AtomicUsize, Ordering}, time::Duration};
 
 use super::*;
 
@@ -38,7 +38,7 @@ impl Manager {
             pause.entered.notify_one();
             pause.resume.notified().await;
         }
-        if !self.0.delay.is_zero() { async_io::Timer::after(self.0.delay).await; }
+        if !self.0.delay.is_zero() { tokio::time::sleep(self.0.delay).await; }
         self.0.in_flight.fetch_sub(1, Ordering::SeqCst);
     }
     fn unref_unit(&self, _name: &str) { self.0.unrefs.fetch_add(1, Ordering::SeqCst); }
@@ -70,7 +70,7 @@ impl Service {
 async fn fixture(state: UnitState) -> (Connection, Connection, Arc<UnitState>) {
     let state = Arc::new(state);
     let shared = state.clone();
-    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let server = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
             .serve_at(MANAGER_PATH, Manager(shared.clone())).unwrap()

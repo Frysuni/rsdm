@@ -71,7 +71,7 @@ impl Deadline {
                 Err(_) => continue,
             };
             tokio::select! {
-                _ = async_io::Timer::after(remaining) => {},
+                _ = tokio::time::sleep(remaining) => {},
                 _ = changed.changed() => {},
             }
         }

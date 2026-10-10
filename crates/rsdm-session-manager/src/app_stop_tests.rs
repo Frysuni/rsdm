@@ -1,7 +1,7 @@
 //! Private records and a peer bus keep shutdown tests off the live session.
 
 use std::{
-    fs::{self, OpenOptions}, os::{fd::AsRawFd, unix::{fs::PermissionsExt, net::UnixStream}},
+    fs::{self, OpenOptions}, os::{fd::AsRawFd, unix::fs::PermissionsExt},
     sync::atomic::AtomicUsize, time::Instant,
 };
 
@@ -65,7 +65,7 @@ impl Fixture {
         runtime.save_app(&app).unwrap();
         let queries = Arc::new(AtomicUsize::new(0));
         let shared = queries.clone();
-        let (server_socket, client_socket) = UnixStream::pair().unwrap();
+        let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server_socket).p2p()
                 .server(zbus::Guid::generate()).unwrap()

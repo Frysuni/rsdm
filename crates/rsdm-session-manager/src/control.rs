@@ -141,10 +141,10 @@ impl Endpoint {
         let outcome = self.request(permit.clone(), |reply| Request::Stop { generation, action, reply }).await?;
         let (response, sent) = ResponseDispatchNotifier::new(outcome);
         let requests = self.requests.clone();
-        connection.executor().spawn(async move {
+        tokio::spawn(async move {
             sent.await;
             let _ = requests.try_send(Request::StopReplySent(permit));
-        }, "rsdm session stop response").detach();
+        });
         Ok(response)
     }
 

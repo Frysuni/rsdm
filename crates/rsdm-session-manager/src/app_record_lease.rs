@@ -67,9 +67,8 @@ fn lock_record(file: &File, shared: &Deadline) -> Result<(), SessionError> {
             return Err(error.into());
         }
         let wait = shared.remaining(deadline.saturating_duration_since(Instant::now()).min(Duration::from_millis(5)))?;
-        async_io::block_on(shared.bound(async {
-            async_io::Timer::after(wait).await;
-            Ok::<_, zbus::Error>(())
-        }))?;
+        // This synchronous filesystem operation needs no async executor. Recheck
+        // revisions after at most five milliseconds, before another lock try.
+        std::thread::sleep(wait);
     }
 }

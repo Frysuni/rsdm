@@ -1,4 +1,4 @@
-use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicUsize, Ordering}}};
+use std::{sync::{Arc, atomic::{AtomicUsize, Ordering}}};
 
 use zbus::{Connection, zvariant::OwnedObjectPath};
 
@@ -44,7 +44,7 @@ impl Service {
 async fn manager(invocation: Vec<u8>, state: &'static str, processes: Vec<u32>) -> (UserManager, Connection, Arc<AtomicUsize>) {
     let queries = Arc::new(AtomicUsize::new(0));
     let shared = queries.clone();
-    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let worker = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p()
             .server(zbus::Guid::generate()).unwrap()

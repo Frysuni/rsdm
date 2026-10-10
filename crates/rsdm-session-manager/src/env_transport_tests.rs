@@ -1,4 +1,4 @@
-use std::{collections::HashMap, os::unix::net::UnixStream, sync::{Arc, Mutex}};
+use std::{collections::HashMap, sync::{Arc, Mutex}};
 
 use super::*;
 use crate::bus::UserManager;
@@ -44,7 +44,7 @@ impl Activation {
 }
 
 async fn connect(reject: bool) -> (UserManager, zbus::Connection, Effects) {
-    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let effects = Effects::default();
     let manager = Manager(effects.clone());
     let activation = Activation { effects: effects.clone(), reject };

@@ -1,9 +1,9 @@
-use std::{os::unix::net::UnixStream, time::Duration};
+use std::{time::Duration};
 
 use super::*;
 
 async fn connect(uid: u32) -> (Connection, Connection, tokio::sync::mpsc::Receiver<Request>) {
-    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let (endpoint, receiver) = Endpoint::channel(uid);
     let server = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket)

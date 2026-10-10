@@ -1,4 +1,4 @@
-use std::{os::unix::net::UnixStream, sync::{Arc, atomic::{AtomicUsize, Ordering}}};
+use std::{sync::{Arc, atomic::{AtomicUsize, Ordering}}};
 
 use super::*;
 use crate::processes::monotonic_usec;
@@ -13,18 +13,18 @@ struct Manager {
 impl Manager {
     #[zbus(property)]
     async fn version(&self) -> &str {
-        if !self.version_delay.is_zero() { async_io::Timer::after(self.version_delay).await; }
+        if !self.version_delay.is_zero() { tokio::time::sleep(self.version_delay).await; }
         "260"
     }
 
     async fn subscribe(&self) {
         self.subscriptions.fetch_add(1, Ordering::SeqCst);
-        if !self.subscribe_delay.is_zero() { async_io::Timer::after(self.subscribe_delay).await; }
+        if !self.subscribe_delay.is_zero() { tokio::time::sleep(self.subscribe_delay).await; }
     }
 }
 
 async fn fixture(version_delay: Duration, subscribe_delay: Duration) -> (Connection, Connection, Arc<AtomicUsize>) {
-    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let subscriptions = Arc::new(AtomicUsize::new(0));
     let state = subscriptions.clone();
     let server = tokio::spawn(async move {
@@ -63,7 +63,7 @@ async fn expired_setup_does_not_even_poll_the_connection_builder() {
 
 #[tokio::test]
 async fn the_recovery_budget_includes_a_hung_bus_handshake() {
-    let (_silent_peer, client_socket) = UnixStream::pair().unwrap();
+    let (_silent_peer, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let before = Instant::now();
     let result = UserManager::connect_with(
         zbus::connection::Builder::unix_stream(client_socket).p2p().build(), short_deadline(),

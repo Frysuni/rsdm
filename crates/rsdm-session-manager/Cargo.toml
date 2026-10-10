@@ -11,9 +11,6 @@ default = []
 xsmp = []
 
 [dependencies]
-async-channel.workspace = true
-async-io.workspace = true
-futures-lite.workspace = true
 libc.workspace = true
 rsdm-core = { path = "../rsdm-core" }
 rsdm-system = { path = "../rsdm-system" }

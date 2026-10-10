@@ -31,7 +31,7 @@ async fn connect(preparing: bool) -> (Connection, Connection, UnixStream, Arc<Mu
     let (guard, writer) = UnixStream::pair().unwrap();
     let descriptor = Arc::new(Mutex::new(Some(guard.into())));
     let service = Logind { descriptor: descriptor.clone(), preparing };
-    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let worker = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p()
             .server(zbus::Guid::generate()).unwrap().serve_at(PATH, service).unwrap().build().await.unwrap()

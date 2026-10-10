@@ -1,6 +1,6 @@
 //! Suspend the health reply on a private peer, without touching the user bus.
 
-use std::{os::unix::net::UnixStream, sync::Arc};
+use std::{sync::Arc};
 
 use tokio::sync::{Notify, mpsc};
 
@@ -24,7 +24,7 @@ async fn fixture() -> (Server, Connection, mpsc::UnboundedReceiver<()>, Arc<Noti
     let (entered, ready) = mpsc::unbounded_channel();
     let resume = Arc::new(Notify::new());
     let bus = Bus { entered, resume: resume.clone() };
-    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let peer = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p()
             .server(zbus::Guid::generate()).unwrap()

@@ -1,6 +1,6 @@
 //! Login identity queries against a private logind substitute.
 
-use std::{os::unix::net::UnixStream, sync::{Arc, Mutex}, time::Instant};
+use std::{sync::{Arc, Mutex}, time::Instant};
 
 use super::*;
 
@@ -38,7 +38,7 @@ impl Session {
 async fn fixture(uid: u32) -> (zbus::Connection, zbus::Connection, Arc<Mutex<Vec<String>>>) {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let manager = Manager(calls.clone());
-    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let server = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p()
             .server(zbus::Guid::generate()).unwrap()

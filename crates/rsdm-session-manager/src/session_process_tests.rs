@@ -1,5 +1,4 @@
-use std::io::{BufRead, BufReader};
-use std::process::Stdio;
+use std::{future::Future, io::{BufRead, BufReader}, pin::Pin, process::Stdio, task::{Context, Waker}};
 
 use super::*;
 
@@ -19,8 +18,8 @@ impl Launcher {
         Self(child)
     }
 
-    fn status(&mut self) -> ExitStatus {
-        assert!(async_io::block_on(wait_for_launcher(&mut self.0, Duration::from_secs(1))).unwrap());
+    async fn status(&mut self) -> ExitStatus {
+        assert!(wait_for_launcher(&mut self.0, Duration::from_secs(1)).await.unwrap());
         self.0.try_wait().unwrap().unwrap()
     }
 }
@@ -32,61 +31,65 @@ impl Drop for Launcher {
     }
 }
 
+fn assert_pending(future: Pin<&mut impl Future>) {
+    assert!(future.poll(&mut Context::from_waker(Waker::noop())).is_pending());
+}
+
 fn assert_timed_out(result: Result<(), SessionError>) {
     assert!(matches!(result, Err(SessionError::Bus(error)) if super::super::bus::retryable_error(&error)));
 }
 
-#[test]
-fn an_ordinary_launcher_is_terminated_and_reaped() {
+#[tokio::test]
+async fn an_ordinary_launcher_is_terminated_and_reaped() {
     let mut launcher = Launcher::new(false);
-    async_io::block_on(stop_launcher(&mut launcher.0, &Deadline::default())).unwrap();
-    assert_eq!(launcher.status().signal(), Some(libc::SIGTERM));
+    stop_launcher(&mut launcher.0, &Deadline::default()).await.unwrap();
+    assert_eq!(launcher.status().await.signal(), Some(libc::SIGTERM));
 }
 
-#[test]
-fn an_already_reaped_launcher_needs_no_shutdown_budget() {
+#[tokio::test]
+async fn an_already_reaped_launcher_needs_no_shutdown_budget() {
     let mut launcher = Launcher::new(false);
     launcher.0.kill().unwrap();
-    let status = launcher.status();
+    let status = launcher.status().await;
     let deadline = Deadline::default();
     deadline.set(1);
-    async_io::block_on(stop_launcher(&mut launcher.0, &deadline)).unwrap();
-    assert_eq!(launcher.status(), status);
+    stop_launcher(&mut launcher.0, &deadline).await.unwrap();
+    assert_eq!(launcher.status().await, status);
 }
 
-#[test]
-fn an_expired_budget_skips_grace_and_kills_only_the_owned_launcher() {
+#[tokio::test]
+async fn an_expired_budget_skips_grace_and_kills_only_the_owned_launcher() {
     let mut launcher = Launcher::new(true);
     let mut unrelated = Launcher::new(true);
     let deadline = Deadline::default();
     deadline.set(1);
     let before = Instant::now();
-    assert_timed_out(async_io::block_on(stop_launcher(&mut launcher.0, &deadline)));
+    assert_timed_out(stop_launcher(&mut launcher.0, &deadline).await);
     assert!(before.elapsed() < Duration::from_secs(1));
-    assert_eq!(launcher.status().signal(), Some(libc::SIGKILL));
+    assert_eq!(launcher.status().await.signal(), Some(libc::SIGKILL));
     assert!(unrelated.0.try_wait().unwrap().is_none());
 }
 
-#[test]
-fn revising_the_deadline_interrupts_an_active_launcher_wait() {
+#[tokio::test]
+async fn revising_the_deadline_interrupts_an_active_launcher_wait() {
     let mut launcher = Launcher::new(true);
     let deadline = Deadline::default();
     let mut stopping = Box::pin(stop_launcher(&mut launcher.0, &deadline));
-    assert!(async_io::block_on(futures_lite::future::poll_once(stopping.as_mut())).is_none());
+    assert_pending(stopping.as_mut());
     deadline.set(1);
     let before = Instant::now();
-    assert_timed_out(async_io::block_on(stopping));
+    assert_timed_out(stopping.await);
     assert!(before.elapsed() < Duration::from_secs(1));
-    assert_eq!(launcher.status().signal(), Some(libc::SIGKILL));
+    assert_eq!(launcher.status().await.signal(), Some(libc::SIGKILL));
 }
 
-#[test]
-fn escalation_does_not_add_a_new_wait_after_the_shared_budget() {
+#[tokio::test]
+async fn escalation_does_not_add_a_new_wait_after_the_shared_budget() {
     let mut launcher = Launcher::new(true);
     let deadline = Deadline::default();
     deadline.set(super::super::processes::monotonic_usec().unwrap() + 50_000);
     let before = Instant::now();
-    assert_timed_out(async_io::block_on(stop_launcher(&mut launcher.0, &deadline)));
+    assert_timed_out(stop_launcher(&mut launcher.0, &deadline).await);
     assert!(before.elapsed() < Duration::from_secs(1));
-    assert_eq!(launcher.status().signal(), Some(libc::SIGKILL));
+    assert_eq!(launcher.status().await.signal(), Some(libc::SIGKILL));
 }
