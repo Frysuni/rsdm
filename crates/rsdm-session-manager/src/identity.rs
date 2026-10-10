@@ -1,6 +1,6 @@
 //! Identity of one login, distinct from the selected desktop entry.
 
-use std::time::Duration;
+use std::{future::Future, time::Duration};
 
 pub(super) use rsdm_system::generation::new_generation;
 
@@ -22,7 +22,7 @@ pub(super) struct SessionIdentity {
 }
 
 impl SessionIdentity {
-    pub fn discover() -> Result<Self, SessionError> {
+    pub async fn discover() -> Result<Self, SessionError> {
         let generation = match std::env::var(GENERATION_ENV) {
             Ok(generation) if valid_generation(&generation) => generation,
             Ok(_) => return Err(SessionError::State("invalid session generation".into())),
@@ -30,7 +30,12 @@ impl SessionIdentity {
         };
         // SAFETY: geteuid has no preconditions.
         let uid = unsafe { libc::geteuid() };
-        let login_session_id = verified_login_session(uid)?;
+        let timeout = Duration::from_secs(5);
+        let connection = async {
+            Ok(zbus::connection::Builder::system()?.method_timeout(timeout).build().await?)
+        };
+        let session_hint = std::env::var("XDG_SESSION_ID").ok().filter(|id| !id.is_empty());
+        let login_session_id = verified_login_session(connection, uid, session_hint.as_deref()).await?;
         Ok(Self {
             generation,
             login_session_id,
@@ -53,16 +58,18 @@ pub(super) fn valid_generation(generation: &str) -> bool {
         && generation.bytes().all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
-fn verified_login_session(uid: u32) -> Result<String, SessionError> {
-    async_io::block_on(async {
-        let connection = zbus::connection::Builder::system()?
-            .method_timeout(Duration::from_secs(5)).build().await?;
+async fn verified_login_session(
+    connect: impl Future<Output = Result<zbus::Connection, SessionError>>,
+    uid: u32, session_hint: Option<&str>,
+) -> Result<String, SessionError> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let connection = connect.await?;
         let manager = zbus::Proxy::new(
             &connection, "org.freedesktop.login1", "/org/freedesktop/login1",
             "org.freedesktop.login1.Manager",
         ).await?;
-        let path: OwnedObjectPath = match std::env::var("XDG_SESSION_ID") {
-            Ok(id) if !id.is_empty() => manager.call("GetSession", &(id,)).await?,
+        let path: OwnedObjectPath = match session_hint {
+            Some(id) => manager.call("GetSession", &(id,)).await?,
             _ => manager.call("GetSessionByPID", &(std::process::id(),)).await?,
         };
         let session = zbus::Proxy::new(
@@ -73,8 +80,14 @@ fn verified_login_session(uid: u32) -> Result<String, SessionError> {
             return Err(SessionError::State("logind session belongs to another user".into()));
         }
         Ok(session.get_property("Id").await?)
-    })
+    }).await.map_err(|_| {
+        SessionError::Bus(zbus::fdo::Error::TimedOut("verifying the logind session timed out".into()).into())
+    })?
 }
+
+#[cfg(test)]
+#[path = "identity_login_tests.rs"]
+mod login_tests;
 
 #[cfg(test)]
 mod tests {

@@ -19,7 +19,7 @@ impl Coordinator {
         let program = argv.first().ok_or(SessionError::EmptyCommand)?;
         let ready_deadline = Instant::now().checked_add(Duration::from_secs(cfg.ready_timeout_secs))
             .ok_or_else(|| SessionError::State("readiness timeout is too large".into()))?;
-        let identity = SessionIdentity::discover()?;
+        let identity = SessionIdentity::discover().await?;
         let lease = super::session_lease::SessionLease::acquire()?;
         let (endpoint, requests) = control::Endpoint::channel(identity.uid);
         // Acquire the one-session lease before changing shared manager state.

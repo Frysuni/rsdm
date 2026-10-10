@@ -1,0 +1,81 @@
+//! Login identity queries against a private logind substitute.
+
+use std::{os::unix::net::UnixStream, sync::{Arc, Mutex}, time::Instant};
+
+use super::*;
+
+const SESSION_PATH: &str = "/org/freedesktop/login1/session/test";
+
+struct Manager(Arc<Mutex<Vec<String>>>);
+
+#[zbus_macros::interface(name = "org.freedesktop.login1.Manager")]
+impl Manager {
+    fn get_session(&self, id: &str) -> OwnedObjectPath {
+        self.0.lock().unwrap().push(format!("session:{id}"));
+        OwnedObjectPath::try_from(SESSION_PATH).unwrap()
+    }
+
+    #[zbus(name = "GetSessionByPID")]
+    fn get_session_by_pid(&self, pid: u32) -> OwnedObjectPath {
+        self.0.lock().unwrap().push(format!("pid:{pid}"));
+        OwnedObjectPath::try_from(SESSION_PATH).unwrap()
+    }
+}
+
+struct Session(u32);
+
+#[zbus_macros::interface(name = "org.freedesktop.login1.Session")]
+impl Session {
+    #[zbus(property)]
+    fn user(&self) -> (u32, OwnedObjectPath) {
+        (self.0, OwnedObjectPath::try_from("/org/freedesktop/login1/user/test").unwrap())
+    }
+
+    #[zbus(property)]
+    fn id(&self) -> &str { "verified-session" }
+}
+
+async fn fixture(uid: u32) -> (zbus::Connection, zbus::Connection, Arc<Mutex<Vec<String>>>) {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let manager = Manager(calls.clone());
+    let (server_socket, client_socket) = UnixStream::pair().unwrap();
+    let server = tokio::spawn(async move {
+        zbus::connection::Builder::unix_stream(server_socket).p2p()
+            .server(zbus::Guid::generate()).unwrap()
+            .serve_at("/org/freedesktop/login1", manager).unwrap()
+            .serve_at(SESSION_PATH, Session(uid)).unwrap().build().await.unwrap()
+    });
+    let client = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    (client, server.await.unwrap(), calls)
+}
+
+#[tokio::test]
+async fn a_session_hint_is_resolved_and_its_owner_is_checked() {
+    let (connection, _server, calls) = fixture(1000).await;
+    let id = verified_login_session(async { Ok(connection) }, 1000, Some("hint")).await.unwrap();
+    assert_eq!(id, "verified-session");
+    assert_eq!(*calls.lock().unwrap(), ["session:hint"]);
+}
+
+#[tokio::test]
+async fn no_hint_queries_the_current_process_instead() {
+    let (connection, _server, calls) = fixture(1000).await;
+    let id = verified_login_session(async { Ok(connection) }, 1000, None).await.unwrap();
+    assert_eq!(id, "verified-session");
+    assert_eq!(*calls.lock().unwrap(), [format!("pid:{}", std::process::id())]);
+}
+
+#[tokio::test]
+async fn a_session_owned_by_another_uid_is_rejected() {
+    let (connection, _server, _) = fixture(1001).await;
+    let result = verified_login_session(async { Ok(connection) }, 1000, Some("hint")).await;
+    assert!(matches!(result, Err(SessionError::State(error)) if error == "logind session belongs to another user"));
+}
+
+#[tokio::test]
+async fn the_budget_also_bounds_a_hung_connection_setup() {
+    let started = Instant::now();
+    let result = verified_login_session(std::future::pending(), 1000, None).await;
+    assert!(matches!(result, Err(SessionError::Bus(error)) if super::super::bus::retryable_error(&error)));
+    assert!(started.elapsed() < Duration::from_secs(6));
+}

@@ -93,6 +93,8 @@ Session, app, and power commands own their Tokio runtime at the CLI boundary.
 The PAM owner creates its inhibitor runtime after fork; Lock power workers
 create their own runtime while the Wayland event loop keeps running. Logind
 capability queries, request timeouts, and shutdown notifications use Tokio.
+Coordinator startup awaits logind identity verification; connection setup and
+session queries share one five-second budget.
 Session Manager clients await typed D-Bus requests; compatibility stop hooks
 and recovery run in blocking workers while their internals are migrated.
 Control endpoint registration and health checks run as Tokio tasks; dropping
