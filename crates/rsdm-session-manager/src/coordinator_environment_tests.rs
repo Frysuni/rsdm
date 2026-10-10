@@ -41,8 +41,8 @@ fn repeated_finalize_updates_environment_without_reactivating_a_running_session(
     assert_eq!(state.reads.load(Ordering::SeqCst), 0);
 }
 
-#[test]
-fn a_paused_publication_does_not_block_status_or_cancellation() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_paused_publication_does_not_block_status_or_cancellation() {
     let mut fixture = Fixture::new();
     let state = install(&fixture);
     let (entered, resume) = pause(&state);

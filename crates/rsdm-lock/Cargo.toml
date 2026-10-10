@@ -19,6 +19,7 @@ rsdm-ui = { path = "../rsdm-ui" }
 smithay-client-toolkit.workspace = true
 thiserror.workspace = true
 time.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 wayland-protocols.workspace = true
 zeroize.workspace = true

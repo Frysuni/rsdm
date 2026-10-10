@@ -72,12 +72,12 @@ pub enum SessionError {
     NoGraphicalSession,
 }
 
-pub fn start(argv: &[String], cfg: &SessionManagerConfig) -> Result<i32, SessionError> {
-    start_with_options(argv, cfg, &StartOptions::default())
+pub async fn start(argv: &[String], cfg: &SessionManagerConfig) -> Result<i32, SessionError> {
+    start_with_options(argv, cfg, &StartOptions::default()).await
 }
 
-pub fn start_with_options(argv: &[String], cfg: &SessionManagerConfig, options: &StartOptions) -> Result<i32, SessionError> {
-    coordinator::start(argv, cfg, options)
+pub async fn start_with_options(argv: &[String], cfg: &SessionManagerConfig, options: &StartOptions) -> Result<i32, SessionError> {
+    coordinator::start(argv, cfg, options).await
 }
 
 pub fn run_app(argv: &[String]) -> Result<i32, SessionError> {

@@ -16,6 +16,7 @@ mod dm;
 mod logging;
 mod logs;
 mod output;
+mod runtime;
 mod session;
 mod session_exec;
 mod status;
@@ -144,7 +145,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Command::LockAuthHelper { fd } => return Ok(rsdm_lock::run_auth_helper(fd)),
         Command::LogindRequest { action } => {
             let action = match action { session::PowerAction::Reboot => "reboot", session::PowerAction::Poweroff => "poweroff" };
-            rsdm_system::logind::request_direct(action).map_err(Into::into)
+            runtime::run(async { Ok(rsdm_system::logind::request_direct(action).await?) })
         }
         Command::Dm => return run_dm(&cli.config),
         Command::Lock => run_lock(&cli.config),
@@ -158,7 +159,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Command::Status => status::run(&cli.config),
         Command::Session { action } => session::run(&cli.config, action),
         Command::App(options) => session::run_app(options),
-        Command::Power { action } => session::power(action),
+        Command::Power { action } => runtime::run(session::power(action)),
         Command::ValidateConfig => validate_config(&cli.config),
     };
     result.map(|()| ExitCode::SUCCESS)

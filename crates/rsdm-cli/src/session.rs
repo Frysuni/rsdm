@@ -11,12 +11,12 @@ use crate::output;
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum PowerAction { Reboot, Poweroff }
 
-pub fn power(action: PowerAction) -> Result<()> {
+pub async fn power(action: PowerAction) -> Result<()> {
     let action = match action { PowerAction::Reboot => "reboot", PowerAction::Poweroff => "poweroff" };
     if std::env::var_os("RSDM_SESSION_GENERATION").is_some() {
         return print_outcome(session_manager::stop(action)?);
     }
-    rsdm_system::logind::request_direct(action)?;
+    rsdm_system::logind::request_direct(action).await?;
     print_outcome(session_manager::StopOutcome {
         result: "accepted".into(), forced_units: Vec::new(), message: format!("logind accepted {action}"),
     })
@@ -85,8 +85,10 @@ pub fn run(path: &Path, action: SessionAction) -> Result<()> {
         SessionAction::Start { mode, native_unit, logout_command, compositor } => {
             let config = load_config(path)?;
             let options = session_manager::StartOptions { mode, native_unit, logout_command: parse_command(logout_command)? };
-            let code = session_manager::start_with_options(&compositor, &config.session_manager, &options)
-                .context("running the graphical session")?;
+            let code = crate::runtime::run(async {
+                session_manager::start_with_options(&compositor, &config.session_manager, &options).await
+                    .context("running the graphical session")
+            })?;
             std::process::exit(code);
         }
         SessionAction::Finalize { names } => {

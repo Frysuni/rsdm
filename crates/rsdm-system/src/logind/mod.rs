@@ -2,10 +2,8 @@
 
 use std::{future::Future, os::fd::OwnedFd, time::Duration};
 
-use futures_lite::future;
-use zbus::{Connection, Proxy};
-
 use thiserror::Error;
+use zbus::{Connection, Proxy};
 
 pub use monitor::{ShutdownMonitor, ShutdownNotice};
 mod monitor;
@@ -47,25 +45,22 @@ pub struct PowerCapabilities {
 }
 
 /// Query the same logind authority used for executing sleep requests.
-pub fn capabilities() -> Result<PowerCapabilities, LogindError> {
+pub async fn capabilities() -> Result<PowerCapabilities, LogindError> {
     let timeout = Duration::from_secs(5);
-    async_io::block_on(query_capabilities(connection(timeout), timeout))
+    query_capabilities(connection(timeout), timeout).await
 }
 
 async fn query_capabilities(
     connect: impl Future<Output = Result<Connection, LogindError>>, timeout: Duration,
 ) -> Result<PowerCapabilities, LogindError> {
-    future::or(async {
+    tokio::time::timeout(timeout, async {
         let connection = connect.await?;
         let proxy = proxy(&connection).await?;
-        let (hibernate, suspend) = future::zip(
+        let (hibernate, suspend) = tokio::join!(
             available(&proxy, "CanHibernate"), available(&proxy, "CanSuspend"),
-        ).await;
+        );
         Ok(PowerCapabilities { hibernate, suspend })
-    }, async {
-        async_io::Timer::after(timeout).await;
-        Err(LogindError::State("logind power capability query timed out".into()))
-    }).await
+    }).await.map_err(|_| LogindError::State("logind power capability query timed out".into()))?
 }
 
 async fn available(proxy: &Proxy<'_>, method: &str) -> bool {
@@ -78,11 +73,7 @@ async fn available(proxy: &Proxy<'_>, method: &str) -> bool {
     }
 }
 
-pub fn check(action: &str) -> Result<(), LogindError> {
-    async_io::block_on(check_async(action))
-}
-
-pub async fn check_async(action: &str) -> Result<(), LogindError> {
+pub async fn check(action: &str) -> Result<(), LogindError> {
     let timeout = Duration::from_secs(5);
     check_with(connection(timeout), action, timeout).await
 }
@@ -99,11 +90,7 @@ async fn check_with(
     }, timeout).await
 }
 
-pub fn request_direct(action: &str) -> Result<(), LogindError> {
-    async_io::block_on(request_direct_async(action))
-}
-
-pub async fn request_direct_async(action: &str) -> Result<(), LogindError> {
+pub async fn request_direct(action: &str) -> Result<(), LogindError> {
     let timeout = Duration::from_secs(60);
     request_with(connection(timeout), action, timeout).await
 }
@@ -122,11 +109,11 @@ async fn request_with(
 async fn within_timeout<T>(
     operation: impl Future<Output = Result<T, LogindError>>, timeout: Duration,
 ) -> Result<T, LogindError> {
-    future::or(operation, async {
-        async_io::Timer::after(timeout).await;
-        Err(zbus::Error::from(zbus::fdo::Error::TimedOut("logind request timed out".into())).into())
-    }).await
+    tokio::time::timeout(timeout, operation).await.map_err(|_| {
+        LogindError::Bus(zbus::fdo::Error::TimedOut("logind request timed out".into()).into())
+    })?
 }
+
 async fn inhibit(connection: &Connection, reason: &str) -> Result<OwnedFd, LogindError> {
     let fd: zbus::zvariant::OwnedFd = proxy(connection).await?
         .call("Inhibit", &("shutdown", "RSDM", reason, "delay")).await?;
@@ -134,13 +121,14 @@ async fn inhibit(connection: &Connection, reason: &str) -> Result<OwnedFd, Login
 }
 
 /// Hold a delay inhibitor until the caller has completed its shutdown work.
-pub fn delay_inhibitor(reason: &str) -> Result<OwnedFd, LogindError> {
+pub async fn delay_inhibitor(reason: &str) -> Result<OwnedFd, LogindError> {
     let timeout = Duration::from_secs(5);
-    async_io::block_on(within_timeout(async {
+    within_timeout(async {
         let connection = connection(timeout).await?;
         inhibit(&connection, reason).await
-    }, timeout))
+    }, timeout).await
 }
+
 #[cfg(test)]
 #[path = "power_tests.rs"]
 mod tests;

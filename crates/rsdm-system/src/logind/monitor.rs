@@ -1,9 +1,9 @@
 //! Logind shutdown notifications and an optional delay inhibitor.
 
-use std::{os::fd::OwnedFd, sync::mpsc::Sender, thread, time::Duration};
+use std::{future::poll_fn, os::fd::OwnedFd, pin::Pin, time::Duration};
 
-use futures_lite::{StreamExt, future};
-use zbus::Connection;
+use tokio::{sync::mpsc::UnboundedSender, task::JoinHandle};
+use zbus::{Connection, export::futures_core::Stream};
 
 use super::{LogindError, connection, inhibit, proxy};
 
@@ -28,18 +28,18 @@ impl ShutdownNotice {
 
 pub struct ShutdownMonitor {
     pub(super) _inhibitor: Option<OwnedFd>,
-    stop: async_channel::Sender<()>,
-    listener: Option<thread::JoinHandle<()>>,
+    listener: JoinHandle<()>,
 }
 
 impl ShutdownMonitor {
-    pub fn start(notices: Sender<ShutdownNotice>, reason: &str) -> Result<Self, LogindError> {
-        async_io::block_on(async {
-            Self::listen(connection(Duration::from_secs(5)).await?, notices, reason).await
-        })
+    pub async fn start(notices: UnboundedSender<ShutdownNotice>, reason: &str) -> Result<Self, LogindError> {
+        let timeout = Duration::from_secs(5);
+        super::within_timeout(async {
+            Self::listen(connection(timeout).await?, notices, reason).await
+        }, timeout).await
     }
 
-    pub(super) async fn listen(connection: Connection, notices: Sender<ShutdownNotice>, reason: &str) -> Result<Self, LogindError> {
+    pub(super) async fn listen(connection: Connection, notices: UnboundedSender<ShutdownNotice>, reason: &str) -> Result<Self, LogindError> {
         // Holding the FD precedes the signal subscription and the initial state query.
         let inhibitor = match inhibit(&connection, reason).await {
             Ok(fd) => Some(fd),
@@ -55,25 +55,21 @@ impl ShutdownMonitor {
         let initial = ShutdownNotice::new(true, budget_usec);
         let preparing: bool = proxy.get_property("PreparingForShutdown").await?;
         if preparing { let _ = notices.send(initial); }
-        let (stop, stopped) = async_channel::bounded(1);
-        let listener = thread::spawn(move || async_io::block_on(async move {
-            future::or(async {
-                while let Some(signal) = signals.next().await {
-                    match signal.body().deserialize::<bool>() {
-                        Ok(preparing) => { if notices.send(ShutdownNotice::new(preparing, budget_usec)).is_err() { break; } }
-                        Err(error) => tracing::warn!(%error, "invalid logind shutdown notification"),
-                    }
+        let listener = tokio::spawn(async move {
+            while let Some(signal) = poll_fn(|cx| Pin::new(&mut signals).poll_next(cx)).await {
+                match signal.body().deserialize::<bool>() {
+                    Ok(preparing) => { if notices.send(ShutdownNotice::new(preparing, budget_usec)).is_err() { break; } }
+                    Err(error) => tracing::warn!(%error, "invalid logind shutdown notification"),
                 }
-            }, async { let _ = stopped.recv().await; }).await;
+            }
             drop(connection);
-        }));
-        Ok(Self { _inhibitor: inhibitor, stop, listener: Some(listener) })
+        });
+        Ok(Self { _inhibitor: inhibitor, listener })
     }
 }
 
 impl Drop for ShutdownMonitor {
     fn drop(&mut self) {
-        let _ = self.stop.try_send(());
-        if let Some(listener) = self.listener.take() { let _ = listener.join(); }
+        self.listener.abort();
     }
 }

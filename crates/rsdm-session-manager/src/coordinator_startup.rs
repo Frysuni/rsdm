@@ -13,7 +13,7 @@ use super::{
 };
 
 impl Coordinator {
-    pub(super) fn create(
+    pub(super) async fn create(
         argv: &[String], cfg: &SessionManagerConfig, options: &StartOptions,
     ) -> Result<Self, SessionError> {
         let program = argv.first().ok_or(SessionError::EmptyCommand)?;
@@ -30,8 +30,9 @@ impl Coordinator {
             return Err(SessionError::SessionAlreadyActive);
         }
         let provider = Provider::select(argv, &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(), options)?;
-        let (notices_sender, notices) = mpsc::channel();
+        let (notices_sender, notices) = tokio::sync::mpsc::unbounded_channel();
         let power = ShutdownMonitor::start(notices_sender, "Saving registered graphical applications")
+            .await
             .map_err(|error| SessionError::State(format!("creating shutdown delay monitor: {error}")))?;
         let runtime = Runtime::create(&identity.generation)?;
         if runtime.path.join("session.toml").try_exists()? {

@@ -67,19 +67,21 @@ pub(super) struct Coordinator {
     pub ready_deadline: Instant,
     pub display_since: Option<Instant>,
     pub _power_monitor: Option<ShutdownMonitor>,
-    pub notices: Receiver<ShutdownNotice>,
+    pub notices: tokio::sync::mpsc::UnboundedReceiver<ShutdownNotice>,
     pub last_reap: Instant,
     pub _lease: super::session_lease::SessionLease,
 }
 
-pub(super) fn start(argv: &[String], cfg: &SessionManagerConfig, options: &StartOptions) -> Result<i32, SessionError> {
-    let mut coordinator = Coordinator::create(argv, cfg, options)?;
-    super::signals::install();
-    let result = coordinator.run();
-    if result.as_ref().map_or(true, |code| *code != 0) {
-        coordinator.recover();
-    }
-    result
+pub(super) async fn start(argv: &[String], cfg: &SessionManagerConfig, options: &StartOptions) -> Result<i32, SessionError> {
+    let mut coordinator = Coordinator::create(argv, cfg, options).await?;
+    tokio::task::spawn_blocking(move || {
+        super::signals::install();
+        let result = coordinator.run();
+        if result.as_ref().map_or(true, |code| *code != 0) {
+            coordinator.recover();
+        }
+        result
+    }).await.map_err(|error| SessionError::State(format!("coordinator worker failed: {error}")))?
 }
 
 impl Coordinator {

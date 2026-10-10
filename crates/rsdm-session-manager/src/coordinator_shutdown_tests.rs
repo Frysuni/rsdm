@@ -20,7 +20,7 @@ impl FixtureReady {
 
 struct Fixture {
     coordinator: Coordinator,
-    notices: std::sync::mpsc::Sender<ShutdownNotice>,
+    notices: tokio::sync::mpsc::UnboundedSender<ShutdownNotice>,
     _server: zbus::Connection,
     directory: PathBuf,
 }
@@ -60,7 +60,7 @@ impl Fixture {
         runtime.save_session(&record).unwrap();
         let (endpoint, requests) = crate::control::Endpoint::channel(uid);
         let (events, work) = std::sync::mpsc::channel();
-        let (notices, received) = std::sync::mpsc::channel();
+        let (notices, received) = tokio::sync::mpsc::unbounded_channel();
         let mut lifecycle = Lifecycle::new();
         lifecycle.ready();
         let coordinator = Coordinator {

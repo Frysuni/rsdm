@@ -24,8 +24,8 @@ fn observation_preserves_the_process_until_the_start_worker_completes() {
     assert_eq!(fixture.coordinator.record.compositor_invocation, vec![3; 16]);
 }
 
-#[test]
-fn stopping_does_not_start_observations_that_starve_preparation() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stopping_does_not_start_observations_that_starve_preparation() {
     let mut fixture = Fixture::new();
     fixture.coordinator.begin_stop("logout", None).unwrap();
 
@@ -56,8 +56,8 @@ fn stale_readiness_cannot_acknowledge_or_restart_a_stopping_session() {
     assert_eq!(fixture.coordinator.workers, 0);
 }
 
-#[test]
-fn an_inflight_observation_returns_ownership_before_shutdown_advances() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_inflight_observation_returns_ownership_before_shutdown_advances() {
     let mut fixture = Fixture::new();
     completion::install_manager(&fixture);
     fixture.coordinator.start_observation();

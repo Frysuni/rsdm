@@ -20,6 +20,7 @@ rsdm-system = { path = "../rsdm-system" }
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 zeroize.workspace = true
 zbus.workspace = true

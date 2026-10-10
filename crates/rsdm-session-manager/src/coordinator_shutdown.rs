@@ -55,13 +55,14 @@ impl Coordinator {
         let action = self.action.clone();
         let native = self.provider.native_desktop();
         self.workers += 1;
-        thread::spawn(move || {
-            let result = (|| {
+        tokio::spawn(async move {
+            let result = async {
                 if !native && matches!(action.as_str(), "poweroff" | "reboot") {
-                    async_io::block_on(manager.deadline.bound(rsdm_system::logind::check_async(&action)))?;
+                    manager.deadline.bound(rsdm_system::logind::check(&action)).await?;
                 }
-                app_stop::prepare_apps(&manager, &runtime, apps, control)
-            })();
+                tokio::task::spawn_blocking(move || app_stop::prepare_apps(&manager, &runtime, apps, control))
+                    .await.map_err(|error| SessionError::State(format!("application preparation worker failed: {error}")))?
+            }.await;
             let _ = events.send(Work::Prepared(result));
         });
         Ok(())
@@ -96,8 +97,8 @@ impl Coordinator {
             let events = self.events.clone();
             self.workers += 1;
             let deadline = self.manager.deadline.clone();
-            thread::spawn(move || {
-                let result = async_io::block_on(deadline.bound(rsdm_system::logind::request_direct_async(&action)));
+            tokio::spawn(async move {
+                let result = deadline.bound(rsdm_system::logind::request_direct(&action)).await;
                 let _ = events.send(Work::PowerRequested(result.map_err(SessionError::from)));
             });
             return Ok(());
