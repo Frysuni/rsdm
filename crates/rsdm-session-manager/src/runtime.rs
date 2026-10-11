@@ -52,6 +52,13 @@ pub(super) struct SessionRecord {
     pub shutdown_transaction: Option<super::shutdown_transaction::ShutdownTransaction>,
 }
 
+impl SessionRecord {
+    pub(super) fn pending_transaction_id(&self) -> Option<&str> {
+        self.shutdown_transaction.as_ref().filter(|transaction| transaction.result.is_none())
+            .map(|transaction| transaction.id.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct AppRecord {

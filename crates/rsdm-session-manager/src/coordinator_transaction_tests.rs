@@ -1,6 +1,28 @@
 use super::*;
 
 #[tokio::test]
+async fn an_independent_stop_hook_after_cancellation_does_not_reuse_the_finished_transaction() {
+    let mut fixture = Fixture::new().await;
+    fixture.coordinator.begin_stop("logout", None).await.unwrap();
+    fixture.coordinator.shutdown.as_ref().unwrap().cancelled.store(true, Ordering::SeqCst);
+    fixture.coordinator.resume_if_cancelled().await.unwrap();
+    assert_eq!(fixture.coordinator.record.shutdown_transaction.as_ref().unwrap().result.as_deref(), Some("cancelled"));
+    let (reply, mut received) = tokio::sync::mpsc::channel(1);
+    fixture.coordinator.request(crate::control::Request::XsmpPrepare {
+        generation: GENERATION.into(), transaction_id: String::new(), units: Vec::new(), cancellable: false,
+        reply: crate::control::Reply::for_test(reply),
+    }).await.unwrap();
+    assert!(received.recv().await.unwrap().unwrap().is_empty());
+    fixture.coordinator.begin_stop("logout", None).await.unwrap();
+    let (reply, mut received) = tokio::sync::mpsc::channel(1);
+    fixture.coordinator.request(crate::control::Request::XsmpPrepare {
+        generation: GENERATION.into(), transaction_id: String::new(), units: Vec::new(), cancellable: false,
+        reply: crate::control::Reply::for_test(reply),
+    }).await.unwrap();
+    assert_eq!(received.recv().await.unwrap().unwrap_err(), "shutdown transaction is stale");
+}
+
+#[tokio::test]
 async fn cancelled_and_replaced_transactions_reject_late_xsmp_requests() {
     let mut fixture = Fixture::new().await;
     fixture.coordinator.begin_stop("logout", None).await.unwrap();

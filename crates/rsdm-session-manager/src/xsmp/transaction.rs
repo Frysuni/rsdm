@@ -8,11 +8,7 @@ use crate::{SessionError, apps, processes::{app_processes, monotonic_usec}};
 impl Server {
     pub async fn prepare(&mut self, units: &[String], requested: &str, cancellable: bool) -> Result<Vec<String>, SessionError> {
         let records = self.runtime.clone();
-        let transaction = crate::runtime::blocking(move || Ok(records.session()?.shutdown_transaction)).await?;
-        if transaction.as_ref().is_some_and(|transaction| transaction.result.is_some()) {
-            return Err(SessionError::State("shutdown transaction has finished".into()));
-        }
-        let transaction_id = transaction.map(|transaction| transaction.id);
+        let transaction_id = crate::runtime::blocking(move || Ok(records.session()?.pending_transaction_id().map(str::to_string))).await?;
         if transaction_id.as_deref().unwrap_or("") != requested { return Err(SessionError::State("shutdown transaction is stale".into())); }
         self.transaction_id = transaction_id.clone();
         let mut selected = Vec::new();
@@ -128,10 +124,8 @@ impl Server {
         self.manager.actions.check()?;
         let active = if self.peers.iter().any(|peer| peer.selected) {
             let records = self.runtime.clone();
-            let transaction = crate::runtime::blocking(move || Ok(records.session()?.shutdown_transaction)).await?;
-            let current = transaction.as_ref().map(|transaction| transaction.id.as_str());
-            current == self.transaction_id.as_deref()
-                && transaction.as_ref().is_none_or(|transaction| transaction.result.is_none())
+            let current = crate::runtime::blocking(move || Ok(records.session()?.pending_transaction_id().map(str::to_string))).await?;
+            current.as_deref() == self.transaction_id.as_deref()
         } else { false };
         for peer in &mut self.peers {
             self.manager.actions.check()?;

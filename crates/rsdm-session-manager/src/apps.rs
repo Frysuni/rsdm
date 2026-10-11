@@ -194,7 +194,8 @@ pub async fn stop_hook(generation: &str, unit: &str, actions: super::action_gate
         if runtime.is_disabled()? { return Ok(None); }
         let record = runtime.session()?;
         if record.disabled { return Ok(None); }
-        Ok(Some((runtime, record.shutdown_deadline_usec, record.shutdown_transaction.map(|transaction| transaction.id))))
+        let transaction_id = record.pending_transaction_id().map(str::to_string);
+        Ok(Some((runtime, record.shutdown_deadline_usec, transaction_id)))
     }).await? else { return Ok(()); };
     let actions = actions.with_generation(runtime.clone());
     let deadline = Deadline::default();

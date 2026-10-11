@@ -39,10 +39,8 @@ impl Coordinator {
                         && self.shutdown.as_ref().is_some_and(|control| {
                             !control.noncancelable.load(Ordering::SeqCst)
                         });
-                    let current = self.record.shutdown_transaction.as_ref().map(|transaction| transaction.id.as_str()).unwrap_or("");
-                    if current != transaction_id || (!transaction_id.is_empty()
-                        && self.record.shutdown_transaction.as_ref().is_some_and(|transaction| transaction.result.is_some()))
-                    {
+                    let current = self.record.pending_transaction_id().unwrap_or("");
+                    if current != transaction_id {
                         let _ = reply.try_send(Err("shutdown transaction is stale".into()));
                     } else {
                         self.xsmp.prepare(units, transaction_id, allowed, reply);
