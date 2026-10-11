@@ -35,6 +35,8 @@ pub(super) struct SessionRecord {
     #[serde(default)]
     pub disabled: bool,
     #[serde(default)]
+    pub config_path: Option<PathBuf>,
+    #[serde(default)]
     pub exported_environment: Vec<(String, String)>,
     #[serde(default)]
     pub shutdown_deadline_usec: Option<u64>,

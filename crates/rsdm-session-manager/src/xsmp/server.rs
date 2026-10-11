@@ -35,9 +35,11 @@ pub(super) async fn run(
     manager: UserManager, runtime: Runtime, messages: UnboundedReceiver<Message>, notices: UnboundedSender<Notice>,
     ready: oneshot::Sender<Result<Vec<(String, String)>, SessionError>>, interrupt: Arc<Interrupt>,
 ) {
+    let actions = manager.actions.clone();
     let created = tokio::select! {
         biased;
         _ = interrupt.stopped() => return,
+        _ = actions.wait_closed() => return,
         result = Server::create(manager, runtime, messages, notices.clone(), interrupt.clone()) => result,
     };
     let mut server = match created {
@@ -52,6 +54,7 @@ pub(super) async fn run(
         tokio::select! {
             biased;
             _ = interrupt.stopped() => Ok(()),
+            _ = actions.wait_closed() => Ok(()),
             result = server.run() => result,
         }
     };
@@ -133,6 +136,7 @@ impl Server {
     }
 
     async fn process_ready(&mut self, index: usize) -> Result<(), SessionError> {
+        self.manager.actions.check()?;
         if index >= self.listeners.count() {
             let peer = (&mut *self.peers[index - self.listeners.count()]) as *mut Peer;
             self.admission.peer.set(peer);

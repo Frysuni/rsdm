@@ -7,6 +7,20 @@ mod fixture;
 
 use fixture::{Fixture, Mode};
 
+#[tokio::test]
+async fn stop_hooks_preserve_the_coordinators_config_path_as_one_argument() {
+    let fixture = Fixture::new(Mode::Accepted).await;
+    let path = Path::new("/run/custom config/rsdm.toml");
+    let properties = launch_properties(&fixture.runtime, "anchor.service", &fixture.request, &fixture.app, Some(path)).await.unwrap();
+    let value = properties.into_iter().find(|(name, _)| *name == "ExecStopEx").unwrap().1;
+    let commands: Vec<(String, Vec<String>, Vec<String>)> = zbus::zvariant::OwnedValue::try_from(value).unwrap().try_into().unwrap();
+    let (executable, argv, flags) = &commands[0];
+    assert_eq!(argv, &vec![executable.clone(), "--config".into(), path.to_str().unwrap().into(),
+        "session".into(), "app-stop".into(), "--generation".into(), fixture.runtime.generation.clone(),
+        "--unit".into(), fixture.app.unit.clone()]);
+    assert_eq!(flags, &["no-env-expand"]);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_missing_executable_rolls_back_registration_without_contacting_systemd() {
     let mut fixture = Fixture::new(Mode::Accepted).await;

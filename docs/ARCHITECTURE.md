@@ -158,6 +158,17 @@ receiver for session policy. It reopens the path every 250 ms on blocking
 workers, so in-place edits, atomic replacement and recreation are observed.
 Invalid or missing updates retain the last validated policy. Unchanged session
 policy does not notify receivers; dropping all receivers ends monitoring.
+Updates retain a disable counter, so a receiver that skips intermediate values
+still observes a validated false-to-true transition as disabling its generation.
+
+CLI start, stop hooks and recovery consume these updates. A disabled generation
+closes control admission and cancels pending manager calls and preparation. It
+persists its disabled marker, releases the shutdown inhibitor and interrupts the
+private XSMP worker. Already accepted external requests cannot be recalled.
+It leaves application units, WM, anchor and exported environment running.
+The launcher retains its child and compositor pidfd independently of coordinator
+workers and passively waits for the actual WM exit before returning to DM.
+App stop commands preserve the coordinator's configuration path in their argv.
 
 Recovery records can permanently mark a generation disabled. Once marked, app
 stop hooks and recovery leave its applications, compositor, anchor and exported

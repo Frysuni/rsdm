@@ -25,6 +25,7 @@ pub(super) type UnitProperties = Vec<(&'static str, Value<'static>)>;
 pub(super) struct UserManager {
     transport: transport::Transport,
     pub(super) deadline: Deadline,
+    pub(super) actions: super::action_gate::ActionGate,
 }
 
 impl UserManager {
@@ -38,13 +39,20 @@ impl UserManager {
         }, deadline).await
     }
 
+    pub(super) async fn connect_guarded(deadline: Deadline, actions: super::action_gate::ActionGate) -> Result<Self, SessionError> {
+        let mut manager = actions.guard(Self::connect_until(deadline)).await??;
+        actions.check()?;
+        manager.actions = actions;
+        Ok(manager)
+    }
+
     async fn connect_with(
         connection: impl Future<Output = zbus::Result<Connection>>, deadline: Deadline,
     ) -> Result<Self, SessionError> {
         let setup = async {
             let connection = connection.await?;
             validate_connection(&connection).await?;
-            Ok(Self { transport: transport::Transport::new(connection), deadline: deadline.clone() })
+            Ok(Self { transport: transport::Transport::new(connection), deadline: deadline.clone(), actions: Default::default() })
         };
         deadline.bound(async {
             tokio::select! {
@@ -64,7 +72,7 @@ impl UserManager {
 
     #[cfg(test)]
     pub(super) fn with_connection(connection: Connection) -> Self {
-        Self { transport: transport::Transport::new(connection), deadline: Deadline::default() }
+        Self { transport: transport::Transport::new(connection), deadline: Deadline::default(), actions: Default::default() }
     }
 
     pub(super) fn connection(&self) -> Connection {
@@ -75,19 +83,24 @@ impl UserManager {
         Proxy::new_owned(self.connection(), DESTINATION.to_string(), MANAGER_PATH.to_string(), MANAGER_INTERFACE.to_string()).await
     }
 
-    async fn request<T>(&self, operation: impl Future<Output = zbus::Result<T>>) -> zbus::Result<T> {
+    pub(super) async fn request<T>(&self, operation: impl Future<Output = zbus::Result<T>>) -> zbus::Result<T> {
         // Job and recovery futures compose these requests; keep their state
         // off the caller's stack instead of growing every enclosing future.
-        self.deadline.bound(Box::pin(self.transport.request(async {
+        self.actions.guard(self.deadline.bound(Box::pin(self.transport.request(async {
+            self.actions.check().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
             // The deadline can change while this request waits for a slot.
             self.deadline.remaining(Duration::MAX)?;
             operation.await
-        }))).await
+        })))).await.map_err(|error| zbus::Error::from(zbus::fdo::Error::Failed(error.to_string())))?
     }
 
     pub async fn start_service(&self, unit: &str, properties: &UnitProperties) -> Result<(), SessionError> {
         let submitted = AtomicBool::new(false);
-        let result = self.deadline.bound(jobs::start(self, unit, properties, Duration::from_secs(10), &submitted)).await;
+        self.start_service_tracked(unit, properties, &submitted).await
+    }
+
+    pub(super) async fn start_service_tracked(&self, unit: &str, properties: &UnitProperties, submitted: &AtomicBool) -> Result<(), SessionError> {
+        let result = self.deadline.bound(jobs::start(self, unit, properties, Duration::from_secs(10), submitted)).await;
         match result {
             Err(error) if !submitted.load(Ordering::Relaxed) => Err(SessionError::StartRejected { error: Box::new(error), reference_retained: false }),
             other => other,
@@ -163,7 +176,7 @@ impl UserManager {
     }
 
     pub(super) async fn update_activation(&self, pairs: &[(String, String)]) -> Result<(), SessionError> {
-        self.deadline.bound(self.transport.update_activation(pairs)).await.map_err(Into::into)
+        self.actions.guard(self.deadline.bound(self.transport.update_activation(pairs))).await?.map_err(Into::into)
     }
 
     pub(super) async fn read<T, F, Fut>(&self, query: F) -> Result<T, SessionError>
@@ -183,7 +196,8 @@ impl UserManager {
             let epoch = self.transport.epoch();
             let result = self.request(query()).await;
             if result.as_ref().is_err_and(transport::disconnected) {
-                self.transport.reconnect(epoch).await?;
+                self.actions.guard(self.transport.reconnect(epoch)).await
+                    .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))??;
             }
             result
         }, timeout)).await

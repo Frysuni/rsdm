@@ -59,6 +59,20 @@ fn stop_acknowledgements_hold_admission_until_received() {
     assert!(endpoint.admission.acquire(Class::Stop).is_ok());
 }
 
+#[test]
+fn closing_admission_rejects_every_class_and_releases_existing_permits_normally() {
+    let admission = Admission::default();
+    let clone = admission.clone();
+    let held = admission.acquire(Class::Regular).unwrap();
+    clone.close();
+    for class in [Class::Regular, Class::Stop, Class::Cancel, Class::Xsmp] {
+        assert!(matches!(admission.acquire(class), Err(zbus::fdo::Error::Failed(message)) if message.contains("disabled")));
+    }
+    assert_eq!(admission.regular.load(Ordering::Relaxed), 1);
+    drop(held);
+    assert_eq!(admission.regular.load(Ordering::Relaxed), 0);
+}
+
 #[tokio::test]
 async fn full_queue_returns_backpressure_without_waiting() {
     let (endpoint, _received) = Endpoint::channel(0);

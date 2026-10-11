@@ -1,15 +1,18 @@
 //! Observing a managed compositor or an unchanged native session launcher.
 
-use std::{os::unix::process::ExitStatusExt, path::Path, process::ExitStatus, time::Duration};
+use std::{os::unix::process::ExitStatusExt, path::Path, process::ExitStatus, sync::Arc, time::Duration};
 
 use tokio::process::{Child, Command};
 
-use super::{SessionError, bus::UserManager, deadline::Deadline, processes::ProcessHandle, provider::{Provider, ProviderKind}};
+use super::{SessionError, action_gate::ActionGate, bus::UserManager, deadline::Deadline, processes::ProcessHandle, provider::{Provider, ProviderKind}};
 
+#[derive(Clone)]
 pub(super) struct SessionProcess {
     pub unit: Option<String>,
     pub invocation: Vec<u8>,
-    child: Option<Child>,
+    pub(super) child: Option<Arc<tokio::sync::Mutex<Child>>>,
+    pub(super) compositor: Arc<std::sync::Mutex<Option<Arc<ProcessHandle>>>>,
+    pub(super) submitted: Arc<std::sync::atomic::AtomicBool>,
     pub booting: bool,
     child_exit: Option<i32>,
     native_unit_seen: bool,
@@ -26,24 +29,26 @@ impl SessionProcess {
         provider: &Provider, managed_unit: String,
     ) -> Result<Self, SessionError> {
         if provider.kind == ProviderKind::Managed {
-            return Ok(Self { unit: Some(managed_unit), invocation: Vec::new(), child: None, booting: true,
+            return Ok(Self { unit: Some(managed_unit), invocation: Vec::new(), child: None, compositor: Default::default(), submitted: Default::default(), booting: true,
                 child_exit: None, native_unit_seen: false, launched: std::time::Instant::now() });
         }
         let child = Command::new(argv.first().ok_or(SessionError::EmptyCommand)?)
             .args(&argv[1..]).env_clear().envs(environment.iter().map(|(key, value)| (key, value)))
             .current_dir(directory).spawn().map_err(SessionError::Spawn)?;
-        Ok(Self { unit: provider.native_unit.clone(), invocation: Vec::new(), child: Some(child), booting: false,
+        Ok(Self { unit: provider.native_unit.clone(), invocation: Vec::new(), child: Some(Arc::new(tokio::sync::Mutex::new(child))), compositor: Default::default(), submitted: Default::default(), booting: false,
             child_exit: None, native_unit_seen: false, launched: std::time::Instant::now() })
     }
 
     pub async fn exited(&mut self, manager: &UserManager) -> Result<Option<i32>, SessionError> {
         if self.booting { return Ok(None); }
-        if let Some(child) = &mut self.child {
+        if let Some(child) = &self.child {
+            let mut child = child.lock().await;
             if self.child_exit.is_none() { self.child_exit = child.try_wait().map_err(SessionError::Wait)?.map(exit_status_code); }
             let Some(unit) = &self.unit else { return Ok(self.child_exit); };
             if manager.active(unit).await? {
                 self.native_unit_seen = true;
                 if self.invocation.is_empty() { self.invocation = manager.invocation_id(unit).await?; }
+                self.pin_compositor(manager, unit).await?;
                 return Ok(None);
             }
             if self.native_unit_seen || self.launched.elapsed() > Duration::from_secs(10) {
@@ -52,13 +57,34 @@ impl SessionProcess {
             return Ok(None);
         }
         let Some(unit) = &self.unit else { return Ok(None); };
-        if manager.active(unit).await? { return Ok(None); }
+        if manager.active(unit).await? {
+            self.pin_compositor(manager, unit).await?;
+            return Ok(None);
+        }
         let code: i32 = manager.unit_property(unit, "org.freedesktop.systemd1.Service", "ExecMainCode").await?;
         let status: i32 = manager.unit_property(unit, "org.freedesktop.systemd1.Service", "ExecMainStatus").await?;
         Ok(Some(if code == libc::CLD_EXITED { status } else { 128 + status }))
     }
 
+    async fn pin_compositor(&self, manager: &UserManager, unit: &str) -> Result<(), SessionError> {
+        if self.compositor.lock().unwrap().is_some() { return Ok(()); }
+        let pid: u32 = match manager.unit_property(unit, "org.freedesktop.systemd1.Service", "MainPID").await {
+            Ok(pid) => pid,
+            Err(SessionError::Bus(zbus::Error::MethodError(name, _, _))) if matches!(name.as_str(),
+                "org.freedesktop.DBus.Error.UnknownProperty" | "org.freedesktop.DBus.Error.UnknownInterface") => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        if pid == 0 { return Ok(()); }
+        let handle = ProcessHandle::open(pid)?;
+        if manager.invocation_id(unit).await? != self.invocation {
+            return Err(SessionError::State("compositor invocation changed before its PID was pinned".into()));
+        }
+        *self.compositor.lock().unwrap() = handle.map(Arc::new);
+        Ok(())
+    }
+
     pub async fn stop(&mut self, manager: &UserManager, provider: &Provider, generation: &str) -> Result<(), SessionError> {
+        manager.actions.check()?;
         let mut failure = None;
         if let Some(unit) = &self.unit {
             let result = async {
@@ -71,8 +97,9 @@ impl SessionProcess {
             }.await;
             if let Err(error) = result { failure = Some(error); }
         }
-        if let Some(child) = &mut self.child {
-            if let Err(error) = stop_launcher(child, &manager.deadline).await {
+        if let Some(child) = &self.child {
+            let mut child = manager.actions.guard(child.lock()).await?;
+            if let Err(error) = stop_launcher(&mut child, &manager.deadline, manager.actions.clone()).await {
                 failure.get_or_insert(error);
             }
         }
@@ -80,18 +107,23 @@ impl SessionProcess {
     }
 }
 
-async fn stop_launcher(child: &mut Child, deadline: &Deadline) -> Result<(), SessionError> {
+async fn stop_launcher(child: &mut Child, deadline: &Deadline, actions: ActionGate) -> Result<(), SessionError> {
+    actions.check()?;
     if child.try_wait()?.is_some() { return Ok(()); }
     // The unreaped child cannot be replaced before this handle is opened.
     // Keep that same handle for escalation, even when the budget expires.
     let Some(pid) = child.id() else { return Ok(()); };
     let handle = ProcessHandle::open(pid)?;
     let graceful = deadline.bound(async {
-        if let Some(handle) = &handle { handle.signal(libc::SIGTERM)?; }
-        wait_for_launcher(child, Duration::from_secs(5)).await
+        if let Some(handle) = &handle {
+            actions.check()?;
+            handle.signal(libc::SIGTERM)?;
+        }
+        actions.guard(wait_for_launcher(child, Duration::from_secs(5))).await?
     }).await;
     if matches!(graceful, Ok(true)) { return Ok(()); }
 
+    actions.check()?;
     if let Some(handle) = &handle { handle.signal(libc::SIGKILL)?; }
     if let Err(error) = graceful {
         // Reap if already exited, but do not wait beyond the shared deadline.

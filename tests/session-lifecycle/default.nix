@@ -392,5 +392,5 @@ pkgs.testers.runNixOSTest {
         machine.succeed(user + "systemctl --user kill --signal=KILL app-rsdm-*service")
         machine.succeed(session + "rsdm session stop")
     machine.fail("journalctl --no-pager -b | grep 'XSMP error:'")
-  '';
+  '' + (import ./hot-disable.nix { inherit application stubborn; });
 }

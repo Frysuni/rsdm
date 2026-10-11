@@ -145,11 +145,12 @@ impl Coordinator {
         let manager = self.manager.clone();
         let runtime = self.runtime.clone();
         let anchor = self.record.anchor_unit.clone();
+        let config_path = self.record.config_path.clone();
         let events = self.events.clone();
         self.workers += 1;
         tokio::spawn(async move {
             let unit = app.unit.clone();
-            let result = apps::launch(&manager, &runtime, &anchor, &request, app).await;
+            let result = apps::launch(&manager, &runtime, &anchor, &request, app, config_path.as_deref()).await;
             let _ = events.send(Work::Launched(unit, reply, result));
         });
         Ok(())

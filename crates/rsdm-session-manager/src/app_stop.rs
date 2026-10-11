@@ -228,13 +228,13 @@ async fn prepare_xsmp(
     if !cfg!(feature = "xsmp") || units.is_empty() || control.recovery.load(Ordering::SeqCst) {
         return Ok(Vec::new());
     }
-    let result = manager.deadline.bound(async {
+    let result = manager.actions.guard(manager.deadline.bound(async {
         let connection = manager.connection();
         let proxy = zbus::Proxy::new(&connection, super::control::BUS_NAME,
             super::control::OBJECT_PATH, super::control::BUS_NAME).await?;
         let selected = proxy.call("XsmpPrepare", &(&runtime.generation, units, !control.noncancelable.load(Ordering::SeqCst))).await?;
         Ok::<Vec<String>, SessionError>(selected)
-    }).await;
+    })).await?;
     match result {
         Err(error) if control.noncancelable.load(Ordering::SeqCst) => {
             tracing::warn!(%error, "XSMP is unavailable during noncancellable cleanup; using application signals");

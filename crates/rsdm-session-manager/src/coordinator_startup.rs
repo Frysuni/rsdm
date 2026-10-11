@@ -15,6 +15,7 @@ use super::{
 impl Coordinator {
     pub(super) async fn create(
         argv: &[String], cfg: &SessionManagerConfig, options: &StartOptions,
+        actions: super::action_gate::ActionGate, config_path: Option<std::path::PathBuf>,
     ) -> Result<Self, SessionError> {
         let program = argv.first().ok_or(SessionError::EmptyCommand)?;
         let ready_deadline = Instant::now().checked_add(Duration::from_secs(cfg.ready_timeout_secs))
@@ -23,16 +24,16 @@ impl Coordinator {
         let lease = super::runtime::blocking(super::session_lease::SessionLease::acquire).await?;
         let (endpoint, requests) = control::Endpoint::channel(identity.uid);
         // Acquire the one-session lease before changing shared manager state.
-        let bus = control::ControlServer::start(endpoint).await?;
-        let manager = UserManager::connect().await?;
+        let bus = actions.guard(control::ControlServer::start(endpoint)).await??;
+        let manager = UserManager::connect_guarded(super::deadline::Deadline::default(), actions).await?;
         super::processes::require_pidfds()?;
         if manager.active(units::SESSION_TARGET).await? {
             return Err(SessionError::SessionAlreadyActive);
         }
         let provider = Provider::select(argv, &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(), options)?;
         let (notices_sender, notices) = tokio::sync::mpsc::unbounded_channel();
-        let power = ShutdownMonitor::start(notices_sender, "Saving registered graphical applications")
-            .await
+        let power = manager.actions.guard(ShutdownMonitor::start(notices_sender, "Saving registered graphical applications"))
+            .await?
             .map_err(|error| SessionError::State(format!("creating shutdown delay monitor: {error}")))?;
         let generation = identity.generation.clone();
         let runtime = super::runtime::blocking(move || {
@@ -42,7 +43,7 @@ impl Coordinator {
             }
             Ok(runtime)
         }).await?;
-        let xsmp = super::xsmp::Handle::start(&manager, &runtime, &provider).await?;
+        let xsmp = manager.actions.guard(super::xsmp::Handle::start(&manager, &runtime, &provider)).await??;
         let mut environment = identity.command_environment(env::command_environment());
         for (name, value) in &xsmp.environment {
             environment.retain(|(existing, _)| existing != name);
@@ -50,7 +51,8 @@ impl Coordinator {
         }
         let directory = super::runtime::blocking(|| Ok(std::env::current_dir()?)).await?;
         let managed_unit = format!("{}.service", unique_unit_name(ManagedUnitKind::Session, program));
-        let record = initial_record(identity, &provider, &managed_unit, &xsmp.environment);
+        let mut record = initial_record(identity, &provider, &managed_unit, &xsmp.environment);
+        record.config_path = config_path;
         let properties = if provider.kind == ProviderKind::Managed {
             Some(units::compositor_properties(argv, &environment, &directory, &record.anchor_unit).await?)
         } else {
@@ -58,6 +60,10 @@ impl Coordinator {
         };
 
         super::startup::publish(&manager, &runtime, &record).await?;
+        if let Err(error) = manager.actions.check() {
+            super::startup::rollback(&manager, &runtime, &record).await;
+            return Err(error);
+        }
         let process = match SessionProcess::launch(argv, &environment, &directory, &provider, managed_unit) {
             Ok(process) => process,
             Err(error) => {
@@ -70,10 +76,11 @@ impl Coordinator {
         if let Some(properties) = properties {
             let manager = manager.clone();
             let unit = process.unit.clone().expect("managed compositor unit");
+            let submitted = process.submitted.clone();
             let events = events.clone();
             tokio::spawn(async move {
                 let result = async {
-                    manager.start_service(&unit, &properties).await?;
+                    manager.start_service_tracked(&unit, &properties, &submitted).await?;
                     manager.invocation_id(&unit).await
                 }.await;
                 let _ = events.send(Work::Boot(result));
@@ -143,6 +150,7 @@ fn initial_record(
         owns_targets: false,
         phase: SessionPhase::Starting,
         disabled: false,
+        config_path: None,
         exported_environment,
         shutdown_deadline_usec: None,
     }

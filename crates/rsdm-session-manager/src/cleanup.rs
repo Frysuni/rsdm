@@ -10,16 +10,27 @@ use super::{
     runtime::{Runtime, SessionRecord}, units,
 };
 
-pub async fn cleanup(generation: &str) -> Result<(), SessionError> {
+pub async fn cleanup(generation: &str, actions: super::action_gate::ActionGate) -> Result<(), SessionError> {
     let generation = generation.to_string();
     let Some((runtime, _lease, saved_deadline)) = super::runtime::blocking(move || {
         open_recovery(&generation)
     }).await? else { return Ok(()); };
     let deadline = Deadline::default();
     deadline.set(recovery_deadline(saved_deadline, 0)?);
-    let manager = UserManager::connect_until(deadline).await?;
-    acquire_lease(&manager).await?;
-    recover(&manager, &runtime).await
+    let result = async {
+        let manager = UserManager::connect_guarded(deadline, actions.clone()).await?;
+        manager.actions.guard(acquire_lease(&manager)).await??;
+        recover(&manager, &runtime).await
+    }.await;
+    if actions.check().is_err() {
+        super::runtime::blocking(move || {
+            let mut record = runtime.session()?;
+            record.disabled = true;
+            runtime.save_session(&record)
+        }).await?;
+        return Ok(());
+    }
+    result
 }
 
 fn open_recovery(generation: &str) -> Result<Option<(Runtime, super::session_lease::SessionLease, Option<u64>)>, SessionError> {

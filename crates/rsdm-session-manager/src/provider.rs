@@ -79,11 +79,11 @@ impl Provider {
             let connection = manager.connection();
             match self.kind {
                 ProviderKind::Gnome => {
-                    let proxy = zbus::Proxy::new(&connection, "org.gnome.SessionManager", "/org/gnome/SessionManager", "org.gnome.SessionManager").await?;
+                    let proxy = manager.request(zbus::Proxy::new(&connection, "org.gnome.SessionManager", "/org/gnome/SessionManager", "org.gnome.SessionManager")).await?;
                     match action {
-                        "logout" => proxy.call::<_, _, ()>("Logout", &(0_u32,)).await?,
-                        "reboot" => proxy.call::<_, _, ()>("Reboot", &()).await?,
-                        "poweroff" => proxy.call::<_, _, ()>("Shutdown", &()).await?,
+                        "logout" => manager.request(proxy.call::<_, _, ()>("Logout", &(0_u32,))).await?,
+                        "reboot" => manager.request(proxy.call::<_, _, ()>("Reboot", &())).await?,
+                        "poweroff" => manager.request(proxy.call::<_, _, ()>("Shutdown", &())).await?,
                         _ => return Err(SessionError::State("unsupported native session action".into())),
                     }
                 }
@@ -94,8 +94,8 @@ impl Provider {
                         "poweroff" => "promptShutDown",
                         _ => return Err(SessionError::State("unsupported native session action".into())),
                     };
-                    let proxy = zbus::Proxy::new(&connection, "org.kde.LogoutPrompt", "/LogoutPrompt", "org.kde.LogoutPrompt").await?;
-                    proxy.call::<_, _, ()>(method, &()).await?;
+                    let proxy = manager.request(zbus::Proxy::new(&connection, "org.kde.LogoutPrompt", "/LogoutPrompt", "org.kde.LogoutPrompt")).await?;
+                    manager.request(proxy.call::<_, _, ()>(method, &())).await?;
                 }
                 _ => return Err(SessionError::State("this provider does not delegate desktop shutdown".into())),
             }

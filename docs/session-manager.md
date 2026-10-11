@@ -386,7 +386,14 @@ held until PAM is closed/dropped on all these paths.
 monotonic deadline on the host platform. Configuration validation rejects
 unrepresentable values before the session starts.
 
-Disable coordination with `enabled = false`, or
+Disable coordination with `enabled = false`. A running CLI session observes
+validated file updates, including atomic replacement. Disabling detaches the
+coordinator and its private XSMP server without stopping applications or the WM;
+the launcher still waits for the WM to exit before releasing its PAM session.
+Re-enabling does not resume that generation's hooks or recovery. A request
+already accepted by another service may still complete.
+
+Alternatively, set
 `services.rsdm.sessionManager = false` on NixOS. Inspect `rsdm session status`,
 `journalctl --user -b` and the DM journal for readiness/recovery. Enable graphical
 services under `WantedBy=graphical-session.target`.

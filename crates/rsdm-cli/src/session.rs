@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use rsdm_core::domain::{SessionMode, ShutdownMethod, ShutdownPolicy, TimeoutAction};
-use rsdm_infra::{config::load_config_async, unix::split_exec};
+use rsdm_infra::{config::{load_config_async, watch_session_config}, unix::split_exec};
 use rsdm_session_manager as session_manager;
 
 use crate::output;
@@ -82,12 +82,18 @@ pub struct AppOptions {
 }
 
 pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
-    let cfg = load_config_async(path).await?.session_manager;
+    let updates = if matches!(&action, SessionAction::Start { .. } | SessionAction::AppStop { .. } | SessionAction::Cleanup { .. }) {
+        Some(watch_session_config(path).await?)
+    } else { None };
+    let cfg = match &updates {
+        Some(updates) => updates.borrow().config.clone(),
+        None => load_config_async(path).await?.session_manager,
+    };
     match action {
         SessionAction::Start { mode, native_unit, logout_command, compositor } => {
             let logout_command = if cfg.enabled { parse_command(logout_command)? } else { Vec::new() };
             let options = session_manager::StartOptions { mode, native_unit, logout_command };
-            let code = session_manager::start_with_options(&compositor, &cfg, &options).await
+            let code = session_manager::start_with_config_updates(&compositor, updates.expect("start configuration"), &options, path).await
                 .context("running the graphical session")?;
             std::process::exit(code);
         }
@@ -110,10 +116,10 @@ pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
             Ok(())
         }
         SessionAction::AppStop { generation, unit } => {
-            session_manager::stop_hook(&generation, &unit, &cfg).await.context("completing application shutdown")
+            session_manager::stop_hook_with_config_updates(&generation, &unit, updates.expect("hook configuration")).await.context("completing application shutdown")
         }
         SessionAction::Cleanup { generation } => {
-            session_manager::cleanup(&generation, &cfg).await.context("recovering the graphical session")
+            session_manager::cleanup_with_config_updates(&generation, updates.expect("recovery configuration")).await.context("recovering the graphical session")
         }
     }
 }
@@ -140,7 +146,7 @@ pub fn print_outcome(outcome: session_manager::StopOutcome) -> Result<()> {
     for unit in outcome.forced_units {
         output::notice("FORCED SHUTDOWN", format!("forced shutdown: {unit}\n"), output::WARNING).stderr()?;
     }
-    if matches!(outcome.result.as_str(), "failed" | "cancelled") { bail!("session shutdown {}", outcome.result); }
+    if matches!(outcome.result.as_str(), "failed" | "cancelled" | "unknown") { bail!("session shutdown {}", outcome.result); }
     Ok(())
 }
 

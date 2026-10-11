@@ -15,7 +15,14 @@ pub(super) async fn publish(manager: &UserManager, runtime: &Runtime, record: &S
 }
 
 pub(super) async fn rollback(manager: &UserManager, runtime: &Runtime, record: &SessionRecord) {
+    if manager.actions.check().is_err() {
+        record_disabled(runtime, record).await;
+        return;
+    }
     if let Err(error) = env::clear_owned(manager, &record.exported_environment).await {
+        if manager.actions.check().is_err() {
+            record_disabled(runtime, record).await;
+        }
         tracing::warn!(%error, "startup environment rollback failed");
         return;
     }
@@ -24,5 +31,14 @@ pub(super) async fn rollback(manager: &UserManager, runtime: &Runtime, record: &
     let runtime = runtime.clone();
     if let Err(error) = super::runtime::blocking(move || runtime.save_session(&closed)).await {
         tracing::warn!(%error, "could not record startup rollback");
+    }
+}
+
+async fn record_disabled(runtime: &Runtime, record: &SessionRecord) {
+    let mut disabled = record.clone();
+    disabled.disabled = true;
+    let runtime = runtime.clone();
+    if let Err(error) = super::runtime::blocking(move || runtime.save_session(&disabled)).await {
+        tracing::error!(%error, "could not record disabled startup");
     }
 }

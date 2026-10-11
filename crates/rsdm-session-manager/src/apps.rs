@@ -55,8 +55,9 @@ pub(super) async fn register(
 
 pub(super) async fn launch(
     manager: &UserManager, runtime: &Runtime, anchor: &str, request: &LaunchRequest, mut app: AppRecord,
+    config_path: Option<&Path>,
 ) -> Result<String, SessionError> {
-    let properties = match launch_properties(runtime, anchor, request, &app).await {
+    let properties = match launch_properties(runtime, anchor, request, &app, config_path).await {
         Ok(properties) => properties,
         Err(error) => return Err(rollback_launch(manager, runtime, &app, error).await),
     };
@@ -91,14 +92,20 @@ pub(super) async fn launch(
 
 async fn launch_properties(
     runtime: &Runtime, anchor: &str, request: &LaunchRequest, app: &AppRecord,
+    config_path: Option<&Path>,
 ) -> Result<UnitProperties, SessionError> {
     let mut environment = request.environment.clone();
     environment.retain(|(name, _)| name != GENERATION_ENV);
     environment.push((GENERATION_ENV.into(), runtime.generation.clone()));
     let mut properties = app_properties(&request.argv, &environment, Path::new(&request.directory), Some(anchor)).await?;
     let executable = blocking(|| Ok(std::env::current_exe()?)).await?.to_string_lossy().into_owned();
-    let stop_command = vec![(executable.clone(), vec![executable, "session".into(), "app-stop".into(),
-        "--generation".into(), runtime.generation.clone(), "--unit".into(), app.unit.clone()], vec!["no-env-expand".to_string()])];
+    let mut stop_argv = vec![executable.clone()];
+    if let Some(path) = config_path {
+        let path = path.to_str().ok_or_else(|| SessionError::State("hook configuration path is not valid UTF-8".into()))?;
+        stop_argv.extend(["--config".into(), path.into()]);
+    }
+    stop_argv.extend(["session".into(), "app-stop".into(), "--generation".into(), runtime.generation.clone(), "--unit".into(), app.unit.clone()]);
+    let stop_command = vec![(executable, stop_argv, vec!["no-env-expand".to_string()])];
     properties.extend([
         ("ExecStopEx", Value::new(stop_command)),
         ("TimeoutStopUSec", Value::from(app.policy.timeout_secs.saturating_add(20).saturating_mul(1_000_000))),
@@ -165,7 +172,7 @@ pub(super) async fn reset_preparation(runtime: &Runtime) -> Result<(), SessionEr
     }).await
 }
 
-pub async fn stop_hook(generation: &str, unit: &str) -> Result<(), SessionError> {
+pub async fn stop_hook(generation: &str, unit: &str, actions: super::action_gate::ActionGate) -> Result<(), SessionError> {
     let generation = generation.to_string();
     let Some((runtime, saved)) = blocking(move || {
         let runtime = Runtime::open(&generation)?.ok_or_else(|| SessionError::State("session recovery record is missing".into()))?;
@@ -175,12 +182,20 @@ pub async fn stop_hook(generation: &str, unit: &str) -> Result<(), SessionError>
     }).await? else { return Ok(()); };
     let deadline = Deadline::default();
     if let Some(saved) = saved { deadline.set(saved); }
-    let manager = UserManager::connect_until(deadline).await?;
+    let manager = match UserManager::connect_guarded(deadline, actions.clone()).await {
+        Ok(manager) => manager,
+        Err(_) if actions.check().is_err() => return Ok(()),
+        Err(error) => return Err(error),
+    };
     let control = super::app_stop::ShutdownControl::for_manager(&manager);
     control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
-    pin_pending(&manager, &runtime, unit).await?;
-    super::app_stop::prepare_app(&manager, &runtime, unit, &control).await?;
-    Ok(())
+    let result = async {
+        pin_pending(&manager, &runtime, unit).await?;
+        super::app_stop::prepare_app(&manager, &runtime, unit, &control).await?;
+        Ok(())
+    }.await;
+    if actions.check().is_err() { return Ok(()); }
+    result
 }
 
 pub(super) async fn pin_pending(manager: &UserManager, runtime: &Runtime, unit: &str) -> Result<bool, SessionError> {

@@ -31,7 +31,7 @@ pub(super) enum Work {
     Prepared(Result<Vec<String>, SessionError>),
     Delegated(Result<(), SessionError>),
     PowerRequested(Result<(), SessionError>),
-    Finished(Result<(), SessionError>),
+    Finished(SessionProcess, Result<(), SessionError>),
 }
 
 pub(super) struct Coordinator {
@@ -74,10 +74,39 @@ pub(super) struct Coordinator {
     pub _lease: super::session_lease::SessionLease,
 }
 
-pub(super) async fn start(argv: &[String], cfg: &SessionManagerConfig, options: &StartOptions) -> Result<i32, SessionError> {
+pub(super) async fn start(
+    argv: &[String], cfg: &SessionManagerConfig, options: &StartOptions,
+    actions: super::action_gate::ActionGate, config_path: Option<PathBuf>,
+) -> Result<i32, SessionError> {
     let mut signals = super::signals::Signals::new()?;
-    let mut coordinator = Coordinator::create(argv, cfg, options).await?;
+    let created = Coordinator::create(argv, cfg, options, actions.clone(), config_path).await;
+    let mut coordinator = match created {
+        Ok(coordinator) => coordinator,
+        Err(_) if actions.check().is_err() => {
+            drop(actions);
+            return super::plain_launch::run(argv).await;
+        },
+        Err(error) => return Err(error),
+    };
+    let launcher = coordinator.process.as_ref().expect("session process").clone();
     let result = coordinator.run(&mut signals).await;
+    if actions.check().is_err() {
+        let disabled = coordinator.disable().await;
+        let process = coordinator.process.take().unwrap_or(launcher);
+        let record = coordinator.record.clone();
+        let provider = coordinator.provider.clone();
+        let connection = coordinator.manager.connection();
+        drop(coordinator);
+        drop(actions);
+        if process.child.is_none() && !process.submitted.load(std::sync::atomic::Ordering::Acquire) {
+            drop(connection);
+            disabled?;
+            return super::plain_launch::run(argv).await;
+        }
+        let code = super::session_wait::wait(process, &record, &provider, connection).await?;
+        disabled?;
+        return Ok(code);
+    }
     if result.as_ref().map_or(true, |code| *code != 0) {
         coordinator.recover().await;
     }
@@ -95,6 +124,8 @@ impl Coordinator {
         let mut notices_open = true;
         loop {
             tokio::select! {
+                biased;
+                _ = self.manager.actions.wait_closed() => return Ok(self.exit_code),
                 request = self.requests.recv() => {
                     let request = request.ok_or_else(|| SessionError::State("session control channel closed".into()))?;
                     self.request(request).await?;
@@ -154,6 +185,10 @@ impl Coordinator {
     }
 
     pub(super) async fn completed(&mut self, work: Work) -> Result<(), SessionError> {
+        if self.manager.actions.check().is_err() {
+            self.disabled_completed(work);
+            return Ok(());
+        }
         self.workers = self.workers.saturating_sub(1);
         match work {
             Work::Observed(result) => self.observation_completed(result).await?,
@@ -168,7 +203,8 @@ impl Coordinator {
             Work::Prepared(result) => self.prepared(result).await?,
             Work::Delegated(result) => self.delegated(result).await?,
             Work::PowerRequested(result) => self.power_requested(result).await?,
-            Work::Finished(result) => {
+            Work::Finished(process, result) => {
+                self.process = Some(process);
                 match result {
                     Ok(()) => self.respond_stop("completed", "session processes stopped"),
                     Err(error) => {

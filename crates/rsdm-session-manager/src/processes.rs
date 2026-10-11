@@ -72,6 +72,7 @@ pub(super) async fn signal_app(manager: &UserManager, app: &AppRecord, signal: i
         }
         if !verify_invocation(manager, app).await? { return Ok(()); }
         let group = group.clone();
+        let actions = manager.actions.clone();
         super::runtime::blocking(move || {
             for (pid, handle) in pinned {
                 let membership = match std::fs::read_to_string(format!("/proc/{pid}/cgroup")) {
@@ -79,7 +80,10 @@ pub(super) async fn signal_app(manager: &UserManager, app: &AppRecord, signal: i
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                     Err(error) => return Err(error.into()),
                 };
-                if belongs_to_cgroup(&membership, &group) { handle.signal(signal)?; }
+                if belongs_to_cgroup(&membership, &group) {
+                    actions.check()?;
+                    handle.signal(signal)?;
+                }
             }
             Ok(())
         }).await?;
@@ -121,6 +125,7 @@ pub(super) async fn terminate_main(manager: &UserManager, app: &AppRecord) -> Re
         return signal_app(manager, app, libc::SIGTERM).await;
     };
     if app_processes(manager, app).await?.contains(&main) {
+        manager.actions.check()?;
         handle.signal(libc::SIGTERM)?;
     }
     Ok(())

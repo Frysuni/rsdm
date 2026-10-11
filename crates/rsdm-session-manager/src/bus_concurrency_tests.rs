@@ -170,3 +170,38 @@ async fn a_revised_deadline_is_checked_when_a_queued_request_gets_a_slot() {
     assert_eq!(fixture.next_call().await, "UnsetEnvironment");
     assert!(fixture.entered.try_recv().is_err());
 }
+
+#[tokio::test]
+async fn disabling_cancels_inflight_reads_and_never_dispatches_a_queued_mutation() {
+    let mut fixture = Fixture::new().await;
+    let mut workers = fixture.fill_slots().await;
+    let manager = fixture.manager.clone();
+    workers.spawn(async move { manager.set_environment(&["EXAMPLE=1".into()]).await });
+    tokio::task::yield_now().await;
+    fixture.manager.actions.close();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while let Some(result) = workers.join_next().await { assert!(result.unwrap().is_err()); }
+    }).await.unwrap();
+    fixture.state.replies.add_permits(4);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while fixture.state.in_flight.load(Ordering::SeqCst) > 0 { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    assert!(fixture.entered.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn cancelling_an_accepted_mutation_does_not_claim_to_undo_it() {
+    let mut fixture = Fixture::new().await;
+    let manager = fixture.manager.clone();
+    let worker = tokio::spawn(async move { manager.set_environment(&["EXAMPLE=1".into()]).await });
+    assert_eq!(fixture.next_call().await, "SetEnvironment");
+    fixture.manager.actions.close();
+    assert!(tokio::time::timeout(Duration::from_secs(1), worker).await.unwrap().unwrap().is_err());
+    assert_eq!(fixture.state.in_flight.load(Ordering::SeqCst), 1);
+    fixture.state.replies.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while fixture.state.in_flight.load(Ordering::SeqCst) > 0 { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    assert!(fixture.entered.try_recv().is_err());
+}

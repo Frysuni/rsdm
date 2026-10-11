@@ -38,6 +38,11 @@ impl Server {
         Self { connection, endpoint, checked: Instant::now(), pending: None }
     }
 
+    pub fn close_admission(&mut self) {
+        self.endpoint.admission.close();
+        self.pending = None;
+    }
+
     pub fn maintain(&mut self) {
         if let Some(pending) = &mut self.pending {
             let result = match pending.result.try_recv() {

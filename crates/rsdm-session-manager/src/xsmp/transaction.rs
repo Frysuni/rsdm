@@ -73,7 +73,7 @@ impl Server {
     }
 
     pub async fn advance(&mut self) -> Result<(), SessionError> {
-        self.start_pending_saves();
+        self.start_pending_saves()?;
         if self.peers.iter().any(|peer| peer.selected && (peer.cancellation_requested || peer.phase == Phase::Failed)) {
             let failure = self.peers.iter().find(|peer| peer.selected && peer.phase == Phase::Failed).map(|peer| peer.unit.clone());
             if self.cancellable {
@@ -92,6 +92,7 @@ impl Server {
         if protocol::phase2_ready(&phases) {
             for peer in &mut self.peers {
                 if peer.selected && peer.phase == Phase::Phase2Waiting {
+                    self.manager.actions.check()?;
                     peer.phase = Phase::Phase2Saving;
                     unsafe { ffi::SmsSaveYourselfPhase2(peer.sms); }
                 }
@@ -99,6 +100,7 @@ impl Server {
         } else if protocol::die_ready(&phases) {
             for peer in &mut self.peers {
                 if peer.selected && peer.phase == Phase::Saved {
+                    self.manager.actions.check()?;
                     peer.phase = Phase::Dying;
                     unsafe { ffi::SmsDie(peer.sms); }
                 }
@@ -107,8 +109,10 @@ impl Server {
         Ok(())
     }
 
-    fn start_pending_saves(&mut self) {
+    fn start_pending_saves(&mut self) -> Result<(), SessionError> {
+        self.manager.actions.check()?;
         for peer in &mut self.peers {
+            self.manager.actions.check()?;
             if matches!(peer.phase, Phase::InitialDone | Phase::CancelledDone) {
                 unsafe { ffi::SmsSaveComplete(peer.sms); }
                 peer.phase = Phase::Idle;
@@ -122,6 +126,7 @@ impl Server {
                 unsafe { ffi::SmsSaveYourself(peer.sms, 1, 0, 0, 0); }
             }
         }
+        Ok(())
     }
 
     async fn expire_saves(&mut self) -> Result<bool, SessionError> {
@@ -147,6 +152,7 @@ impl Server {
     }
 
     fn grant_interaction(&mut self) {
+        if self.manager.actions.check().is_err() { return; }
         if self.peers.iter().any(|peer| peer.interacting) { return; }
         if let Some(peer) = self.peers.iter_mut().find(|peer| peer.selected && peer.interaction_requested && peer.phase.saving()) {
             peer.interaction_requested = false;

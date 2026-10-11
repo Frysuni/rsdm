@@ -1,6 +1,7 @@
 use std::{fs, sync::atomic::{AtomicU64, Ordering}};
 
 use super::*;
+use rsdm_core::domain::SessionManagerConfig;
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -35,16 +36,16 @@ impl Drop for ConfigFile {
     fn drop(&mut self) { fs::remove_dir_all(&self.directory).unwrap(); }
 }
 
-async fn changed(receiver: &mut watch::Receiver<SessionManagerConfig>) -> SessionManagerConfig {
+async fn changed(receiver: &mut watch::Receiver<SessionManagerUpdate>) -> SessionManagerConfig {
     tokio::time::timeout(Duration::from_secs(3), receiver.changed()).await.unwrap().unwrap();
-    receiver.borrow_and_update().clone()
+    receiver.borrow_and_update().config.clone()
 }
 
 #[tokio::test]
 async fn observes_in_place_edits_and_atomic_replacement() {
     let file = tokio::task::spawn_blocking(ConfigFile::new).await.unwrap();
     let mut receiver = watch_session_config(&file.path).await.unwrap();
-    assert!(receiver.borrow_and_update().enabled);
+    assert!(receiver.borrow_and_update().config.enabled);
 
     let path = file.path.clone();
     tokio::task::spawn_blocking(move || fs::write(path, "[session_manager]\nenabled = false\n"))
@@ -69,12 +70,12 @@ async fn keeps_the_last_valid_policy_and_recovers_after_missing_file() {
 
     file.replace("[session_manager]\nenabled = false\nready_timeout_secs = 9223372036854775807\n").await;
     assert!(tokio::time::timeout(POLL_INTERVAL * 3, receiver.changed()).await.is_err());
-    assert!(receiver.borrow().enabled);
+    assert!(receiver.borrow().config.enabled);
 
     let path = file.path.clone();
     tokio::task::spawn_blocking(move || fs::remove_file(path)).await.unwrap().unwrap();
     assert!(tokio::time::timeout(POLL_INTERVAL * 3, receiver.changed()).await.is_err());
-    assert!(receiver.borrow().enabled);
+    assert!(receiver.borrow().config.enabled);
 
     file.replace("[session_manager]\nenabled = false\n").await;
     assert!(!changed(&mut receiver).await.enabled);
@@ -90,11 +91,28 @@ async fn invalid_initial_policy_is_rejected() {
 #[tokio::test]
 async fn monitoring_ends_only_after_all_receivers_are_dropped() {
     let file = tokio::task::spawn_blocking(ConfigFile::new).await.unwrap();
-    let (sender, receiver) = watch::channel(SessionManagerConfig::default());
+    let (sender, receiver) = watch::channel(SessionManagerUpdate::from(SessionManagerConfig::default()));
     let clone = receiver.clone();
     let mut worker = tokio::spawn(monitor(file.path.clone(), sender));
     drop(receiver);
     assert!(tokio::time::timeout(POLL_INTERVAL * 2, &mut worker).await.is_err());
     drop(clone);
     tokio::time::timeout(Duration::from_secs(1), worker).await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn re_enabling_keeps_the_disable_transition_when_the_receiver_skips_values() {
+    let file = tokio::task::spawn_blocking(ConfigFile::new).await.unwrap();
+    let receiver = watch_session_config(&file.path).await.unwrap();
+    file.replace("[session_manager]\nenabled = false\n").await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while receiver.borrow().disable_count == 0 { tokio::time::sleep(Duration::from_millis(10)).await; }
+    }).await.unwrap();
+    file.replace("[session_manager]\nenabled = true\n").await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !receiver.borrow().config.enabled { tokio::time::sleep(Duration::from_millis(10)).await; }
+    }).await.unwrap();
+    let update = receiver.borrow();
+    assert!(update.config.enabled);
+    assert_eq!(update.disable_count, 1);
 }

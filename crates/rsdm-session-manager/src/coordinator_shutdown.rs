@@ -59,7 +59,7 @@ impl Coordinator {
                     apps.retain(|app| app.policy.method != ShutdownMethod::Auto || !app.policy.quit_command.is_empty());
                 }
                 if !native && matches!(action.as_str(), "poweroff" | "reboot") {
-                    manager.deadline.bound(rsdm_system::logind::check(&action)).await?;
+                    manager.actions.guard(manager.deadline.bound(rsdm_system::logind::check(&action))).await??;
                 }
                 app_stop::prepare_apps(&manager, &runtime, apps, control).await
             }.await;
@@ -96,10 +96,11 @@ impl Coordinator {
             let action = self.action.clone();
             let events = self.events.clone();
             self.workers += 1;
-            let deadline = self.manager.deadline.clone();
+            let manager = self.manager.clone();
             tokio::spawn(async move {
-                let result = deadline.bound(rsdm_system::logind::request_direct(&action)).await;
-                let _ = events.send(Work::PowerRequested(result.map_err(SessionError::from)));
+                let result = manager.actions.guard(manager.deadline.bound(rsdm_system::logind::request_direct(&action))).await
+                    .and_then(|result| result.map_err(SessionError::from));
+                let _ = events.send(Work::PowerRequested(result));
             });
             return Ok(());
         }
@@ -132,11 +133,14 @@ impl Coordinator {
         let runtime = self.runtime.clone();
         let record = self.record.clone();
         let provider = self.provider.clone();
-        let process = self.process.take().expect("session process");
+        let mut process = self.process.take().expect("session process");
         let directory = self.directory.clone();
         let events = self.events.clone();
         self.workers += 1;
-        tokio::spawn(async move { let _ = events.send(Work::Finished(finish(&manager, &runtime, &record, &provider, process, directory).await)); });
+        tokio::spawn(async move {
+            let result = finish(&manager, &runtime, &record, &provider, &mut process, directory).await;
+            let _ = events.send(Work::Finished(process, result));
+        });
         Ok(())
     }
 
@@ -175,7 +179,7 @@ impl Coordinator {
 }
 
 async fn finish(
-    manager: &UserManager, runtime: &Runtime, record: &SessionRecord, provider: &Provider, mut process: SessionProcess, directory: PathBuf,
+    manager: &UserManager, runtime: &Runtime, record: &SessionRecord, provider: &Provider, process: &mut SessionProcess, directory: PathBuf,
 ) -> Result<(), SessionError> {
     let mut failure = None;
     let mut cleanup_manager = manager.clone();

@@ -89,6 +89,7 @@ impl Coordinator {
                 self.process = result.process;
             }
             Work::Boot(Ok(id)) => self.record.compositor_invocation = id,
+            Work::Finished(process, _) => self.process = Some(process),
             Work::Ready(Ok(owns)) => self.record.owns_targets |= owns,
             Work::Launched(_, reply, _) => {
                 let _ = reply.try_send(Err("session coordinator failed".into()));

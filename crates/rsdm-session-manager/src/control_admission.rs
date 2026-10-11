@@ -1,6 +1,6 @@
 //! Admission follows a request through queueing, workers, and reply delivery.
 
-use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
 
 use tokio::sync::mpsc::{Sender, error::TrySendError};
 
@@ -20,6 +20,7 @@ pub(super) enum Class {
 
 #[derive(Clone, Default)]
 pub(super) struct Admission {
+    closed: Arc<AtomicBool>,
     regular: Arc<AtomicUsize>,
     stop: Arc<AtomicUsize>,
     cancel: Arc<AtomicUsize>,
@@ -27,7 +28,12 @@ pub(super) struct Admission {
 }
 
 impl Admission {
+    pub fn close(&self) { self.closed.store(true, Ordering::Release); }
+
     pub fn acquire(&self, class: Class) -> zbus::fdo::Result<Arc<Permit>> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(zbus::fdo::Error::Failed("session manager is disabled".into()));
+        }
         let (pending, limit) = match class {
             Class::Regular => (&self.regular, MAX_REGULAR_REQUESTS),
             Class::Stop => (&self.stop, MAX_STOP_REQUESTS),
@@ -38,7 +44,11 @@ impl Admission {
             if count >= limit { return None; }
             Some(count + 1)
         }).map_err(|_| zbus::fdo::Error::LimitsExceeded("session coordinator is busy; retry the request".into()))?;
-        Ok(Arc::new(Permit { pending: pending.clone() }))
+        let permit = Arc::new(Permit { pending: pending.clone() });
+        if self.closed.load(Ordering::Acquire) {
+            return Err(zbus::fdo::Error::Failed("session manager is disabled".into()));
+        }
+        Ok(permit)
     }
 }
 

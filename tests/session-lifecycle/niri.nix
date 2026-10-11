@@ -105,5 +105,5 @@ pkgs.testers.runNixOSTest {
         machine.succeed("test -e /run/user/1000/niri-app-saved")
         machine.wait_until_fails(user + "systemctl --user is-active --quiet niri.service")
         machine.wait_for_file("/tmp/rsdm-niri-exited")
-  '';
+  '' + (import ./niri-hot-disable.nix { inherit application; });
 }
