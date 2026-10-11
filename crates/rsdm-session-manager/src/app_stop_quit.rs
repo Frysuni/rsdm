@@ -11,10 +11,11 @@ use crate::{SessionError, bus::UserManager, processes::{app_processes, terminate
 
 pub(super) async fn request_quit(manager: &UserManager, runtime: &Runtime, app: &AppRecord, control: &ShutdownControl) -> Result<Option<String>, SessionError> {
     if !app.policy.quit_command.is_empty() {
+        let anchor = quit_anchor(manager, runtime).await?;
         if !crate::app_dispatch::claim(runtime, app, control.transaction_id.as_deref(), crate::app_dispatch::Method::Command, &manager.deadline).await? {
             return Ok(None);
         }
-        let dispatched = launch_quit(manager, app, &runtime.generation).await;
+        let dispatched = launch_quit(manager, app, &anchor).await;
         let state = if dispatched.is_ok() { crate::app_dispatch::State::Sent }
             else if matches!(&dispatched, Err(SessionError::StartRejected { reference_retained: false, .. })) { crate::app_dispatch::State::NotSent }
             else { crate::app_dispatch::State::Intent };
@@ -62,7 +63,22 @@ pub(super) async fn prepare_xsmp(
     })).await?
 }
 
-pub(super) async fn launch_quit(manager: &UserManager, app: &AppRecord, generation: &str) -> Result<String, SessionError> {
+async fn quit_anchor(manager: &UserManager, runtime: &Runtime) -> Result<String, SessionError> {
+    let records = runtime.clone();
+    let record = crate::runtime::blocking(move || records.session()).await?;
+    if record.disabled { return Err(SessionError::Disabled); }
+    if record.provider != "partial" { return Ok(record.anchor_unit); }
+    let (unit, invocation) = record.coordinator_unit
+        .ok_or_else(|| SessionError::State("attached coordinator ownership is missing".into()))?;
+    if unit != crate::attach::UNIT || invocation.is_empty() || invocation.iter().all(|byte| *byte == 0)
+        || manager.invocation_id(&unit).await? != invocation
+    {
+        return Err(SessionError::State("attached coordinator invocation changed before quit dispatch".into()));
+    }
+    Ok(unit)
+}
+
+pub(super) async fn launch_quit(manager: &UserManager, app: &AppRecord, anchor: &str) -> Result<String, SessionError> {
     let unit = app.unit.replacen("app-rsdm-", "rsdm-quit-", 1);
     let environment: Vec<String> = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Service", "Environment").await?;
     let environment: Vec<_> = environment.iter().filter_map(|entry| entry.split_once('=')
@@ -72,8 +88,8 @@ pub(super) async fn launch_quit(manager: &UserManager, app: &AppRecord, generati
     properties.extend([
         ("Slice", Value::from(crate::units::APP_SLICE)),
         ("TimeoutStopUSec", Value::from(1_000_000_u64)),
-        ("PartOf", Value::new(vec![format!("rsdm-session-{generation}.service")])),
-        ("Requisite", Value::new(vec![format!("rsdm-session-{generation}.service")])),
+        ("PartOf", Value::new(vec![anchor.to_string()])),
+        ("Requisite", Value::new(vec![anchor.to_string()])),
     ]);
     if let Err(error) = manager.start_service(&unit, &properties).await {
         if !matches!(error, SessionError::StartRejected { .. }) {
@@ -90,3 +106,7 @@ pub(super) async fn release_quit(manager: &UserManager, unit: &str) {
     }
     let _ = manager.unref(unit).await;
 }
+
+#[cfg(test)]
+#[path = "app_stop_quit_tests.rs"]
+mod tests;

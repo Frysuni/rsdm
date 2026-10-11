@@ -28,7 +28,9 @@ rejected even when its environment contains the current generation.
 Attached status uses provider `partial`. Application units do not require
 `graphical-session.target` or an external anchor. Environment and a private XSMP
 endpoint are scoped to new managed applications; the user's global environment
-remains untouched. `session stop` prepares registered applications and returns
+remains untouched. Quit-command helpers bind to the attached coordinator's
+verified invocation and run with the application's environment and working
+directory. `session stop` prepares registered applications and returns
 `prepared`, retaining the external WM. Power requests prepare these applications
 before requesting logind; disabling releases only the attached coordinator.
 Native desktop delegation and window-close capabilities require verified backend

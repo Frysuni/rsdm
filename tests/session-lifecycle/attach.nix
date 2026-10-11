@@ -15,6 +15,21 @@ let
     touch "$XDG_RUNTIME_DIR/attach-app-ready"
     while :; do sleep 1; done
   '';
+  commandApplication = pkgs.writeShellScript "test-attached-command-app" ''
+    set -eu
+    trap "" TERM INT
+    fifo="$XDG_RUNTIME_DIR/attach-quit-request"
+    mkfifo "$fifo"
+    touch "$XDG_RUNTIME_DIR/attach-command-ready"
+    read -r request < "$fifo"
+    test "$request" = quit
+    test ! -e "$XDG_RUNTIME_DIR/attach-wm-stopped"
+    touch "$XDG_RUNTIME_DIR/attach-command-saved"
+    rm "$fifo"
+  '';
+  quitCommand = pkgs.writeShellScript "test-attached-quit-command" ''
+    printf 'quit\n' > "$XDG_RUNTIME_DIR/attach-quit-request"
+  '';
 in pkgs.testers.runNixOSTest {
   name = "rsdm-session-attach";
   globalTimeout = 120;
@@ -71,6 +86,15 @@ in pkgs.testers.runNixOSTest {
         assert machine.succeed("systemctl show rsdm-test-external-session -p MainPID -p InvocationID") == wm
         machine.succeed("loginctl show-session " + record["identity"]["login_session_id"])
         machine.fail("test -e " + runtime + "/attach-wm-stopped")
+        assert machine.succeed(user + "systemctl --user show-environment") == before
+    with subtest("quit-command helpers use the independent coordinator without a graphical anchor"):
+        machine.succeed(session + "rsdm app --quit-command ${quitCommand} -- ${commandApplication}")
+        machine.wait_for_file(runtime + "/attach-command-ready")
+        output = machine.succeed(session + "rsdm session stop")
+        assert "prepared" in output, output
+        machine.wait_for_file(runtime + "/attach-command-saved")
+        machine.fail(user + "systemctl --user is-active --quiet graphical-session.target")
+        assert machine.succeed("systemctl show rsdm-test-external-session -p MainPID -p InvocationID") == wm
         assert machine.succeed(user + "systemctl --user show-environment") == before
     with subtest("hot disable drops only the attached coordinator"):
         machine.succeed("printf '[session_manager]\\nenabled = false\\n' > /etc/rsdm-toggle.toml; mv /etc/rsdm-toggle.toml /etc/rsdm.toml")
