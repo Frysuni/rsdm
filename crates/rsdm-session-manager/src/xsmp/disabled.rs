@@ -19,7 +19,7 @@ impl Handle {
 
     pub async fn shutdown(&mut self, _deadline: &Deadline) -> Result<(), SessionError> { Ok(()) }
 
-    pub fn prepare(&self, _units: Vec<String>, _cancellable: bool, reply: Reply<Vec<String>>) {
+    pub fn prepare(&self, _units: Vec<String>, _transaction_id: String, _cancellable: bool, reply: Reply<Vec<String>>) {
         let _ = reply.try_send(Ok(Vec::new()));
     }
 

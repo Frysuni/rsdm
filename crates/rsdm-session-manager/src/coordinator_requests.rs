@@ -31,7 +31,7 @@ impl Coordinator {
                 self.replies_pending = self.replies_pending.saturating_sub(1);
                 drop(permit);
             }
-            Request::XsmpPrepare { generation, units, cancellable, reply } => {
+            Request::XsmpPrepare { generation, transaction_id, units, cancellable, reply } => {
                 if generation != self.runtime.generation || self.lifecycle.phase == SessionPhase::Closed {
                     let _ = reply.try_send(Err("session generation is stale or closed".into()));
                 } else {
@@ -39,7 +39,14 @@ impl Coordinator {
                         && self.shutdown.as_ref().is_some_and(|control| {
                             !control.noncancelable.load(Ordering::SeqCst)
                         });
-                    self.xsmp.prepare(units, allowed, reply);
+                    let current = self.record.shutdown_transaction.as_ref().map(|transaction| transaction.id.as_str()).unwrap_or("");
+                    if current != transaction_id || (!transaction_id.is_empty()
+                        && self.record.shutdown_transaction.as_ref().is_some_and(|transaction| transaction.result.is_some()))
+                    {
+                        let _ = reply.try_send(Err("shutdown transaction is stale".into()));
+                    } else {
+                        self.xsmp.prepare(units, transaction_id, allowed, reply);
+                    }
                 }
             }
         }

@@ -58,7 +58,9 @@ pub(super) async fn recover(manager: &UserManager, runtime: &Runtime) -> Result<
     let records = runtime.clone();
     let mut record = super::runtime::blocking(move || records.session()).await?;
     if record.disabled { return Ok(()); }
-    let control = std::sync::Arc::new(ShutdownControl::for_manager(manager));
+    let mut control = ShutdownControl::for_manager(manager);
+    control.transaction_id = record.shutdown_transaction.as_ref().map(|transaction| transaction.id.clone());
+    let control = std::sync::Arc::new(control);
     control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
     control.recovery.store(true, std::sync::atomic::Ordering::SeqCst);
     let deadline = recovery_deadline(record.shutdown_deadline_usec, manager.deadline.get())?;

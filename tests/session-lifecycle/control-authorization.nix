@@ -4,7 +4,7 @@
         return [
             ["Handshake"], ["Attach"], ["Status"], ["Cancel", "s", generation],
             ["Stop", "ss", generation, "logout"], ["Finalize", "sa(ss)", generation, "0"],
-            ["XsmpPrepare", "sasb", generation, "0", "true"],
+            ["XsmpPrepare", "ssasb", generation, "", "0", "true"],
             ["Launch", "(sasa(ss)stssas)", generation, "1", "${application}", "0", "/", "30", "force", "auto", "0"],
         ]
 

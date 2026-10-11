@@ -93,7 +93,8 @@ fn other_methods_reject_invalid_or_excessive_inputs() {
     assert!(validate_finalize(&request.generation, &[("BAD-NAME".into(), "value".into())]).is_err());
     assert!(validate_finalize(&request.generation, &[("NAME".into(), "bad\0value".into())]).is_err());
     let units = vec!["example.service".into(); MAX_ARGUMENTS + 1];
-    assert!(validate_xsmp(&request.generation, &units).is_err());
+    assert!(validate_xsmp(&request.generation, "", &units).is_err());
     validate_stop(&request.generation, "logout").unwrap();
-    validate_xsmp(&request.generation, &["example.service".into()]).unwrap();
+    validate_xsmp(&request.generation, "", &["example.service".into()]).unwrap();
+    assert!(validate_xsmp(&request.generation, &"a".repeat(65_537), &[]).is_err());
 }

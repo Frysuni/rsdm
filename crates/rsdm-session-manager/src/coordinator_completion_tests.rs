@@ -227,6 +227,8 @@ async fn resuming_waits_for_the_record_lease_without_blocking_timers() {
         unit: crate::unit_name::app_unit_name("test", GENERATION), invocation_id: vec![1; 16],
         policy: Default::default(), deadline_usec: Some(monotonic_usec().unwrap() + 30_000_000),
         quit_started: true,
+        dispatch: None,
+        window_close_sent: false,
     };
     fixture.coordinator.runtime.save_app(&app).unwrap();
     fixture.coordinator.begin_stop("logout", None).await.unwrap();
@@ -243,7 +245,7 @@ async fn resuming_waits_for_the_record_lease_without_blocking_timers() {
     }
     let restored = fixture.coordinator.runtime.app(&app.unit).unwrap();
     assert_eq!(restored.deadline_usec, None);
-    assert!(!restored.quit_started);
+    assert!(restored.quit_started);
     assert_eq!(fixture.coordinator.runtime.session().unwrap().phase, SessionPhase::Running);
 }
 

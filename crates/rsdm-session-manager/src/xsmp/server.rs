@@ -20,6 +20,7 @@ pub(super) struct Server {
     messages: UnboundedReceiver<Message>,
     pub notices: UnboundedSender<Notice>,
     pub cancellable: bool,
+    pub transaction_id: Option<String>,
     announced: HashSet<String>,
     interrupt: Arc<Interrupt>,
     _listener_sockets: Vec<Arc<OwnedFd>>,
@@ -98,7 +99,7 @@ impl Server {
             (&*admission as *const Admission).cast_mut().cast(), None, 256, error.as_mut_ptr()) };
         if initialized == 0 { return Err(SessionError::State("could not initialize XSMP".into())); }
         Ok(Self { manager, runtime, peers: Vec::new(), listeners, _authority: authority, admission,
-            messages, notices, cancellable: true, announced: HashSet::new(), interrupt,
+            messages, notices, cancellable: true, transaction_id: None, announced: HashSet::new(), interrupt,
             _listener_sockets: listener_sockets })
     }
 
@@ -129,8 +130,8 @@ impl Server {
 
     async fn message(&mut self, message: Message) -> Result<(), SessionError> {
         match message {
-            Message::Prepare { units, cancellable, reply } => {
-                let result = self.prepare(&units, cancellable).await.map_err(|error| error.to_string());
+            Message::Prepare { units, transaction_id, cancellable, reply } => {
+                let result = self.prepare(&units, &transaction_id, cancellable).await.map_err(|error| error.to_string());
                 let _ = reply.try_send(result);
             }
             Message::Cancel => self.cancel(),

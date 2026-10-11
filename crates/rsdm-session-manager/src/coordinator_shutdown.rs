@@ -20,10 +20,13 @@ impl Coordinator {
             let transaction = super::shutdown_transaction::ShutdownTransaction::start(&self.runtime, action, hard_deadline).await?;
             self.manager.deadline.set(transaction.deadline_usec);
             self.record.shutdown_deadline_usec = Some(transaction.deadline_usec);
+            let transaction_id = transaction.id.clone();
             self.record.shutdown_transaction = Some(transaction);
             self.forced_units.clear();
             self.action = action.to_string();
-            self.shutdown = Some(Arc::new(ShutdownControl::for_manager(&self.manager)));
+            let mut control = ShutdownControl::for_manager(&self.manager);
+            control.transaction_id = Some(transaction_id);
+            self.shutdown = Some(Arc::new(control));
         }
         if let Some(proposed) = hard_deadline {
             let control = self.shutdown.as_ref().expect("shutdown control");

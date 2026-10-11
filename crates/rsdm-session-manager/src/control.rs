@@ -73,7 +73,7 @@ pub(super) enum Request {
     Stop { generation: String, action: String, reply: Reply<StopOutcome> },
     Cancel { generation: String, reply: Reply<()> },
     Status(Reply<SessionStatus>),
-    XsmpPrepare { generation: String, units: Vec<String>, cancellable: bool, reply: Reply<Vec<String>> },
+    XsmpPrepare { generation: String, transaction_id: String, units: Vec<String>, cancellable: bool, reply: Reply<Vec<String>> },
     StopReplySent(Arc<Permit>),
 }
 
@@ -210,13 +210,13 @@ impl Endpoint {
     }
 
     async fn xsmp_prepare(
-        &self, generation: String, units: Vec<String>, cancellable: bool,
+        &self, generation: String, transaction_id: String, units: Vec<String>, cancellable: bool,
         #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<Vec<String>> {
         let permit = self.admission.acquire(Class::Xsmp)?;
         self.authorize(connection, &header).await?;
-        payload::validate_xsmp(&generation, &units).map_err(zbus::fdo::Error::InvalidArgs)?;
-        self.request(permit, |reply| Request::XsmpPrepare { generation, units, cancellable, reply }).await
+        payload::validate_xsmp(&generation, &transaction_id, &units).map_err(zbus::fdo::Error::InvalidArgs)?;
+        self.request(permit, |reply| Request::XsmpPrepare { generation, transaction_id, units, cancellable, reply }).await
     }
 }
 

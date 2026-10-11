@@ -57,6 +57,10 @@ pub(super) struct AppRecord {
     pub policy: ShutdownPolicy,
     pub deadline_usec: Option<u64>,
     pub quit_started: bool,
+    #[serde(default)]
+    pub dispatch: Option<super::app_dispatch::Dispatch>,
+    #[serde(default)]
+    pub window_close_sent: bool,
 }
 
 #[derive(Debug, Clone)]

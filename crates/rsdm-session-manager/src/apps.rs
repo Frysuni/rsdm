@@ -44,7 +44,7 @@ pub(super) async fn register(
     }
     let app = AppRecord {
         unit: app_unit_name(program, &runtime.generation), invocation_id: Vec::new(),
-        policy, deadline_usec: None, quit_started: false,
+        policy, deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false,
     };
     let runtime = runtime.clone();
     blocking(move || {
@@ -179,7 +179,7 @@ pub(super) async fn reset_preparation(runtime: &Runtime) -> Result<(), SessionEr
             let _lease = runtime.app_lease(&record.unit)?;
             let mut app = runtime.app(&record.unit)?;
             app.deadline_usec = None;
-            app.quit_started = false;
+            super::app_dispatch::cancel(&mut app);
             runtime.save_app(&app)?;
         }
         Ok(())
@@ -188,12 +188,12 @@ pub(super) async fn reset_preparation(runtime: &Runtime) -> Result<(), SessionEr
 
 pub async fn stop_hook(generation: &str, unit: &str, actions: super::action_gate::ActionGate) -> Result<(), SessionError> {
     let generation = generation.to_string();
-    let Some((runtime, saved)) = blocking(move || {
+    let Some((runtime, saved, transaction_id)) = blocking(move || {
         let runtime = Runtime::open(&generation)?.ok_or_else(|| SessionError::State("session recovery record is missing".into()))?;
         if runtime.is_disabled()? { return Ok(None); }
         let record = runtime.session()?;
         if record.disabled { return Ok(None); }
-        Ok(Some((runtime, record.shutdown_deadline_usec)))
+        Ok(Some((runtime, record.shutdown_deadline_usec, record.shutdown_transaction.map(|transaction| transaction.id))))
     }).await? else { return Ok(()); };
     let actions = actions.with_generation(runtime.clone());
     let deadline = Deadline::default();
@@ -203,7 +203,8 @@ pub async fn stop_hook(generation: &str, unit: &str, actions: super::action_gate
         Err(_) if actions.check().is_err() => return Ok(()),
         Err(error) => return Err(error),
     };
-    let control = super::app_stop::ShutdownControl::for_manager(&manager);
+    let mut control = super::app_stop::ShutdownControl::for_manager(&manager);
+    control.transaction_id = transaction_id;
     control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
     let result = async {
         pin_pending(&manager, &runtime, unit).await?;

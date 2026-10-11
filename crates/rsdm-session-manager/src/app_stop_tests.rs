@@ -60,7 +60,7 @@ impl Fixture {
         let runtime = Runtime { path, generation: GENERATION.into() };
         let app = AppRecord {
             unit: format!("app-rsdm-example@{GENERATION}-1.service"), invocation_id: vec![1; 16],
-            policy: ShutdownPolicy::default(), deadline_usec: None, quit_started: false,
+            policy: ShutdownPolicy::default(), deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false,
         };
         runtime.save_app(&app).unwrap();
         let queries = Arc::new(AtomicUsize::new(0));
@@ -109,7 +109,8 @@ async fn waiting_for_an_app_does_not_hold_its_record_lease() {
     assert!(acquired, "application wait retained the record lease");
     assert_eq!(outcome, AppOutcome::Cancelled);
     let saved = fixture.runtime.app(&fixture.app.unit).unwrap();
-    assert!(!saved.quit_started);
+    assert!(saved.quit_started);
+    assert_eq!(saved.dispatch.unwrap().state, crate::app_dispatch::State::Intent);
     assert_eq!(saved.deadline_usec, None);
 }
 
@@ -189,7 +190,9 @@ async fn a_contended_record_claim_keeps_the_callers_runtime_responsive() {
     drop(lease);
     let (app, claimed) = claim.await.unwrap();
     assert!(claimed);
-    assert!(fixture.runtime.app(&app.unit).unwrap().quit_started);
+    let saved = fixture.runtime.app(&app.unit).unwrap();
+    assert!(!saved.quit_started);
+    assert!(saved.deadline_usec.is_some());
 }
 
 #[tokio::test]
@@ -229,6 +232,7 @@ async fn cancellation_does_not_reset_a_replacement_invocation() {
     let (prepared, _) = claim_preparation(&fixture.runtime, &fixture.app.unit, &ShutdownControl::default(), &Deadline::default()).await.unwrap();
     let mut replacement = prepared.clone();
     replacement.invocation_id = vec![2; 16];
+    replacement.quit_started = true;
     fixture.runtime.save_app(&replacement).unwrap();
     reset_preparation(&fixture.runtime, &prepared, &Deadline::default()).await.unwrap();
     let saved = fixture.runtime.app(&fixture.app.unit).unwrap();

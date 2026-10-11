@@ -379,6 +379,13 @@ transaction and deadline; logind may shorten the budget. Recovery uses the saved
 remaining budget rather than restarting it. Legacy records without a saved
 deadline retain the existing five-second recovery fallback.
 
+Before a graceful action, the application record stores its transaction ID,
+InvocationID, method and dispatch intent. An unconfirmed reply preserves that
+intent and prevents replay or a second graceful method. Only a proven unsent
+request permits fallback. Cancellation preserves command and window-close
+claims; a confirmed cancelled XSMP save can start again in a new transaction.
+Legacy `quit_started=true` records are treated as possibly dispatched.
+
 The user-bus API accepts at most 4096 application arguments, 1024 environment
 entries, and 64 KiB per string. Quit commands allow up to 256 arguments and
 64 KiB of encoded data. Each complete Launch/Finalize/XSMP request body is

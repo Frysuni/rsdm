@@ -1,6 +1,25 @@
 use super::*;
 
 #[tokio::test]
+async fn cancelled_and_replaced_transactions_reject_late_xsmp_requests() {
+    let mut fixture = Fixture::new().await;
+    fixture.coordinator.begin_stop("logout", None).await.unwrap();
+    let old = fixture.coordinator.record.shutdown_transaction.as_ref().unwrap().id.clone();
+    fixture.coordinator.shutdown.as_ref().unwrap().cancelled.store(true, Ordering::SeqCst);
+    assert!(fixture.coordinator.resume_if_cancelled().await.unwrap());
+    for replaced in [false, true] {
+        if replaced { fixture.coordinator.begin_stop("logout", None).await.unwrap(); }
+        let (reply, mut received) = tokio::sync::mpsc::channel(1);
+        fixture.coordinator.request(crate::control::Request::XsmpPrepare {
+            generation: GENERATION.into(), transaction_id: old.clone(), units: Vec::new(), cancellable: true,
+            reply: crate::control::Reply::for_test(reply),
+        }).await.unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(1), received.recv()).await.unwrap().unwrap();
+        assert_eq!(result.unwrap_err(), "shutdown transaction is stale");
+    }
+}
+
+#[tokio::test]
 async fn ordinary_logout_persists_one_transaction_and_a_bounded_default_budget() {
     let mut fixture = Fixture::new().await;
     let before = monotonic_usec().unwrap();
@@ -26,7 +45,7 @@ async fn the_budget_uses_the_largest_registered_app_timeout_and_preserves_it_for
         let app = crate::runtime::AppRecord {
             unit: format!("app-rsdm-budget@{GENERATION}-{index}.service"), invocation_id: vec![1; 16],
             policy: rsdm_core::domain::ShutdownPolicy { timeout_secs, ..Default::default() },
-            deadline_usec: None, quit_started: false,
+            deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false,
         };
         fixture.coordinator.runtime.save_app(&app).unwrap();
     }

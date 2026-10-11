@@ -21,7 +21,7 @@ async fn assert_all_requests_denied(endpoint: Endpoint, receiver: tokio::sync::m
             proxy.call::<_, _, ()>("Finalize", &(launch().generation, Vec::<(String, String)>::new())).await,
             proxy.call::<_, _, StopOutcome>("Stop", &(launch().generation, "logout")).await.map(|_| ()),
             proxy.call::<_, _, ()>("Cancel", &(launch().generation,)).await,
-            proxy.call::<_, _, Vec<String>>("XsmpPrepare", &(launch().generation, Vec::<String>::new(), true)).await.map(|_| ()),
+            proxy.call::<_, _, Vec<String>>("XsmpPrepare", &(launch().generation, "", Vec::<String>::new(), true)).await.map(|_| ()),
         ];
         for result in results {
             assert!(result.unwrap_err().to_string().contains("AccessDenied"));

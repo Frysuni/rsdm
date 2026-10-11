@@ -27,6 +27,8 @@ fn app() -> AppRecord {
         policy: ShutdownPolicy::default(),
         deadline_usec: None,
         quit_started: false,
+        dispatch: None,
+        window_close_sent: false,
     }
 }
 

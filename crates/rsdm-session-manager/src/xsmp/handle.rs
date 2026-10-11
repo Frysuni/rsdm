@@ -16,7 +16,7 @@ pub enum Notice {
 }
 
 pub enum Message {
-    Prepare { units: Vec<String>, cancellable: bool, reply: Reply<Vec<String>> },
+    Prepare { units: Vec<String>, transaction_id: String, cancellable: bool, reply: Reply<Vec<String>> },
     Cancel,
 }
 
@@ -106,9 +106,9 @@ impl Handle {
 
     pub fn available(&self) -> bool { self.sender.is_some() }
 
-    pub fn prepare(&self, units: Vec<String>, cancellable: bool, reply: Reply<Vec<String>>) {
+    pub fn prepare(&self, units: Vec<String>, transaction_id: String, cancellable: bool, reply: Reply<Vec<String>>) {
         if let Some(sender) = &self.sender {
-            if sender.send(Message::Prepare { units, cancellable, reply: reply.clone() }).is_err() {
+            if sender.send(Message::Prepare { units, transaction_id, cancellable, reply: reply.clone() }).is_err() {
                 let _ = reply.try_send(Err("XSMP server stopped".into()));
             }
         } else { let _ = reply.try_send(Ok(Vec::new())); }

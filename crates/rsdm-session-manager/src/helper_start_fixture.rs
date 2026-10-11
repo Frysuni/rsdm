@@ -135,7 +135,7 @@ pub(super) fn command() -> Vec<String> {
 pub(super) fn app() -> AppRecord {
     AppRecord { unit: format!("app-rsdm-example@{GENERATION}-1.service"), invocation_id: vec![1; 16],
         policy: ShutdownPolicy { quit_command: command(), ..ShutdownPolicy::default() },
-        deadline_usec: None, quit_started: false }
+        deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false }
 }
 
 pub(super) fn record() -> SessionRecord {

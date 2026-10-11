@@ -4,6 +4,7 @@ mod activation;
 mod action_gate;
 mod app_record_lease;
 mod app_stop;
+mod app_dispatch;
 mod attach;
 mod attach_bootstrap;
 mod apps;

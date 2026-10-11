@@ -48,10 +48,11 @@ pub(super) fn validate_stop(generation: &str, action: &str) -> Result<(), String
     Ok(())
 }
 
-pub(super) fn validate_xsmp(generation: &str, units: &[String]) -> Result<(), String> {
+pub(super) fn validate_xsmp(generation: &str, transaction_id: &str, units: &[String]) -> Result<(), String> {
     validate_generation(generation)?;
+    if !transaction_id.is_empty() { validate_generation(transaction_id)?; }
     strings(units, MAX_ARGUMENTS)?;
-    check_size(&(generation, units), MAX_REQUEST_BYTES)
+    check_size(&(generation, transaction_id, units), MAX_REQUEST_BYTES)
 }
 
 fn strings(values: &[String], limit: usize) -> Result<(), String> {
