@@ -1,4 +1,4 @@
-"""Private logind protocol fixture, backed by a separate test bus."""
+"""Private power protocol fixture with real PAM session identity queries."""
 
 import os
 from pathlib import Path
@@ -19,6 +19,8 @@ SESSION = "org.freedesktop.login1.Session"
 class Manager(dbus.service.Object):
     def __init__(self, bus):
         self.bus = bus
+        self.login_bus = dbus.SystemBus()
+        self.sessions = {}
         self.name = dbus.service.BusName("org.freedesktop.login1", bus)
         self.preparing = False
         self.guards = []
@@ -30,11 +32,12 @@ class Manager(dbus.service.Object):
 
     @dbus.service.method(MANAGER, in_signature="u", out_signature="o")
     def GetSessionByPID(self, pid):
-        return "/org/freedesktop/login1/session/test"
-
-    @dbus.service.method(MANAGER, in_signature="s", out_signature="o")
-    def GetSession(self, session):
-        return "/org/freedesktop/login1/session/test"
+        manager = dbus.Interface(self.login_bus.get_object("org.freedesktop.login1", "/org/freedesktop/login1"), MANAGER)
+        path = manager.GetSessionByPID(pid)
+        if path not in self.sessions:
+            actual = self.login_bus.get_object("org.freedesktop.login1", path)
+            self.sessions[path] = Session(self.bus, path, actual)
+        return path
 
     @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="ss", out_signature="v")
     def Get(self, interface, name):
@@ -113,13 +116,15 @@ class Manager(dbus.service.Object):
 
 
 class Session(dbus.service.Object):
+    def __init__(self, bus, path, actual):
+        self.properties = dbus.Interface(actual, "org.freedesktop.DBus.Properties")
+        super().__init__(bus, path)
+
     @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="ss", out_signature="v")
     def Get(self, interface, name):
         assert interface == SESSION
-        if name == "User":
-            return dbus.Struct((dbus.UInt32(os.geteuid()), dbus.ObjectPath("/org/freedesktop/login1/user/test")))
-        if name == "Id":
-            return dbus.String("test")
+        if name in ["User", "Id"]:
+            return self.properties.Get(interface, name)
         raise dbus.exceptions.DBusException("unknown property")
 
     @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="s", out_signature="a{sv}")
@@ -130,6 +135,5 @@ class Session(dbus.service.Object):
 DBusGMainLoop(set_as_default=True)
 bus = dbus.SessionBus()
 manager = Manager(bus)
-session = Session(bus, "/org/freedesktop/login1/session/test")
 (RUNTIME / "power-manager-ready").touch()
 GLib.MainLoop().run()

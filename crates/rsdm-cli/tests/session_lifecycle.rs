@@ -25,7 +25,8 @@ struct Login { calls: Calls }
 
 #[zbus_macros::interface(name = "org.freedesktop.login1.Manager")]
 impl Login {
-    fn get_session(&self, _id: &str) -> OwnedObjectPath {
+    #[zbus(name = "GetSessionByPID")]
+    fn get_session_by_pid(&self, _pid: u32) -> OwnedObjectPath {
         OwnedObjectPath::try_from("/org/freedesktop/login1/session/test").unwrap()
     }
 
@@ -158,6 +159,17 @@ async fn starting_a_second_session_does_not_stop_or_modify_the_first() {
     let output = tools.run(&["session", "start", "--", "compositor"]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("name already taken"), "{:?}", output);
+    assert!(tools.calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_session_hint_cannot_select_another_login_before_coordinator_startup() {
+    let tools = SessionTools::new(false).await;
+    let output = tools.command(&["session", "start", "--", "compositor"])
+        .env("XDG_SESSION_ID", "other-login").output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("logind session hint does not match the current process"), "{output:?}");
+    assert!(!tools.root.join("rsdm").exists());
     assert!(tools.calls.lock().unwrap().is_empty());
 }
 

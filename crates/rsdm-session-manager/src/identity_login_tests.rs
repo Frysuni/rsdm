@@ -50,11 +50,19 @@ async fn fixture(uid: u32) -> (zbus::Connection, zbus::Connection, Arc<Mutex<Vec
 }
 
 #[tokio::test]
-async fn a_session_hint_is_resolved_and_its_owner_is_checked() {
+async fn a_matching_session_hint_is_verified_against_the_current_process() {
     let (connection, _server, calls) = fixture(1000).await;
-    let id = verified_login_session(async { Ok(connection) }, 1000, Some("hint")).await.unwrap();
+    let id = verified_login_session(async { Ok(connection) }, 1000, Some("verified-session")).await.unwrap();
     assert_eq!(id, "verified-session");
-    assert_eq!(*calls.lock().unwrap(), ["session:hint"]);
+    assert_eq!(*calls.lock().unwrap(), [format!("pid:{}", std::process::id())]);
+}
+
+#[tokio::test]
+async fn another_session_of_the_same_user_cannot_be_selected_by_an_environment_hint() {
+    let (connection, _server, calls) = fixture(1000).await;
+    let result = verified_login_session(async { Ok(connection) }, 1000, Some("other-session")).await;
+    assert!(matches!(result, Err(SessionError::State(error)) if error == "logind session hint does not match the current process"));
+    assert_eq!(*calls.lock().unwrap(), [format!("pid:{}", std::process::id())]);
 }
 
 #[tokio::test]

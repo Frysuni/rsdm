@@ -68,10 +68,7 @@ async fn verified_login_session(
             &connection, "org.freedesktop.login1", "/org/freedesktop/login1",
             "org.freedesktop.login1.Manager",
         ).await?;
-        let path: OwnedObjectPath = match session_hint {
-            Some(id) => manager.call("GetSession", &(id,)).await?,
-            _ => manager.call("GetSessionByPID", &(std::process::id(),)).await?,
-        };
+        let path: OwnedObjectPath = manager.call("GetSessionByPID", &(std::process::id(),)).await?;
         let session = zbus::Proxy::new(
             &connection, "org.freedesktop.login1", path, "org.freedesktop.login1.Session",
         ).await?;
@@ -79,7 +76,11 @@ async fn verified_login_session(
         if owner != uid {
             return Err(SessionError::State("logind session belongs to another user".into()));
         }
-        Ok(session.get_property("Id").await?)
+        let id: String = session.get_property("Id").await?;
+        if session_hint.is_some_and(|hint| hint != id) {
+            return Err(SessionError::State("logind session hint does not match the current process".into()));
+        }
+        Ok(id)
     }).await.map_err(|_| {
         SessionError::Bus(zbus::fdo::Error::TimedOut("verifying the logind session timed out".into()).into())
     })?

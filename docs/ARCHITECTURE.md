@@ -93,8 +93,10 @@ Session, app, and power commands own their Tokio runtime at the CLI boundary.
 The PAM owner creates its inhibitor runtime after fork; Lock power workers
 create their own runtime while the Wayland event loop keeps running. Logind
 capability queries, request timeouts, and shutdown notifications use Tokio.
-Coordinator startup awaits logind identity verification; connection setup and
-session queries share one five-second budget.
+Coordinator startup resolves its own PID through logind and checks the session
+owner UID. An `XDG_SESSION_ID` hint must match that verified session; it cannot
+select another login of the same user. Connection setup and session queries
+share one five-second budget.
 GNOME and Plasma shutdown delegation runs in an asynchronous worker under the
 shared deadline; a failed or lost reply does not trigger a repeated request.
 Session Manager clients, stop hooks, and recovery await typed D-Bus requests.
