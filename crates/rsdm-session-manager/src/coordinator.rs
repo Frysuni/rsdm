@@ -90,6 +90,11 @@ pub(super) async fn start(
     };
     let launcher = coordinator.process.as_ref().expect("session process").clone();
     let result = coordinator.run(&mut signals).await;
+    if actions.check().is_ok() && result.as_ref().map_or(true, |code| *code != 0) {
+        coordinator.recover().await;
+    }
+    // Recovery can be interrupted by a validated disable update too. Recheck
+    // it before returning to the PAM owner with a still-running compositor.
     if actions.check().is_err() {
         let disabled = coordinator.disable().await;
         let process = coordinator.process.take().unwrap_or(launcher);
@@ -106,9 +111,6 @@ pub(super) async fn start(
         let code = super::session_wait::wait(process, &record, &provider, connection).await?;
         disabled?;
         return Ok(code);
-    }
-    if result.as_ref().map_or(true, |code| *code != 0) {
-        coordinator.recover().await;
     }
     if let Err(error) = coordinator.xsmp.shutdown(&coordinator.manager.deadline).await {
         if result.is_ok() { return Err(error); }
