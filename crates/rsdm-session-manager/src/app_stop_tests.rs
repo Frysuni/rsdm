@@ -115,6 +115,26 @@ async fn waiting_for_an_app_does_not_hold_its_record_lease() {
 }
 
 #[tokio::test]
+async fn resuming_a_deadline_without_dispatch_intent_keeps_the_budget_and_claims_quit() {
+    let fixture = Fixture::new().await;
+    let control = ShutdownControl::default();
+    control.xsmp_units.set(vec![fixture.app.unit.clone()]).unwrap();
+    let (prepared, claimed) = claim_preparation(
+        &fixture.runtime, &fixture.app.unit, &control, &Deadline::default(),
+    ).await.unwrap();
+    assert!(claimed);
+    assert!(!prepared.quit_started);
+    assert!(prepared.dispatch.is_none());
+
+    let resumed = begin_preparation(&fixture.manager, &fixture.runtime, &fixture.app.unit, &control).await.unwrap();
+    assert!(matches!(resumed, Preparation::Waiting(_, None)));
+    let saved = fixture.runtime.app(&fixture.app.unit).unwrap();
+    assert_eq!(saved.deadline_usec, prepared.deadline_usec);
+    assert!(saved.quit_started);
+    assert_eq!(saved.dispatch.unwrap().method, crate::app_dispatch::Method::Xsmp);
+}
+
+#[tokio::test]
 async fn competing_preparations_claim_quit_once_and_preserve_the_deadline() {
     let fixture = Fixture::new().await;
     let control = ShutdownControl::default();

@@ -253,6 +253,13 @@ pkgs.testers.runNixOSTest {
         session = start_session()
         machine.succeed(session + "rsdm app --quit-command ${quitCommand} -- ${commandApplication}")
         machine.wait_for_file(runtime + "/command-ready")
+        generation = session.split("RSDM_SESSION_GENERATION=")[1].split()[0]
+        app_record = runtime + "/rsdm/sessions/" + generation + "/apps/*.toml"
+        deadline = int(float(machine.succeed("cut -d ' ' -f1 /proc/uptime")) * 1_000_000) + 30_000_000
+        machine.succeed("sed -i '1i deadline_usec = " + str(deadline) + "' " + app_record)
+        prepared = tomllib.loads(machine.succeed("cat " + app_record))
+        assert prepared["deadline_usec"] == deadline and not prepared["quit_started"]
+        assert "dispatch" not in prepared
         machine.succeed(session + "rsdm session stop")
         machine.succeed("test -e " + runtime + "/command-saved")
 

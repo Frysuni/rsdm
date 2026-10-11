@@ -162,7 +162,9 @@ async fn begin_preparation(
         if claimed { reset_preparation(runtime, &app, &control.hard_deadline).await?; }
         return Ok(Preparation::Finished(AppOutcome::Cancelled));
     }
-    let quit_unit = if claimed { request_quit(manager, runtime, &app, control).await? } else { None };
+    // A saved deadline can precede dispatch after a crash. The dispatch claim,
+    // rather than the deadline reservation, decides whether an action can run.
+    let quit_unit = if !app.quit_started { request_quit(manager, runtime, &app, control).await? } else { None };
     Ok(Preparation::Waiting(app, quit_unit))
 }
 
