@@ -1,4 +1,4 @@
-//! Niri IPC cannot act through a foreign or replaced compositor invocation.
+//! Compositor IPC cannot act through a foreign or replaced invocation.
 
 use std::sync::{Arc, atomic::{AtomicU32, AtomicU8, Ordering}};
 

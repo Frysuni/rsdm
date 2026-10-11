@@ -2,15 +2,15 @@
 
 use std::path::Path;
 
-use super::{SessionError, app_dispatch::{self, Method, State}, app_stop::ShutdownControl, bus::UserManager, niri,
+use super::{SessionError, app_dispatch::{self, Method, State}, app_stop::ShutdownControl, bus::UserManager, window_backend::{Connection, Events, Window},
     processes::{self, ProcessHandle}, runtime::{self, AppRecord, Runtime, SessionRecord}};
 
 const SERVICE: &str = "org.freedesktop.systemd1.Service";
 
 struct PreparedClose {
-    connection: niri::Connection,
-    events: niri::EventStream,
-    window: niri::Window,
+    connection: Connection,
+    events: Events,
+    window: Window,
     process: ProcessHandle,
 }
 
@@ -18,13 +18,7 @@ pub(super) async fn request(manager: &UserManager, runtime: &Runtime, app: &AppR
     let records = runtime.clone();
     let record = runtime::blocking(move || records.session()).await?;
     if record.disabled { return Err(SessionError::Disabled); }
-    let Some((_, path)) = record.exported_environment.iter().find(|(name, _)| name == "NIRI_SOCKET") else { return Ok(false); };
-    let prepared = prepare(manager, &record, app, path).await;
-    let mut prepared = match prepared {
-        Ok(Some(prepared)) => prepared,
-        Ok(None) => return Ok(false),
-        Err(error) => { tracing::debug!(%error, unit = app.unit, "Niri window close is unavailable"); return Ok(false); }
-    };
+    let Some(mut prepared) = prepare(manager, &record, app).await else { return Ok(false); };
     if control.cancelled() { return Ok(true); }
     let transaction = control.transaction_id.as_deref();
     if !app_dispatch::claim(runtime, app, transaction, Method::WindowClose, &manager.deadline).await? { return Ok(true); }
@@ -34,18 +28,30 @@ pub(super) async fn request(manager: &UserManager, runtime: &Runtime, app: &AppR
     let state = match dispatched {
         Ok(true) => State::Sent,
         Ok(false) => State::NotSent,
-        Err(error) => { tracing::warn!(%error, unit = app.unit, "Niri window close is unconfirmed; observing the application"); State::Intent }
+        Err(error) => { tracing::warn!(%error, unit = app.unit, "window close is unconfirmed; observing the application"); State::Intent }
     };
     app_dispatch::finish(runtime, app, transaction, Method::WindowClose, state, &manager.deadline).await?;
     Ok(state != State::NotSent)
 }
 
-async fn prepare(manager: &UserManager, record: &SessionRecord, app: &AppRecord, path: &str) -> Result<Option<PreparedClose>, SessionError> {
-    let connection = manager.request(async { Ok(niri::Connection::connect(Path::new(path), record.identity.uid).await) }).await??;
-    if !owns_compositor(manager, record, connection.pid).await? { return Ok(None); }
-    let subscriber = manager.request(async { Ok(niri::Connection::connect(Path::new(path), record.identity.uid).await) }).await??;
-    if subscriber.pid != connection.pid || !owns_compositor(manager, record, subscriber.pid).await? { return Ok(None); }
-    let (events, mut windows) = manager.request(async { Ok(niri::EventStream::subscribe(subscriber).await) }).await??;
+async fn prepare(manager: &UserManager, record: &SessionRecord, app: &AppRecord) -> Option<PreparedClose> {
+    for (name, path) in &record.exported_environment {
+        if !matches!(name.as_str(), "NIRI_SOCKET" | "SWAYSOCK") { continue; }
+        match prepare_endpoint(manager, record, app, name, path).await {
+            Ok(Some(prepared)) => return Some(prepared),
+            Ok(None) => {}
+            Err(error) => { tracing::debug!(%error, endpoint = name, unit = app.unit, "window close is unavailable"); }
+        }
+    }
+    None
+}
+
+async fn prepare_endpoint(manager: &UserManager, record: &SessionRecord, app: &AppRecord, name: &str, path: &str) -> Result<Option<PreparedClose>, SessionError> {
+    let mut connection = manager.request(async { Ok(Connection::connect(name, Path::new(path), record.identity.uid).await) }).await??;
+    if !owns_compositor(manager, record, connection.pid()).await? { return Ok(None); }
+    let subscriber = manager.request(async { Ok(Connection::connect(name, Path::new(path), record.identity.uid).await) }).await??;
+    if subscriber.pid() != connection.pid() || !owns_compositor(manager, record, subscriber.pid()).await? { return Ok(None); }
+    let (events, mut windows) = manager.request(async { Ok(connection.subscribe(subscriber).await) }).await??;
     let pids = processes::app_processes(manager, app).await?;
     windows.sort_by_key(|window| window.id);
     for window in windows {
@@ -63,7 +69,7 @@ async fn prepare(manager: &UserManager, record: &SessionRecord, app: &AppRecord,
 async fn dispatch(manager: &UserManager, record: &SessionRecord, app: &AppRecord, prepared: &mut PreparedClose, control: &ShutdownControl) -> Result<bool, SessionError> {
     let PreparedClose { connection, events, window, process: handle } = prepared;
     let pid = window.pid.and_then(|pid| u32::try_from(pid).ok()).unwrap_or(0);
-    if !owns_compositor(manager, record, connection.pid).await? || !owns_process(manager, app, pid, handle).await? { return Ok(false); }
+    if !owns_compositor(manager, record, connection.pid()).await? || !owns_process(manager, app, pid, handle).await? { return Ok(false); }
     let windows = manager.request(async { Ok(connection.windows().await) }).await??;
     if !windows.contains(window) || !owns_process(manager, app, pid, handle).await? { return Ok(false); }
     manager.request(async {
@@ -72,7 +78,7 @@ async fn dispatch(manager: &UserManager, record: &SessionRecord, app: &AppRecord
         match events.unchanged(window) {
             Ok(true) => {}
             Ok(false) => return Ok(Ok(false)),
-            Err(error) => { tracing::debug!(%error, "Niri window events cannot authorize close"); return Ok(Ok(false)); }
+            Err(error) => { tracing::debug!(%error, "window events cannot authorize close"); return Ok(Ok(false)); }
         }
         Ok(connection.close(window.id).await)
     }).await?

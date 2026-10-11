@@ -2,23 +2,15 @@
 
 use std::{path::Path, time::Duration};
 
-use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::{io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}, net::UnixStream};
 
-use super::{SessionError, processes::ProcessHandle};
+use super::{SessionError, compositor_socket::{self, MAX_FRAME_BYTES}, processes::ProcessHandle};
+pub(super) use super::window_backend::Window;
 
 #[path = "niri_events.rs"]
 mod events;
 pub(super) use events::EventStream;
-
-const MAX_FRAME_BYTES: u64 = 1_048_576;
-
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-pub(super) struct Window {
-    pub(super) id: u64,
-    pub(super) pid: Option<i32>,
-}
 
 pub(super) struct Connection {
     stream: BufReader<UnixStream>,
@@ -28,15 +20,7 @@ pub(super) struct Connection {
 
 impl Connection {
     pub(super) async fn connect(path: &Path, uid: u32) -> Result<Self, SessionError> {
-        if !path.is_absolute() { return Err(SessionError::State("Niri socket path must be absolute".into())); }
-        let stream = tokio::time::timeout(Duration::from_secs(2), UnixStream::connect(path)).await
-            .map_err(|_| SessionError::State("connecting to Niri timed out".into()))??;
-        let credentials = stream.peer_cred()?;
-        if credentials.uid() != uid { return Err(SessionError::State("Niri socket belongs to another user".into())); }
-        let pid = credentials.pid().and_then(|pid| u32::try_from(pid).ok()).filter(|pid| *pid != 0)
-            .ok_or_else(|| SessionError::State("Niri socket has no process identity".into()))?;
-        let peer = ProcessHandle::socket_peer(&stream)?;
-        if !peer.alive()? { return Err(SessionError::State("Niri socket owner has exited".into())); }
+        let (stream, pid, peer) = compositor_socket::connect(path, uid).await?;
         Ok(Self { stream: BufReader::new(stream), pid, peer })
     }
 

@@ -222,6 +222,25 @@ Attached compositors currently use fallback because their lifecycle ownership
 does not establish this Niri proof. Events only validate the selected target;
 they do not establish application exit or trigger additional closes.
 
+## Sway window close
+
+For `auto`, the direct binary IPC uses the generation's `SWAYSOCK`, captured
+by finalize. Both command and window-event connections authenticate the same
+compositor peer pidfd and recorded MainPID/InvocationID. GET_TREE traverses
+both tiled and floating children. Only native `xdg_shell` windows with positive
+PIDs can be considered; XWayland's claimed PID does not authorize a close.
+Current application InvocationID, dedicated cgroup and a live pidfd are checked
+again against a second tree before sending one `[con_id=…] kill` command.
+Queued close, replacement or ownership-change events prevent that dispatch.
+
+The shared durable ledger, cancellation, exit observation and TERM fallback
+follow the same rules as Niri. A single rejected command allows fallback;
+a lost or malformed response remains an unconfirmed dispatch. The isolated
+Sway VM exercises GTK Wayland windows with the headless/pixman compositor,
+save-dialog cancellation, foreign windows with the same app ID and an
+individual stop. Hardware rendering, XWayland and attached-compositor close
+are outside that verification.
+
 ## XSMP
 
 Official builds enable `xsmp`. Managed WM and native niri sessions publish

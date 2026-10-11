@@ -1,6 +1,7 @@
 //! The wire event stream must veto stale targets without replacing them.
 
 use super::*;
+use crate::compositor_socket::MAX_FRAME_BYTES;
 use crate::niri::tests::{Fixture, read_request};
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;

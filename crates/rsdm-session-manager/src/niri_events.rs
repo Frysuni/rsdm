@@ -1,8 +1,6 @@
 //! Observe the selected window without a background task or another close.
 
-use std::{io::ErrorKind, os::fd::AsRawFd};
-
-use super::{Connection, Duration, SessionError, Value, Window, MAX_FRAME_BYTES, json};
+use super::{Connection, Duration, SessionError, Value, Window, json};
 use tokio::io::AsyncBufRead;
 
 pub(crate) struct EventStream {
@@ -46,27 +44,10 @@ impl EventStream {
 
     fn pending_events(&mut self) -> Result<Vec<u8>, SessionError> {
         let buffered = self.connection.stream.buffer();
-        let mut events = buffered.to_vec();
+        let events = buffered.to_vec();
         let consumed = buffered.len();
         std::pin::Pin::new(&mut self.connection.stream).consume(consumed);
-        let mut buffer = [0_u8; 4096];
-        loop {
-            // Read kernel-queued events too, even if Tokio has not yet polled
-            // readiness since the command connection's last snapshot.
-            // SAFETY: the socket FD and mutable buffer are valid for this call.
-            let count = unsafe { libc::recv(self.connection.stream.get_ref().as_raw_fd(),
-                buffer.as_mut_ptr().cast(), buffer.len(), libc::MSG_DONTWAIT) };
-            let read = if count < 0 { Err(std::io::Error::last_os_error()) } else { Ok(count as usize) };
-            match read {
-                Ok(0) => return Err(SessionError::State("Niri event stream disconnected before close".into())),
-                Ok(count) => events.extend_from_slice(&buffer[..count]),
-                Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(events),
-                Err(error) => return Err(error.into()),
-            }
-            if events.len() as u64 > MAX_FRAME_BYTES {
-                return Err(SessionError::State("Niri event burst is oversized".into()));
-            }
-        }
+        super::compositor_socket::pending_events(self.connection.stream.get_ref(), events)
     }
 }
 
