@@ -20,6 +20,7 @@ pub(super) enum ProviderKind {
     Gnome,
     Plasma,
     External,
+    Attached,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +57,7 @@ impl Provider {
             ProviderKind::Gnome => "gnome",
             ProviderKind::Plasma => "plasma",
             ProviderKind::External => "external",
+            ProviderKind::Attached => "partial",
         }
     }
 

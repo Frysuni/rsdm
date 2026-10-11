@@ -54,7 +54,7 @@ impl Context {
         let runtime = Runtime::create_at(&directory, &identity.generation).unwrap();
         runtime.save_session(&SessionRecord {
             anchor_unit: format!("rsdm-session-{}.service", identity.generation), identity: identity.clone(),
-            compositor_unit: None, compositor_invocation: Vec::new(), provider: "managed".into(),
+            compositor_unit: None, compositor_invocation: Vec::new(), coordinator_unit: None, provider: "managed".into(),
             owns_targets: true, phase: SessionPhase::Running, disabled: false, config_path: None,
             exported_environment: Vec::new(), shutdown_deadline_usec: None,
         }).unwrap();

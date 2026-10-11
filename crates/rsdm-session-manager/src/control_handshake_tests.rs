@@ -72,7 +72,7 @@ impl Fixture {
         let identity = SessionIdentity { generation: GENERATION.into(), uid: unsafe { libc::geteuid() }, login_session_id: "test".into(), desktop_entry_id: None };
         let record = SessionRecord {
             identity, anchor_unit: format!("rsdm-session-{GENERATION}.service"), compositor_unit: None,
-            compositor_invocation: Vec::new(), provider: "managed".into(), owns_targets: true,
+            compositor_invocation: Vec::new(), coordinator_unit: None, provider: "managed".into(), owns_targets: true,
             phase: SessionPhase::Running, disabled: false, config_path: None, exported_environment: Vec::new(), shutdown_deadline_usec: None,
         };
         Self { directory, runtime, record, connection, _server: server.await.unwrap() }

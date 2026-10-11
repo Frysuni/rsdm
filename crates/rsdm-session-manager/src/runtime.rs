@@ -32,6 +32,8 @@ pub(super) struct SessionRecord {
     pub anchor_unit: String,
     pub compositor_unit: Option<String>,
     pub compositor_invocation: Vec<u8>,
+    #[serde(default)]
+    pub coordinator_unit: Option<(String, Vec<u8>)>,
     pub provider: String,
     pub owns_targets: bool,
     pub phase: SessionPhase,

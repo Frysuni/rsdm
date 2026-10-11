@@ -130,6 +130,14 @@ impl Fixture {
         fs::create_dir(directory.join("apps")).unwrap();
         fs::set_permissions(directory.join("apps"), fs::Permissions::from_mode(0o700)).unwrap();
         let runtime = Runtime { path: directory.clone(), generation: GENERATION.into() };
+        runtime.save_session(&crate::runtime::SessionRecord {
+            identity: crate::identity::SessionIdentity { generation: GENERATION.into(), login_session_id: "test".into(),
+                desktop_entry_id: None, uid: unsafe { libc::geteuid() } },
+            anchor_unit: format!("rsdm-session-{GENERATION}.service"), compositor_unit: None,
+            compositor_invocation: Vec::new(), coordinator_unit: None, provider: "managed".into(), owns_targets: false,
+            phase: rsdm_core::domain::SessionPhase::Running, disabled: false, config_path: None,
+            exported_environment: Vec::new(), shutdown_deadline_usec: None,
+        }).unwrap();
         let request = LaunchRequest {
             generation: GENERATION.into(), argv: vec![std::env::current_exe().unwrap().to_string_lossy().into_owned()],
             environment: Vec::new(), directory: directory.to_string_lossy().into_owned(),

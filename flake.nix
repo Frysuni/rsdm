@@ -123,6 +123,7 @@
         in {
           module = import ./packaging/nix/check.nix { inherit self nixpkgs system; };
           session-lifecycle = import ./tests/session-lifecycle { inherit pkgs rsdm; };
+          session-attach = import ./tests/session-lifecycle/attach.nix { inherit pkgs rsdm; };
           native-niri = import ./tests/session-lifecycle/niri.nix { inherit pkgs rsdm; };
           native-de-handoff = import ./tests/session-lifecycle/native.nix { inherit pkgs rsdm; };
           power-lifecycle = import ./tests/session-lifecycle/power.nix { inherit pkgs rsdm; };

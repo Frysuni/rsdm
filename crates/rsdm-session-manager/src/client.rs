@@ -1,17 +1,24 @@
-//! CLI requests and the basic launch path outside an RSDM-coordinated login.
+//! CLI requests authenticated against the current coordinated login.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use rsdm_core::domain::{SessionManagerConfig, ShutdownPolicy};
 
 use super::{
-    SessionError, bus::UserManager, control::{self, LaunchRequest, SessionStatus, StopOutcome}, env,
-    identity::GENERATION_ENV, unit_name::{ManagedUnitKind, unique_unit_name}, units,
+    SessionError, control::{self, LaunchRequest, SessionStatus, StopOutcome}, env,
 };
 
 pub async fn generation(cfg: &SessionManagerConfig) -> Result<String, SessionError> {
     if !cfg.enabled { return Err(SessionError::State("session manager is disabled".into())); }
     current_generation().await
+}
+
+pub async fn is_running(cfg: &SessionManagerConfig) -> Result<bool, SessionError> {
+    if !cfg.enabled { return Ok(false); }
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let connection = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await?;
+        super::attach::control_exists(&connection).await
+    }).await.map_err(|_| SessionError::State("coordinator presence query timed out".into()))?
 }
 
 async fn current_generation() -> Result<String, SessionError> {
@@ -21,9 +28,6 @@ async fn current_generation() -> Result<String, SessionError> {
 
 pub async fn run_app(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, SessionError> {
     policy.validate().map_err(|error| SessionError::State(error.into()))?;
-    if std::env::var_os(GENERATION_ENV).is_none() {
-        return basic_launch(argv, policy).await;
-    }
     let generation = current_generation().await?;
     let directory = super::runtime::blocking(|| Ok(std::env::current_dir()?)).await?;
     let request = LaunchRequest {
@@ -70,23 +74,4 @@ pub async fn cancel(cfg: &SessionManagerConfig) -> Result<StopOutcome, SessionEr
     let connection = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await?;
     control::proxy(&connection).await?.call::<_, _, ()>("Cancel", &(generation,)).await?;
     Ok(StopOutcome { result: "accepted".into(), forced_units: Vec::new(), message: "shutdown cancellation requested".into() })
-}
-
-async fn basic_launch(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, SessionError> {
-    if *policy != ShutdownPolicy::default() {
-        return Err(SessionError::State("shutdown policy requires an RSDM-coordinated session".into()));
-    }
-    let program = argv.first().ok_or(SessionError::EmptyCommand)?;
-    let manager = UserManager::connect().await?;
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !manager.active(units::SESSION_TARGET).await? {
-        if Instant::now() >= deadline { return Err(SessionError::NoGraphicalSession); }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-    let unit = format!("{}.service", unique_unit_name(ManagedUnitKind::App, program));
-    let directory = super::runtime::blocking(|| Ok(std::env::current_dir()?)).await?;
-    let mut properties = units::app_properties(argv, &env::command_environment(), &directory, None).await?;
-    properties.retain(|(name, _)| *name != "AddRef");
-    manager.start_service(&unit, &properties).await?;
-    Ok(0)
 }

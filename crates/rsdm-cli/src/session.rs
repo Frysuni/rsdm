@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
-use rsdm_core::domain::{SessionMode, ShutdownMethod, ShutdownPolicy, TimeoutAction};
+use rsdm_core::domain::{SessionManagerUpdate, SessionMode, ShutdownMethod, ShutdownPolicy, TimeoutAction};
 use rsdm_infra::{config::{load_config_async, watch_session_config}, unix::split_exec};
 use rsdm_session_manager as session_manager;
 
@@ -13,9 +13,10 @@ pub enum PowerAction { Reboot, Poweroff }
 
 pub async fn power(path: &Path, action: PowerAction) -> Result<()> {
     let action = match action { PowerAction::Reboot => "reboot", PowerAction::Poweroff => "poweroff" };
-    if std::env::var_os("RSDM_SESSION_GENERATION").is_some() {
-        let cfg = load_config_async(path).await?.session_manager;
-        if cfg.enabled { return print_outcome(session_manager::stop(action, &cfg).await?); }
+    let cfg = load_config_async(path).await?.session_manager;
+    let has_user_bus = std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some() || std::env::var_os("XDG_RUNTIME_DIR").is_some();
+    if cfg.enabled && has_user_bus && session_manager::is_running(&cfg).await? {
+        return print_outcome(session_manager::stop(action, &cfg).await?);
     }
     rsdm_system::logind::request_direct(action).await?;
     print_outcome(session_manager::StopOutcome {
@@ -49,6 +50,10 @@ pub enum SessionAction {
     /// Show the coordinator and its registered applications.
     #[command(after_help = "Examples:\n  rsdm session status\n  rsdm session status > session-status.txt")]
     Status,
+    /// Coordinate applications in the current external graphical login.
+    Attach,
+    #[command(hide = true)]
+    Serve,
     #[command(hide = true)]
     AppStop {
         #[arg(long)]
@@ -82,7 +87,7 @@ pub struct AppOptions {
 }
 
 pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
-    let updates = if matches!(&action, SessionAction::Start { .. } | SessionAction::AppStop { .. } | SessionAction::Cleanup { .. }) {
+    let updates = if matches!(&action, SessionAction::Start { .. } | SessionAction::Attach | SessionAction::Serve | SessionAction::Finalize { .. } | SessionAction::AppStop { .. } | SessionAction::Cleanup { .. }) {
         Some(watch_session_config(path).await?)
     } else { None };
     let cfg = match &updates {
@@ -90,6 +95,11 @@ pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
         None => load_config_async(path).await?.session_manager,
     };
     match action {
+        SessionAction::Attach => print_outcome(session_manager::attach_with_config_updates(updates.expect("attach configuration"), path).await?),
+        SessionAction::Serve => {
+            let code = session_manager::serve_with_config_updates(updates.expect("serve configuration"), path).await?;
+            std::process::exit(code);
+        }
         SessionAction::Start { mode, native_unit, logout_command, compositor } => {
             let logout_command = if cfg.enabled { parse_command(logout_command)? } else { Vec::new() };
             let options = session_manager::StartOptions { mode, native_unit, logout_command };
@@ -97,12 +107,7 @@ pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
                 .context("running the graphical session")?;
             std::process::exit(code);
         }
-        SessionAction::Finalize { names } => {
-            session_manager::finalize(&cfg, &names).await.context("finalizing the graphical session")?;
-            if !cfg.enabled { return print_outcome(session_manager::StopOutcome::disabled()); }
-            output::notice("ENVIRONMENT PUBLISHED", "Session environment published.\n", output::SUCCESS).interactive_stdout()?;
-            Ok(())
-        }
+        SessionAction::Finalize { names } => finalize(path, &names, updates.expect("finalize configuration")).await,
         SessionAction::Stop => print_outcome(session_manager::stop("logout", &cfg).await?),
         SessionAction::Cancel => {
             let outcome = session_manager::cancel(&cfg).await.context("cancelling session preparation")?;
@@ -124,6 +129,19 @@ pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
     }
 }
 
+async fn finalize(path: &Path, names: &[String], updates: tokio::sync::watch::Receiver<SessionManagerUpdate>) -> Result<()> {
+    if updates.borrow().config.enabled {
+        let outcome = session_manager::attach_with_config_updates(updates.clone(), path).await?;
+        if outcome.result == "disabled" { return print_outcome(outcome); }
+    }
+    let current = updates.borrow().config.clone();
+    let finalized = session_manager::finalize(&current, names).await;
+    if !updates.borrow().config.enabled { return print_outcome(session_manager::StopOutcome::disabled()); }
+    finalized.context("finalizing the graphical session")?;
+    output::notice("ENVIRONMENT PUBLISHED", "Session environment published.\n", output::SUCCESS).interactive_stdout()?;
+    Ok(())
+}
+
 pub async fn run_app(path: &Path, options: AppOptions) -> Result<()> {
     let cfg = load_config_async(path).await?.session_manager;
     if !cfg.enabled {
@@ -134,6 +152,15 @@ pub async fn run_app(path: &Path, options: AppOptions) -> Result<()> {
         timeout_secs: options.shutdown_timeout, on_timeout: options.on_timeout,
         method: options.shutdown_method, quit_command: parse_command(options.quit_command)?,
     };
+    policy.validate().map_err(anyhow::Error::msg)?;
+    let updates = watch_session_config(path).await?;
+    let attached = session_manager::attach_with_config_updates(updates.clone(), path).await?;
+    if attached.result == "disabled" || !updates.borrow().config.enabled {
+        let mut disabled = updates.borrow().config.clone();
+        disabled.enabled = false;
+        let code = session_manager::run_app(&options.argv, &disabled).await.context("launching app")?;
+        std::process::exit(code);
+    }
     let code = session_manager::run_app_with_policy(&options.argv, &policy, &cfg).await.context("launching app")?;
     if code == 0 {
         output::application(&options.argv, &policy)?;

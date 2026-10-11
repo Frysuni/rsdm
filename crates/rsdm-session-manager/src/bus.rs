@@ -29,10 +29,6 @@ pub(super) struct UserManager {
 }
 
 impl UserManager {
-    pub async fn connect() -> Result<Self, SessionError> {
-        Self::connect_until(Deadline::default()).await
-    }
-
     pub async fn connect_until(deadline: Deadline) -> Result<Self, SessionError> {
         Self::connect_with(async {
             zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await

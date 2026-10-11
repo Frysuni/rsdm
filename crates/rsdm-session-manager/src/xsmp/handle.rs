@@ -35,7 +35,7 @@ impl Handle {
         let (events, notices) = mpsc::unbounded_channel();
         let mut handle = Self { sender: None, finished: None, notices, interrupt: Arc::default(),
             connected: HashSet::new(), environment: Vec::new() };
-        if !matches!(provider.kind, ProviderKind::Managed | ProviderKind::Niri) { return Ok(handle); }
+        if !matches!(provider.kind, ProviderKind::Managed | ProviderKind::Niri | ProviderKind::Attached) { return Ok(handle); }
         manager.deadline.remaining(Duration::MAX)?;
 
         let (ready, started) = oneshot::channel();

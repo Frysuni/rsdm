@@ -142,6 +142,6 @@ pub(super) fn record() -> SessionRecord {
     SessionRecord { identity: SessionIdentity { generation: GENERATION.into(), login_session_id: "test".into(),
             desktop_entry_id: None, uid: 0 },
         anchor_unit: format!("rsdm-session-{GENERATION}.service"), compositor_unit: None,
-        compositor_invocation: Vec::new(), provider: "external".into(), owns_targets: false,
+        compositor_invocation: Vec::new(), coordinator_unit: None, provider: "external".into(), owns_targets: false,
         phase: SessionPhase::Running, disabled: false, config_path: None, exported_environment: Vec::new(), shutdown_deadline_usec: None }
 }

@@ -139,6 +139,14 @@ impl Endpoint {
 
 #[zbus_macros::interface(name = "org.rsdm.Session1")]
 impl Endpoint {
+    async fn attach(
+        &self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<SessionStatus> {
+        let permit = self.admission.acquire(Class::Regular)?;
+        self.authorize(connection, &header).await?;
+        self.request(permit, Request::Status).await
+    }
+
     async fn handshake(
         &self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<String> {

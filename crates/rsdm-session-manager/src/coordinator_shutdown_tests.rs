@@ -55,7 +55,7 @@ impl Fixture {
             identity: SessionIdentity { generation: GENERATION.into(), login_session_id: "test".into(),
                 desktop_entry_id: None, uid },
             anchor_unit: format!("rsdm-session-{GENERATION}.service"), compositor_unit: None,
-            compositor_invocation: Vec::new(), provider: "external".into(), owns_targets: false,
+            compositor_invocation: Vec::new(), coordinator_unit: None, provider: "external".into(), owns_targets: false,
             phase: SessionPhase::Running, disabled: false, config_path: None, exported_environment: Vec::new(), shutdown_deadline_usec: None,
         };
         runtime.save_session(&record).unwrap();
@@ -110,6 +110,35 @@ async fn logind_shutdown_uses_the_full_delay_budget() {
     assert_eq!(fixture.coordinator.runtime.session().unwrap().shutdown_deadline_usec, Some(fixture.deadline()));
     assert!(fixture.coordinator.shutdown.as_ref().unwrap().noncancelable.load(Ordering::SeqCst));
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Preparing);
+}
+
+#[tokio::test]
+async fn an_attached_logout_prepares_apps_and_keeps_the_external_session_running() {
+    let mut fixture = Fixture::new().await;
+    fixture.coordinator.provider.kind = ProviderKind::Attached;
+    fixture.coordinator.record.provider = "partial".into();
+    fixture.coordinator.ready_once = false;
+    fixture.coordinator.begin_stop("logout", None).await.unwrap();
+    fixture.coordinator.prepared(Ok(Vec::new())).await.unwrap();
+    assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Running);
+    assert!(fixture.coordinator.shutdown.is_none());
+    assert_eq!(fixture.coordinator.workers, 0);
+    assert!(!fixture.coordinator.record.owns_targets);
+}
+
+#[tokio::test]
+async fn attached_power_completion_replies_without_stopping_foreign_infrastructure() {
+    let mut fixture = Fixture::new().await;
+    fixture.coordinator.provider.kind = ProviderKind::Attached;
+    fixture.coordinator.record.provider = "partial".into();
+    fixture.coordinator.ready_once = false;
+    let (reply, mut result) = tokio::sync::mpsc::channel(1);
+    fixture.coordinator.stop_replies.push(crate::control::Reply::for_test(reply));
+    fixture.coordinator.begin_stop("reboot", None).await.unwrap();
+    fixture.coordinator.power_requested(Ok(())).await.unwrap();
+    assert_eq!(result.try_recv().unwrap().unwrap().result, "prepared");
+    assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Closed);
+    assert_eq!(fixture.coordinator.workers, 0);
 }
 
 #[tokio::test]

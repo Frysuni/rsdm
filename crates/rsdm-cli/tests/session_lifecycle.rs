@@ -64,6 +64,8 @@ struct Session { calls: Calls, finalize_fails: bool }
 impl Session {
     fn handshake(&self) -> &str { GENERATION }
 
+    fn attach(&self) -> SessionStatus { self.status() }
+
     fn finalize(&self, generation: &str, _environment: Vec<(String, String)>) -> zbus::fdo::Result<()> {
         self.calls.lock().unwrap().push(format!("finalize {generation}"));
         if self.finalize_fails { return Err(zbus::fdo::Error::Failed("session is shutting down".into())); }
@@ -94,6 +96,9 @@ impl Session {
 
 #[path = "support/client_handshake.rs"]
 mod client_handshake;
+
+#[path = "support/attach_disable.rs"]
+mod attach_disable;
 
 struct SessionTools {
     root: PathBuf,

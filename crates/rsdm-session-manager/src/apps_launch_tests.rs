@@ -8,6 +8,23 @@ mod fixture;
 use fixture::{Fixture, Mode};
 
 #[tokio::test]
+async fn attached_apps_keep_private_xsmp_and_have_no_graphical_lifetime_dependencies() {
+    let mut fixture = Fixture::new(Mode::Accepted).await;
+    let mut record = fixture.runtime.session().unwrap();
+    record.provider = "partial".into();
+    record.exported_environment = vec![("SESSION_MANAGER".into(), "private-xsmp".into()), ("VALUE".into(), "default".into())];
+    fixture.runtime.save_session(&record).unwrap();
+    fixture.request.environment = vec![("SESSION_MANAGER".into(), "foreign-xsmp".into()), ("VALUE".into(), "caller".into())];
+    let properties = launch_properties(&fixture.runtime, "foreign-anchor.service", &fixture.request, &fixture.app, None).await.unwrap();
+    assert!(properties.iter().all(|(name, _)| !matches!(*name, "After" | "PartOf" | "Requisite")));
+    let value = properties.into_iter().find(|(name, _)| *name == "Environment").unwrap().1;
+    let environment: Vec<String> = zbus::zvariant::OwnedValue::try_from(value).unwrap().try_into().unwrap();
+    assert!(environment.contains(&"SESSION_MANAGER=private-xsmp".into()));
+    assert!(environment.contains(&"VALUE=caller".into()));
+    assert!(!environment.contains(&"SESSION_MANAGER=foreign-xsmp".into()));
+}
+
+#[tokio::test]
 async fn stop_hooks_preserve_the_coordinators_config_path_as_one_argument() {
     let fixture = Fixture::new(Mode::Accepted).await;
     let path = Path::new("/run/custom config/rsdm.toml");

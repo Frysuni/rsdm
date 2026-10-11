@@ -15,6 +15,25 @@ Only one graphical session per UID is supported because the bus, activation
 environment and graphical targets are shared. A second coordinator is rejected
 before shared state changes. Disabling the wrapper preserves PAM/keyring login.
 
+## External graphical sessions
+
+Use `rsdm session attach` inside an external graphical logind login to coordinate
+newly registered applications while retaining its WM and PAM lifecycle. The first
+`rsdm app` or `rsdm session finalize` also attaches when no coordinator exists.
+The independent `rsdm-session-manager.service` runs the internal `session serve`
+command; a private inherited socket authenticates the originating CLI process.
+Concurrent callers join one coordinator, and a caller from another login is
+rejected even when its environment contains the current generation.
+
+Attached status uses provider `partial`. Application units do not require
+`graphical-session.target` or an external anchor. Environment and a private XSMP
+endpoint are scoped to new managed applications; the user's global environment
+remains untouched. `session stop` prepares registered applications and returns
+`prepared`, retaining the external WM. Power requests prepare these applications
+before requesting logind; disabling releases only the attached coordinator.
+Native desktop delegation and window-close capabilities require verified backend
+ownership; this attached path currently reports preparation without native logout.
+
 ## Quick start
 
 Log in through RSDM with session management enabled. There is no need to run

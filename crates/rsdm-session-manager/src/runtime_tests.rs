@@ -124,7 +124,7 @@ fn serialized_size_limit_applies_to_session_records_too() {
             desktop_entry_id: None, uid: unsafe { libc::geteuid() },
         },
         anchor_unit: format!("rsdm-session-{GENERATION}.service"),
-        compositor_unit: None, compositor_invocation: Vec::new(),
+        compositor_unit: None, compositor_invocation: Vec::new(), coordinator_unit: None,
         provider: "managed".into(), owns_targets: true, phase: SessionPhase::Starting,
         disabled: false,
         config_path: None,

@@ -86,6 +86,10 @@ async fn registered_process(connection: &Connection, caller: &Caller, runtime: &
 async fn registered_invocation(runtime: &Runtime, record: &SessionRecord, unit: &str) -> Result<Vec<u8>, SessionError> {
     let invocation = if record.compositor_unit.as_deref() == Some(unit) {
         compositor_invocation(runtime, record).await?
+    } else if let Some((coordinator, invocation)) = &record.coordinator_unit
+        && coordinator == unit
+    {
+        invocation.clone()
     } else {
         let runtime = runtime.clone();
         let unit = unit.to_string();

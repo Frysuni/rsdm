@@ -96,6 +96,7 @@ async fn recover_infrastructure(
     manager: &UserManager, cleanup_manager: &UserManager, runtime: &Runtime,
     record: &mut SessionRecord, failure: &mut Option<SessionError>,
 ) {
+    if record.provider == "partial" { return; }
     let owns_environment = match cleanup_manager.environment().await {
         Ok(environment) => environment.contains(&format!("{GENERATION_ENV}={}", runtime.generation)),
         Err(error) => { failure.get_or_insert(error); false }

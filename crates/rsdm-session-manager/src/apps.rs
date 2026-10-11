@@ -33,7 +33,7 @@ pub(super) async fn register(
     };
     policy.validate().map_err(|error| SessionError::State(error.into()))?;
     if policy.method == ShutdownMethod::Xsmp && (!cfg!(feature = "xsmp")
-        || !matches!(provider.kind, super::provider::ProviderKind::Managed | super::provider::ProviderKind::Niri))
+        || !matches!(provider.kind, super::provider::ProviderKind::Managed | super::provider::ProviderKind::Niri | super::provider::ProviderKind::Attached))
     {
         return Err(SessionError::State("explicit XSMP requires an XSMP-enabled build and an RSDM-owned XSMP server".into()));
     }
@@ -97,7 +97,21 @@ async fn launch_properties(
     let mut environment = request.environment.clone();
     environment.retain(|(name, _)| name != GENERATION_ENV);
     environment.push((GENERATION_ENV.into(), runtime.generation.clone()));
+    let records = runtime.clone();
+    let record = blocking(move || records.session()).await?;
+    if record.provider == "partial" {
+        for (name, value) in &record.exported_environment {
+            if environment.iter().any(|(existing, _)| existing == name)
+                && !matches!(name.as_str(), "SESSION_MANAGER" | "ICEAUTHORITY" | "RSDM_SESSION_GENERATION" | "XDG_SESSION_ID")
+            { continue; }
+            environment.retain(|(existing, _)| existing != name);
+            environment.push((name.clone(), value.clone()));
+        }
+    }
     let mut properties = app_properties(&request.argv, &environment, Path::new(&request.directory), Some(anchor)).await?;
+    if record.provider == "partial" {
+        properties.retain(|(name, _)| !matches!(*name, "PartOf" | "After" | "Requisite"));
+    }
     let executable = blocking(|| Ok(std::env::current_exe()?)).await?.to_string_lossy().into_owned();
     let mut stop_argv = vec![executable.clone()];
     if let Some(path) = config_path {

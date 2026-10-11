@@ -6,11 +6,15 @@ use super::{SessionError, activation, control::Reply, coordinator::{Coordinator,
 
 impl Coordinator {
     pub(super) async fn finalize_request(
-        &mut self, generation: String, environment: Vec<(String, String)>, reply: Reply<()>,
+        &mut self, generation: String, mut environment: Vec<(String, String)>, reply: Reply<()>,
     ) -> Result<(), SessionError> {
         if generation != self.runtime.generation || !self.lifecycle.accepts_finalize() {
             let _ = reply.try_send(Err("session is shutting down or generation is stale".into()));
             return Ok(());
+        }
+        if self.provider.kind == super::provider::ProviderKind::Attached {
+            environment.retain(|(name, _)| !matches!(name.as_str(),
+                "SESSION_MANAGER" | "ICEAUTHORITY" | "RSDM_SESSION_GENERATION" | "XDG_SESSION_ID"));
         }
         // The endpoint's admission permit bounds queued and active requests.
         self.pending_environment.push_back((environment, reply));
@@ -26,6 +30,14 @@ impl Coordinator {
         }.await;
         if let Err(error) = recorded {
             let _ = reply.try_send(Err(error.to_string()));
+            return Ok(());
+        }
+        if self.provider.kind == super::provider::ProviderKind::Attached {
+            for (name, value) in environment {
+                self.environment.retain(|(existing, _)| existing != &name);
+                self.environment.push((name, value));
+            }
+            let _ = reply.try_send(Ok(()));
             return Ok(());
         }
         // Record ownership before either manager or activation values can be

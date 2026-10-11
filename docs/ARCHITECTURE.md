@@ -180,6 +180,15 @@ completes, before readiness, so its Finalize request can prove membership.
 An early compositor caller waits for this publication within the same query
 budget. Closing admission interrupts pending authorization immediately.
 
+CLI attach starts a single independent transient user service. The private
+bootstrap socket is passed as its stdin; kernel credentials identify the actual
+originating process, whose UID, logind ID and graphical type are verified before
+the service acquires the UID lease. Its own unit and InvocationID are recorded
+for internal helper authorization. Partial coordination publishes no manager
+environment or graphical targets, creates no WM process and owns no PAM login.
+New applications receive the generation's private XSMP endpoint. Logout returns
+prepared; disabling drops the coordinator and retains the external session.
+
 CLI start, stop hooks and recovery consume these updates. A disabled generation
 closes control admission and cancels pending manager calls and preparation. It
 persists its disabled marker, releases the shutdown inhibitor and interrupts the

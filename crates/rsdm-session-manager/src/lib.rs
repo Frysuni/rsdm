@@ -4,6 +4,8 @@ mod activation;
 mod action_gate;
 mod app_record_lease;
 mod app_stop;
+mod attach;
+mod attach_bootstrap;
 mod apps;
 mod bus;
 mod client;
@@ -28,6 +30,7 @@ mod identity;
 mod lifecycle;
 mod native_compositor;
 mod plain_launch;
+mod partial;
 mod processes;
 mod provider;
 mod runtime;
@@ -55,9 +58,24 @@ mod disabled_generation_tests;
 use rsdm_core::domain::{SessionManagerConfig, SessionManagerUpdate, ShutdownPolicy};
 use thiserror::Error;
 
-pub use client::{cancel, generation, status, stop};
+pub use client::{cancel, generation, is_running, status, stop};
 pub use control::{SessionStatus, StopOutcome};
 pub use provider::StartOptions;
+
+pub async fn attach_with_config_updates(updates: tokio::sync::watch::Receiver<SessionManagerUpdate>, path: &std::path::Path) -> Result<StopOutcome, SessionError> {
+    let cfg = updates.borrow().config.clone();
+    if !cfg.enabled { return Ok(StopOutcome::disabled()); }
+    let actions = action_gate::ActionGate::new(Some(updates));
+    let result = attach::attach(&cfg, path, actions.clone()).await;
+    if actions.check().is_err() { return Ok(StopOutcome::disabled()); }
+    let generation = result?;
+    Ok(StopOutcome { result: "attached".into(), forced_units: Vec::new(), message: format!("joined session {generation}") })
+}
+
+pub async fn serve_with_config_updates(updates: tokio::sync::watch::Receiver<SessionManagerUpdate>, path: &std::path::Path) -> Result<i32, SessionError> {
+    let cfg = updates.borrow().config.clone();
+    partial::serve(&cfg, action_gate::ActionGate::new(Some(updates)), path).await
+}
 
 #[derive(Debug, Error)]
 pub enum SessionError {

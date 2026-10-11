@@ -104,6 +104,9 @@ impl Coordinator {
             });
             return Ok(());
         }
+        if self.provider.kind == super::provider::ProviderKind::Attached && self.action == "logout" {
+            return self.resume("prepared", "registered applications prepared; the external WM remains running").await;
+        }
         self.begin_finish().await
     }
 
@@ -127,6 +130,11 @@ impl Coordinator {
     }
 
     async fn begin_finish(&mut self) -> Result<(), SessionError> {
+        if self.provider.kind == super::provider::ProviderKind::Attached {
+            self.respond_stop("prepared", "registered applications prepared; external session infrastructure is retained");
+            self.lifecycle.phase = SessionPhase::Closed;
+            return self.save().await;
+        }
         self.lifecycle.phase = SessionPhase::StoppingSession;
         self.save().await?;
         let manager = self.manager.clone();
@@ -149,7 +157,7 @@ impl Coordinator {
         self.respond_stop(result, message);
         // Restore the last verified phase. Observation will confirm any real
         // anchor stop once the manager is available again.
-        self.lifecycle.phase = if self.ready_once { SessionPhase::Running } else { SessionPhase::Starting };
+        self.lifecycle.phase = if self.ready_once || self.provider.kind == super::provider::ProviderKind::Attached { SessionPhase::Running } else { SessionPhase::Starting };
         self.shutdown = None;
         self.manager.deadline.set(0);
         self.record.shutdown_deadline_usec = None;

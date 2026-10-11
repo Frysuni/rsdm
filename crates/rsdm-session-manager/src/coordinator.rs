@@ -120,7 +120,7 @@ pub(super) async fn start(
 }
 
 impl Coordinator {
-    async fn run(&mut self, signals: &mut super::signals::Signals) -> Result<i32, SessionError> {
+    pub(super) async fn run(&mut self, signals: &mut super::signals::Signals) -> Result<i32, SessionError> {
         let mut tick = tokio::time::interval(Duration::from_millis(100));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut notices_open = true;
@@ -142,7 +142,10 @@ impl Coordinator {
                 },
                 received = signals.recv() => {
                     received?;
-                    if self.lifecycle.accepts_launch() { self.begin_stop("logout", None).await?; }
+                    if self.lifecycle.accepts_launch() {
+                        let action = if self.provider.kind == super::provider::ProviderKind::Attached { "coordinator-stop" } else { "logout" };
+                        self.begin_stop(action, None).await?;
+                    }
                 }
                 _ = tick.tick() => {
                     self.notifications().await?;

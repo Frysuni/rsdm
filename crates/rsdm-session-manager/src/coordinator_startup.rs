@@ -146,6 +146,7 @@ fn initial_record(
         identity,
         compositor_unit,
         compositor_invocation: Vec::new(),
+        coordinator_unit: None,
         provider: provider.name().into(),
         owns_targets: false,
         phase: SessionPhase::Starting,

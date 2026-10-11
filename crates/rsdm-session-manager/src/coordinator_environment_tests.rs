@@ -5,6 +5,25 @@ use crate::control::{Reply, Request};
 mod peer;
 use peer::{install, pause};
 
+#[tokio::test]
+async fn attached_finalize_keeps_private_identity_and_does_not_publish_to_a_manager() {
+    let mut fixture = Fixture::new().await;
+    fixture.coordinator.provider.kind = ProviderKind::Attached;
+    fixture.coordinator.record.provider = "partial".into();
+    fixture.coordinator.record.exported_environment = vec![("SESSION_MANAGER".into(), "private-xsmp".into()),
+        ("XDG_SESSION_ID".into(), "verified".into())];
+    let (reply, mut result) = tokio::sync::mpsc::channel(1);
+    fixture.coordinator.finalize_request(fixture.coordinator.runtime.generation.clone(), vec![
+        ("SESSION_MANAGER".into(), "foreign-xsmp".into()), ("XDG_SESSION_ID".into(), "foreign-login".into()),
+        ("VALUE".into(), "published".into()),
+    ], crate::control::Reply::for_test(reply)).await.unwrap();
+    assert!(result.try_recv().unwrap().is_ok());
+    let saved = fixture.coordinator.runtime.session().unwrap();
+    assert!(saved.exported_environment.contains(&("SESSION_MANAGER".into(), "private-xsmp".into())));
+    assert!(saved.exported_environment.contains(&("XDG_SESSION_ID".into(), "verified".into())));
+    assert!(saved.exported_environment.contains(&("VALUE".into(), "published".into())));
+    assert_eq!(fixture.coordinator.workers, 0);
+}
 async fn finalize(fixture: &mut Fixture, value: &str) -> tokio::sync::mpsc::Receiver<Result<(), String>> {
     let (reply, response) = tokio::sync::mpsc::channel(1);
     fixture.coordinator.request(Request::Finalize {

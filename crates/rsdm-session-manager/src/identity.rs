@@ -22,6 +22,16 @@ pub(super) struct SessionIdentity {
 }
 
 impl SessionIdentity {
+    pub(super) async fn discover_attach() -> Result<Self, SessionError> {
+        let uid = unsafe { libc::geteuid() };
+        let connect = async {
+            Ok(zbus::connection::Builder::system()?.method_timeout(Duration::from_secs(5)).build().await?)
+        };
+        let login_session_id = verified_login_session(connect, uid, None).await?;
+        Ok(Self { generation: super::runtime::blocking(|| Ok(new_generation()?)).await?, login_session_id,
+            desktop_entry_id: std::env::var(DESKTOP_ENTRY_ENV).ok(), uid })
+    }
+
     pub async fn discover() -> Result<Self, SessionError> {
         let generation = match std::env::var(GENERATION_ENV) {
             Ok(generation) if valid_generation(&generation) => generation,
