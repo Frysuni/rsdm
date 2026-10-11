@@ -97,6 +97,9 @@ Coordinator startup resolves its own PID through logind and checks the session
 owner UID. An `XDG_SESSION_ID` hint must match that verified session; it cannot
 select another login of the same user. Connection setup and session queries
 share one five-second budget.
+Validated disable updates interrupt bootstrap waits for identity verification
+and the lease worker. The launcher then runs the original command without
+waiting for logind's timeout or starting a control endpoint.
 GNOME and Plasma shutdown delegation runs in an asynchronous worker under the
 shared deadline; a failed or lost reply does not trigger a repeated request.
 Session Manager clients, stop hooks, and recovery await typed D-Bus requests.
