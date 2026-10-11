@@ -316,6 +316,9 @@ Per-app metadata leases normally wait at most 250 ms for contention. During
 shutdown/recovery their retries and sleeps also obey the shared deadline;
 revisions or revocation affect an already waiting lease. The lease is released
 before application exit waits or systemd jobs.
+After a lock-file replacement, a waiter reacquires the current inode within
+the same budget. Reaping checks the inode before removing a lock file, so an
+obsolete descriptor cannot delete a newer application's lease.
 
 Registration, session records and recovery filesystem operations run on blocking
 tasks. The coordinator awaits each write before its dependent external action;
