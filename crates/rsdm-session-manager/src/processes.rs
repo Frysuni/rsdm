@@ -81,7 +81,7 @@ pub(super) async fn signal_app(manager: &UserManager, app: &AppRecord, signal: i
                     Err(error) => return Err(error.into()),
                 };
                 if belongs_to_cgroup(&membership, &group) {
-                    actions.check()?;
+                    actions.check_generation()?;
                     handle.signal(signal)?;
                 }
             }
@@ -125,7 +125,7 @@ pub(super) async fn terminate_main(manager: &UserManager, app: &AppRecord) -> Re
         return signal_app(manager, app, libc::SIGTERM).await;
     };
     if app_processes(manager, app).await?.contains(&main) {
-        manager.actions.check()?;
+        manager.actions.check_generation_async().await?;
         handle.signal(libc::SIGTERM)?;
     }
     Ok(())

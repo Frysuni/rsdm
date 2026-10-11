@@ -170,11 +170,19 @@ The launcher retains its child and compositor pidfd independently of coordinator
 workers and passively waits for the actual WM exit before returning to DM.
 App stop commands preserve the coordinator's configuration path in their argv.
 
+Each generation reserves a private one-byte retirement file before publishing
+its session record. Disabling updates that file independently of atomic record
+replacement, so denied directory writes cannot revive the old generation.
+Record errors still allow worker draining, inhibitor release and XSMP shutdown.
+Hooks check retirement before dispatch and while waiting, even if their own
+configuration watcher missed the disable transition. Retirement is checked
+before parsing a damaged or missing session record.
+
 Recovery records can permanently mark a generation disabled. Once marked, app
 stop hooks and recovery leave its applications, compositor, anchor and exported
 environment untouched, even when the current configuration enables SM again.
 An attempt to save that generation as enabled is rejected. Older records without
-the marker retain their original recovery behavior.
+the retirement file retain their original recovery behavior and disabled field.
 
 Orderly logout closes the launch gate, drains accepted jobs and prepares
 registered `rsdm app` processes in parallel before infrastructure teardown.

@@ -87,7 +87,7 @@ impl UserManager {
         // Job and recovery futures compose these requests; keep their state
         // off the caller's stack instead of growing every enclosing future.
         self.actions.guard(self.deadline.bound(Box::pin(self.transport.request(async {
-            self.actions.check().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
+            self.actions.check_generation_async().await.map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
             // The deadline can change while this request waits for a slot.
             self.deadline.remaining(Duration::MAX)?;
             operation.await

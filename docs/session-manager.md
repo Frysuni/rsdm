@@ -392,6 +392,10 @@ coordinator and its private XSMP server without stopping applications or the WM;
 the launcher still waits for the WM to exit before releasing its PAM session.
 Re-enabling does not resume that generation's hooks or recovery. A request
 already accepted by another service may still complete.
+The generation reserves a separate retirement file before startup. It keeps old
+hooks passive when replacing `session.toml` fails, provided the retirement file
+can still be updated. Storage errors do not bypass infrastructure shutdown or
+allow the launcher to return before the WM exits.
 
 Alternatively, set
 `services.rsdm.sessionManager = false` on NixOS. Inspect `rsdm session status`,

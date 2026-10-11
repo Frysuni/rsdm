@@ -22,14 +22,14 @@ impl Coordinator {
         let result = if self.preparing || self.lifecycle.phase == rsdm_core::domain::SessionPhase::StoppingSession { "unknown" } else { "disabled" };
         self.respond_stop(result, "session management disabled; previously accepted actions cannot be recalled");
         self.record.disabled = true;
-        self.save().await?;
         self._power_monitor.take();
+        let mut failure = self.save().await.err();
         self.drain_disabled_workers().await;
-        self.save().await?;
+        if let Err(error) = self.save().await { failure.get_or_insert(error); }
         if let Err(error) = self.xsmp.shutdown(&super::deadline::Deadline::default()).await {
             tracing::warn!(%error, "disabled XSMP worker shutdown failed");
         }
-        Ok(())
+        match failure { Some(error) => Err(error), None => Ok(()) }
     }
 
     async fn drain_disabled_workers(&mut self) {

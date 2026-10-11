@@ -15,6 +15,7 @@ pub async fn cleanup(generation: &str, actions: super::action_gate::ActionGate) 
     let Some((runtime, _lease, saved_deadline)) = super::runtime::blocking(move || {
         open_recovery(&generation)
     }).await? else { return Ok(()); };
+    let actions = actions.with_generation(runtime.clone());
     let deadline = Deadline::default();
     deadline.set(recovery_deadline(saved_deadline, 0)?);
     let result = async {
@@ -24,6 +25,7 @@ pub async fn cleanup(generation: &str, actions: super::action_gate::ActionGate) 
     }.await;
     if actions.check().is_err() {
         super::runtime::blocking(move || {
+            if runtime.is_disabled()? { return Ok(()); }
             let mut record = runtime.session()?;
             record.disabled = true;
             runtime.save_session(&record)
@@ -35,6 +37,7 @@ pub async fn cleanup(generation: &str, actions: super::action_gate::ActionGate) 
 
 fn open_recovery(generation: &str) -> Result<Option<(Runtime, super::session_lease::SessionLease, Option<u64>)>, SessionError> {
     let Some(runtime) = Runtime::open(generation)? else { return Ok(None); };
+    if runtime.is_disabled()? { return Ok(None); }
     // Validation may have created the private directory before publishing a
     // session record. No service or environment side effect precedes that
     // record, so an empty generation needs no user-manager connection.
@@ -50,6 +53,8 @@ fn open_recovery(generation: &str) -> Result<Option<(Runtime, super::session_lea
 }
 
 pub(super) async fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), SessionError> {
+    let records = runtime.clone();
+    if super::runtime::blocking(move || records.is_disabled()).await? { return Ok(()); }
     let records = runtime.clone();
     let mut record = super::runtime::blocking(move || records.session()).await?;
     if record.disabled { return Ok(()); }

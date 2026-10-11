@@ -13,6 +13,9 @@ use super::{SessionError, deadline::Deadline, identity::{SessionIdentity, valid_
 
 const MAX_RECORD_BYTES: usize = 1_048_576;
 
+#[path = "runtime_disable.rs"]
+mod disable;
+
 pub(super) async fn blocking<T: Send + 'static>(
     operation: impl FnOnce() -> Result<T, SessionError> + Send + 'static,
 ) -> Result<T, SessionError> {
@@ -78,7 +81,9 @@ impl Runtime {
             }
             verify_directory(&directory)?;
         }
-        Ok(Self { path, generation: generation.to_string() })
+        let runtime = Self { path, generation: generation.to_string() };
+        disable::initialize(&runtime)?;
+        Ok(runtime)
     }
 
     pub fn open(generation: &str) -> Result<Option<Self>, SessionError> {
@@ -98,27 +103,35 @@ impl Runtime {
         if record.identity.generation != self.generation {
             return Err(SessionError::State("session record generation mismatch".into()));
         }
-        if !record.disabled {
-            match self.session() {
-                Ok(previous) if previous.disabled => {
-                    return Err(SessionError::State("disabled session generation cannot be reactivated".into()));
-                }
-                Ok(_) => {}
-                Err(SessionError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
-            }
+        if !record.disabled && self.is_disabled()? {
+            return Err(SessionError::State("disabled session generation cannot be reactivated".into()));
         }
-        write_record(&self.path.join("session.toml"), record)
+        let marked = if record.disabled { disable::mark(self) } else { Ok(()) };
+        let saved = write_record(&self.path.join("session.toml"), record);
+        match (marked, saved) {
+            (Err(marker), Err(record)) => Err(SessionError::State(format!("{record}; disabled generation marker failed: {marker}"))),
+            (_, saved) => saved,
+        }
+    }
+
+    pub fn is_disabled(&self) -> Result<bool, SessionError> {
+        if disable::marked(self)? { return Ok(true); }
+        match self.session() {
+            Ok(record) => Ok(record.disabled),
+            Err(SessionError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
     }
 
     pub fn session(&self) -> Result<SessionRecord, SessionError> {
-        let record: SessionRecord = read_record(&self.path.join("session.toml"))?;
+        let mut record: SessionRecord = read_record(&self.path.join("session.toml"))?;
         // SAFETY: geteuid has no preconditions.
         if record.identity.generation != self.generation || record.identity.uid != unsafe { libc::geteuid() }
             || record.anchor_unit != format!("rsdm-session-{}.service", self.generation)
         {
             return Err(SessionError::State("session record generation mismatch".into()));
         }
+        record.disabled |= disable::marked(self)?;
         Ok(record)
     }
 

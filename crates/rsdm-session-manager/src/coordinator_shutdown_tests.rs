@@ -92,7 +92,10 @@ impl Fixture {
 }
 
 impl Drop for Fixture {
-    fn drop(&mut self) { let _ = fs::remove_dir_all(&self.directory); }
+    fn drop(&mut self) {
+        let _ = fs::remove_file(self.coordinator.runtime.path.with_extension("disabled"));
+        let _ = fs::remove_dir_all(&self.directory);
+    }
 }
 
 use crate::processes::monotonic_usec;

@@ -176,10 +176,12 @@ pub async fn stop_hook(generation: &str, unit: &str, actions: super::action_gate
     let generation = generation.to_string();
     let Some((runtime, saved)) = blocking(move || {
         let runtime = Runtime::open(&generation)?.ok_or_else(|| SessionError::State("session recovery record is missing".into()))?;
+        if runtime.is_disabled()? { return Ok(None); }
         let record = runtime.session()?;
         if record.disabled { return Ok(None); }
         Ok(Some((runtime, record.shutdown_deadline_usec)))
     }).await? else { return Ok(()); };
+    let actions = actions.with_generation(runtime.clone());
     let deadline = Deadline::default();
     if let Some(saved) = saved { deadline.set(saved); }
     let manager = match UserManager::connect_guarded(deadline, actions.clone()).await {

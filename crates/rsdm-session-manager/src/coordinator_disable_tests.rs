@@ -34,3 +34,25 @@ async fn late_worker_completions_cannot_resume_preparation_after_disable() {
     assert_eq!(coordinator.lifecycle.phase, SessionPhase::Running);
     assert!(coordinator.runtime.session().unwrap().disabled);
 }
+
+#[tokio::test]
+async fn a_record_error_still_drains_workers_and_releases_pending_callers() {
+    let mut fixture = Fixture::new().await;
+    let coordinator = &mut fixture.coordinator;
+    // A directory in place of the record forces atomic publication to fail.
+    // The retirement slot must protect hooks even when TOML cannot be loaded.
+    let path = coordinator.runtime.path.join("session.toml");
+    fs::remove_file(&path).unwrap();
+    fs::create_dir(path).unwrap();
+    let (sender, mut finalized) = tokio::sync::mpsc::channel(1);
+    coordinator.finalize_replies.push(crate::control::Reply::for_test(sender));
+    coordinator.workers = 1;
+    coordinator.events.send(Work::EnvironmentPublished(Ok(()))).unwrap();
+
+    assert!(tokio::time::timeout(Duration::from_secs(3), coordinator.disable()).await.unwrap().is_err());
+    assert_eq!(coordinator.workers, 0);
+    assert!(coordinator.runtime.is_disabled().unwrap());
+    assert!(coordinator.manager.actions.check().is_err());
+    assert!(finalized.recv().await.unwrap().is_err());
+    assert_eq!(coordinator.lifecycle.phase, SessionPhase::Running);
+}

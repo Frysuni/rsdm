@@ -4,6 +4,9 @@ use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 use super::*;
 
+#[path = "bus_retirement_tests.rs"]
+mod retirement;
+
 struct State {
     entered: tokio::sync::mpsc::UnboundedSender<&'static str>,
     replies: tokio::sync::Semaphore,

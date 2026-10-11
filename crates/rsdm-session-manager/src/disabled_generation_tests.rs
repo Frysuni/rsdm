@@ -60,6 +60,7 @@ async fn check_disabled_hooks() {
     assert_eq!(peer.state.starts.load(Ordering::SeqCst), 0);
     assert_eq!(peer.state.stops.load(Ordering::SeqCst), 0);
     assert_eq!(peer.state.unrefs.load(Ordering::SeqCst), 0);
+    check_damaged_records(&runtime, &cfg).await;
 
     blocking(move || {
         assert_eq!(fs::read(runtime.path.join("session.toml"))?, session);
@@ -69,6 +70,23 @@ async fn check_disabled_hooks() {
         drop(lease);
         Ok(())
     }).await.unwrap();
+}
+
+async fn check_damaged_records(runtime: &Runtime, cfg: &SessionManagerConfig) {
+    let records = runtime.clone();
+    let saved = blocking(move || Ok(fs::read(records.path.join("session.toml"))?)).await.unwrap();
+    for content in [Some("invalid TOML"), None] {
+        let records = runtime.clone();
+        blocking(move || {
+            let path = records.path.join("session.toml");
+            match content { Some(content) => fs::write(path, content)?, None => fs::remove_file(path)? }
+            Ok(())
+        }).await.unwrap();
+        stop_hook(GENERATION, "../invalid", cfg).await.unwrap();
+        cleanup(GENERATION, cfg).await.unwrap();
+    }
+    let records = runtime.clone();
+    blocking(move || Ok(fs::write(records.path.join("session.toml"), saved)?)).await.unwrap();
 }
 
 #[test]
