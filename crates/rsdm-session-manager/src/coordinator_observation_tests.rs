@@ -22,6 +22,9 @@ async fn observation_preserves_the_process_until_the_start_worker_completes() {
     assert!(!fixture.coordinator.booting());
     assert_eq!(fixture.coordinator.process.as_ref().unwrap().invocation, vec![3; 16]);
     assert_eq!(fixture.coordinator.record.compositor_invocation, vec![3; 16]);
+    let saved = fixture.coordinator.runtime.session().unwrap();
+    assert_eq!(saved.compositor_invocation, vec![3; 16]);
+    assert_eq!(saved.phase, SessionPhase::Starting);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

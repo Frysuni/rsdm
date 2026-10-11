@@ -75,6 +75,9 @@ impl Coordinator {
                 Ok(id) => {
                     process.invocation = id.clone();
                     self.record.compositor_invocation = id;
+                    // Finalize may come from the user-managed WM before readiness.
+                    // Its caller must already have a durable invocation identity.
+                    self.save().await?;
                 }
                 Err(error) => {
                     tracing::error!(%error, "compositor start failed");

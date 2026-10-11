@@ -67,7 +67,7 @@ impl Runtime {
         Self::create_at(&base, generation)
     }
 
-    fn create_at(base: &Path, generation: &str) -> Result<Self, SessionError> {
+    pub(super) fn create_at(base: &Path, generation: &str) -> Result<Self, SessionError> {
         let path = session_path(base, generation)?;
         for directory in [base.join("rsdm"), base.join("rsdm/sessions"), path.clone(), path.join("apps")] {
             match fs::create_dir(&directory) {

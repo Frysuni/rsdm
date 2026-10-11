@@ -28,7 +28,7 @@ async fn a_delivered_acknowledgement_finishes_without_waiting_out_the_budget() {
     let mut fixture = Fixture::new().await;
     // Let the real endpoint send its delivery acknowledgement over the private
     // channel; its permit must stay alive until the coordinator consumes it.
-    let (endpoint, requests) = Endpoint::channel(fixture.coordinator.record.identity.uid);
+    let (endpoint, requests) = Endpoint::for_test(fixture.coordinator.record.identity.clone()).await;
     fixture.coordinator.requests = requests;
     let server = fixture._server.clone();
     server.object_server().at(crate::control::OBJECT_PATH, endpoint).await.unwrap();

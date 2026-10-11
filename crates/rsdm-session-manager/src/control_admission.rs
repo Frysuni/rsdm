@@ -21,6 +21,7 @@ pub(super) enum Class {
 #[derive(Clone, Default)]
 pub(super) struct Admission {
     closed: Arc<AtomicBool>,
+    closed_notice: Arc<tokio::sync::Notify>,
     regular: Arc<AtomicUsize>,
     stop: Arc<AtomicUsize>,
     cancel: Arc<AtomicUsize>,
@@ -28,7 +29,18 @@ pub(super) struct Admission {
 }
 
 impl Admission {
-    pub fn close(&self) { self.closed.store(true, Ordering::Release); }
+    pub fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+        self.closed_notice.notify_waiters();
+    }
+
+    pub async fn wait_closed(&self) {
+        let notice = self.closed_notice.notified();
+        tokio::pin!(notice);
+        notice.as_mut().enable();
+        if self.closed.load(Ordering::Acquire) { return; }
+        notice.await;
+    }
 
     pub fn check_open(&self) -> zbus::fdo::Result<()> {
         if self.closed.load(Ordering::Acquire) {

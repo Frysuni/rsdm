@@ -3,8 +3,15 @@ use std::{time::Duration};
 use super::*;
 
 async fn connect(uid: u32) -> (Connection, Connection, tokio::sync::mpsc::Receiver<Request>) {
+    let (endpoint, receiver) = Endpoint::for_test(super::super::identity::SessionIdentity {
+        generation: "0123456789abcdef0123456789abcdef".into(), login_session_id: "test".into(),
+        desktop_entry_id: None, uid,
+    }).await;
+    connect_endpoint(endpoint, receiver).await
+}
+
+async fn connect_endpoint(endpoint: Endpoint, receiver: tokio::sync::mpsc::Receiver<Request>) -> (Connection, Connection, tokio::sync::mpsc::Receiver<Request>) {
     let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
-    let (endpoint, receiver) = Endpoint::channel(uid);
     let server = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket)
             .p2p().server(zbus::Guid::generate()).unwrap()
@@ -14,6 +21,9 @@ async fn connect(uid: u32) -> (Connection, Connection, tokio::sync::mpsc::Receiv
         .p2p().build().await.unwrap();
     (server.await.unwrap(), client, receiver)
 }
+
+#[path = "control_authorization_tests.rs"]
+mod authorization;
 
 fn launch() -> LaunchRequest {
     LaunchRequest {

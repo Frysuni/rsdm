@@ -6,20 +6,17 @@ use rsdm_core::domain::{SessionManagerConfig, ShutdownPolicy};
 
 use super::{
     SessionError, bus::UserManager, control::{self, LaunchRequest, SessionStatus, StopOutcome}, env,
-    identity::{GENERATION_ENV, valid_generation}, unit_name::{ManagedUnitKind, unique_unit_name}, units,
+    identity::GENERATION_ENV, unit_name::{ManagedUnitKind, unique_unit_name}, units,
 };
 
 pub async fn generation(cfg: &SessionManagerConfig) -> Result<String, SessionError> {
     if !cfg.enabled { return Err(SessionError::State("session manager is disabled".into())); }
-    let connection = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await?;
-    Ok(control::proxy(&connection).await?.call("Handshake", &()).await?)
+    current_generation().await
 }
 
-fn current_generation() -> Result<String, SessionError> {
-    let generation = std::env::var(GENERATION_ENV)
-        .map_err(|_| SessionError::State("this command requires an RSDM-coordinated session".into()))?;
-    if !valid_generation(&generation) { return Err(SessionError::State("invalid session generation".into())); }
-    Ok(generation)
+async fn current_generation() -> Result<String, SessionError> {
+    let connection = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await?;
+    Ok(control::proxy(&connection).await?.call("Handshake", &()).await?)
 }
 
 pub async fn run_app(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, SessionError> {
@@ -27,7 +24,7 @@ pub async fn run_app(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, Se
     if std::env::var_os(GENERATION_ENV).is_none() {
         return basic_launch(argv, policy).await;
     }
-    let generation = current_generation()?;
+    let generation = current_generation().await?;
     let directory = super::runtime::blocking(|| Ok(std::env::current_dir()?)).await?;
     let request = LaunchRequest {
         generation, argv: argv.to_vec(), environment: env::command_environment(),
@@ -42,7 +39,7 @@ pub async fn run_app(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, Se
 }
 
 pub async fn finalize(cfg: &SessionManagerConfig, names: &[String]) -> Result<(), SessionError> {
-    let generation = current_generation()?;
+    let generation = current_generation().await?;
     let pairs = env::collect_present(&cfg.extra_env, names);
     control::validate_finalize(&generation, &pairs).map_err(SessionError::State)?;
     let connection = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(25)).build().await?;
@@ -58,7 +55,7 @@ pub async fn status(cfg: &SessionManagerConfig) -> Result<SessionStatus, Session
 
 pub async fn stop(action: &str, cfg: &SessionManagerConfig) -> Result<StopOutcome, SessionError> {
     if !cfg.enabled { return Ok(StopOutcome::disabled()); }
-    let generation = current_generation()?;
+    let generation = current_generation().await?;
     let status = status(cfg).await?;
     if status.generation != generation { return Err(SessionError::State("session generation is stale".into())); }
     let longest = status.apps.iter().map(|(_, _, timeout, _)| *timeout).max().unwrap_or(30);
@@ -69,7 +66,7 @@ pub async fn stop(action: &str, cfg: &SessionManagerConfig) -> Result<StopOutcom
 
 pub async fn cancel(cfg: &SessionManagerConfig) -> Result<StopOutcome, SessionError> {
     if !cfg.enabled { return Ok(StopOutcome::disabled()); }
-    let generation = current_generation()?;
+    let generation = current_generation().await?;
     let connection = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await?;
     control::proxy(&connection).await?.call::<_, _, ()>("Cancel", &(generation,)).await?;
     Ok(StopOutcome { result: "accepted".into(), forced_units: Vec::new(), message: "shutdown cancellation requested".into() })

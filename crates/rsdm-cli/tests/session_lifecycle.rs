@@ -62,6 +62,8 @@ struct Session { calls: Calls, finalize_fails: bool }
 
 #[zbus_macros::interface(name = "org.rsdm.Session1")]
 impl Session {
+    fn handshake(&self) -> &str { GENERATION }
+
     fn finalize(&self, generation: &str, _environment: Vec<(String, String)>) -> zbus::fdo::Result<()> {
         self.calls.lock().unwrap().push(format!("finalize {generation}"));
         if self.finalize_fails { return Err(zbus::fdo::Error::Failed("session is shutting down".into())); }
@@ -69,6 +71,7 @@ impl Session {
     }
 
     fn launch(&self, request: Launch) -> String {
+        assert_eq!(request.0, GENERATION);
         self.calls.lock().unwrap().push(format!("launch {:?} {} {} {:?}", request.1, request.4, request.5, request.7));
         "example.service".into()
     }
@@ -88,6 +91,9 @@ impl Session {
         StopOutcome { result: "cancelled".into(), forced_units: vec!["earlier.service".into()], message: "application timed out".into() }
     }
 }
+
+#[path = "support/client_handshake.rs"]
+mod client_handshake;
 
 struct SessionTools {
     root: PathBuf,

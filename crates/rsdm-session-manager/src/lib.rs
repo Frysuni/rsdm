@@ -44,6 +44,9 @@ mod xsmp;
 mod helper_start_fixture;
 
 #[cfg(test)]
+mod control_test_authority;
+
+#[cfg(test)]
 mod enabled_tests;
 
 #[cfg(test)]

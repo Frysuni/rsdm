@@ -1,6 +1,6 @@
 //! Bind a control handshake to the caller's authenticated process identity.
 
-use std::{os::fd::AsFd, sync::Arc, time::Duration};
+use std::{os::fd::AsFd, sync::Arc};
 
 use zbus::{Connection, fdo::ConnectionCredentials, message::Header};
 
@@ -42,9 +42,8 @@ impl Caller {
         Ok(())
     }
 
-    pub(super) async fn belongs_to_login(&self, identity: &SessionIdentity) -> Result<bool, SessionError> {
-        let connection = zbus::connection::Builder::system()?.method_timeout(Duration::from_secs(5)).build().await?;
-        let manager = zbus::Proxy::new(&connection, "org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager").await?;
+    pub(super) async fn belongs_to_login(&self, connection: &Connection, identity: &SessionIdentity) -> Result<bool, SessionError> {
+        let manager = zbus::Proxy::new(connection, "org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager").await?;
         match super::identity::login_session_for_process(&manager, self.pid, identity.uid).await {
             Ok(id) if id == identity.login_session_id => Ok(true),
             Ok(_) => Err(denied("caller belongs to another login session")),

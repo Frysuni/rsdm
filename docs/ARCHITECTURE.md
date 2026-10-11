@@ -166,14 +166,19 @@ policy does not notify receivers; dropping all receivers ends monitoring.
 Updates retain a disable counter, so a receiver that skips intermediate values
 still observes a validated false-to-true transition as disabling its generation.
 
-The control endpoint exposes `Handshake` for generation discovery. It checks
+Every user-bus control method verifies session membership. It checks
 bus UID/PID credentials, pins the caller, and verifies its actual logind login.
 Processes without a logind login must belong to a registered application or
 compositor cgroup with the current recorded InvocationID. Another login of the
-same UID is rejected. Queries have a five-second total budget and four concurrent
-slots; disabling closes admission before a successful handshake can return.
-The existing request methods retain their UID authorization until caller
-verification is applied to each request; handshake alone does not secure them.
+same UID is rejected. Authorization queries have a five-second total budget and
+share four concurrent slots. Disabling closes admission before verified requests
+can be queued. `Handshake` returns the generation after these same checks;
+CLI app, finalize, stop and cancel use that result instead of trusting an
+environment generation hint.
+The managed compositor's verified InvocationID is persisted when its start job
+completes, before readiness, so its Finalize request can prove membership.
+An early compositor caller waits for this publication within the same query
+budget. Closing admission interrupts pending authorization immediately.
 
 CLI start, stop hooks and recovery consume these updates. A disabled generation
 closes control admission and cancels pending manager calls and preparation. It

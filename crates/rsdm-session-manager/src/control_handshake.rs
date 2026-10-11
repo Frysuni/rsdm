@@ -7,29 +7,57 @@ use zbus::{Connection, message::Header, zvariant::OwnedObjectPath};
 
 use super::{SessionError, control_caller::{Caller, denied}, identity::SessionIdentity, runtime::{Runtime, SessionRecord}};
 
-pub(super) async fn verify(connection: &Connection, header: &Header<'_>, identity: &SessionIdentity) -> Result<String, SessionError> {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let caller = Caller::discover(connection, header, identity.uid).await?;
-        let (runtime, record) = session(identity).await?;
-        if !caller.belongs_to_login(identity).await? {
-            registered_process(connection, &caller, &runtime, &record).await?;
-        }
-        caller.check_alive()?;
-        session(identity).await?;
-        Ok(identity.generation.clone())
-    }).await.map_err(|_| SessionError::Bus(zbus::fdo::Error::TimedOut("session handshake timed out".into()).into()))?
+#[derive(Clone)]
+pub(super) struct Verifier {
+    pub(super) identity: SessionIdentity,
+    #[cfg(test)]
+    pub(super) context: Option<std::sync::Arc<super::control_test_authority::Context>>,
 }
 
-async fn session(identity: &SessionIdentity) -> Result<(Runtime, SessionRecord), SessionError> {
-    let identity = identity.clone();
-    super::runtime::blocking(move || {
-        let runtime = Runtime::open(&identity.generation)?.ok_or_else(|| denied("session is not published"))?;
-        let record = runtime.session()?;
-        if record.identity != identity || record.disabled || record.phase == SessionPhase::Closed {
-            return Err(denied("session is stale or disabled"));
-        }
-        Ok((runtime, record))
-    }).await
+impl Verifier {
+    pub(super) fn new(identity: SessionIdentity) -> Self {
+        Self { identity, #[cfg(test)] context: None }
+    }
+
+    pub(super) async fn verify(&self, connection: &Connection, header: &Header<'_>) -> Result<String, SessionError> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let caller = Caller::discover(connection, header, self.identity.uid).await?;
+            let (runtime, record) = self.session().await?;
+            let logind = self.logind().await?;
+            if !caller.belongs_to_login(&logind, &self.identity).await? {
+                registered_process(connection, &caller, &runtime, &record).await?;
+            }
+            caller.check_alive()?;
+            self.session().await?;
+            Ok(self.identity.generation.clone())
+        }).await.map_err(|_| SessionError::Bus(zbus::fdo::Error::TimedOut("verifying session membership timed out".into()).into()))?
+    }
+
+    async fn session(&self) -> Result<(Runtime, SessionRecord), SessionError> {
+        let identity = self.identity.clone();
+        #[cfg(test)]
+        let context = self.context.clone();
+        super::runtime::blocking(move || {
+            #[cfg(test)]
+            let runtime = match context {
+                Some(context) => context.runtime.clone(),
+                None => Runtime::open(&identity.generation)?.ok_or_else(|| denied("session is not published"))?,
+            };
+            #[cfg(not(test))]
+            let runtime = Runtime::open(&identity.generation)?.ok_or_else(|| denied("session is not published"))?;
+            let record = runtime.session()?;
+            if record.identity != identity || record.disabled || record.phase == SessionPhase::Closed {
+                return Err(denied("session is stale or disabled"));
+            }
+            Ok((runtime, record))
+        }).await
+    }
+
+    async fn logind(&self) -> Result<Connection, SessionError> {
+        #[cfg(test)]
+        if let Some(context) = &self.context { return Ok(context.logind.clone()); }
+        Ok(zbus::connection::Builder::system()?.method_timeout(Duration::from_secs(5)).build().await?)
+    }
 }
 
 async fn registered_process(connection: &Connection, caller: &Caller, runtime: &Runtime, record: &SessionRecord) -> Result<(), SessionError> {
@@ -57,7 +85,7 @@ async fn registered_process(connection: &Connection, caller: &Caller, runtime: &
 
 async fn registered_invocation(runtime: &Runtime, record: &SessionRecord, unit: &str) -> Result<Vec<u8>, SessionError> {
     let invocation = if record.compositor_unit.as_deref() == Some(unit) {
-        record.compositor_invocation.clone()
+        compositor_invocation(runtime, record).await?
     } else {
         let runtime = runtime.clone();
         let unit = unit.to_string();
@@ -65,6 +93,21 @@ async fn registered_invocation(runtime: &Runtime, record: &SessionRecord, unit: 
     };
     if invocation.is_empty() || invocation.iter().all(|byte| *byte == 0) { return Err(denied("caller unit has no registered invocation")); }
     Ok(invocation)
+}
+
+async fn compositor_invocation(runtime: &Runtime, expected: &SessionRecord) -> Result<Vec<u8>, SessionError> {
+    let mut record = expected.clone();
+    loop {
+        if record.identity != expected.identity || record.compositor_unit != expected.compositor_unit
+            || record.disabled || record.phase == SessionPhase::Closed
+        { return Err(denied("compositor registration has changed or ended")); }
+        if !record.compositor_invocation.is_empty() || record.phase != SessionPhase::Starting {
+            return Ok(record.compositor_invocation);
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let runtime = runtime.clone();
+        record = super::runtime::blocking(move || runtime.session()).await?;
+    }
 }
 
 #[cfg(test)]

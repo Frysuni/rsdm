@@ -112,3 +112,20 @@ async fn a_unit_name_without_registration_or_membership_is_insufficient() {
     fs::remove_file(fixture.runtime.path.join("apps").join(format!("{UNIT}.toml"))).unwrap();
     assert!(fixture.verify().await.is_err());
 }
+
+#[tokio::test]
+async fn an_early_compositor_caller_waits_for_the_recorded_boot_invocation() {
+    let fixture = Fixture::new(vec![1; 16], false, current_group()).await;
+    let mut record = fixture.record.clone();
+    record.phase = SessionPhase::Starting;
+    record.compositor_unit = Some(UNIT.into());
+    fixture.runtime.save_session(&record).unwrap();
+    let runtime = fixture.runtime.clone();
+    let expected = record.clone();
+    let waiting = tokio::spawn(async move { compositor_invocation(&runtime, &expected).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!waiting.is_finished());
+    record.compositor_invocation = vec![1; 16];
+    fixture.runtime.save_session(&record).unwrap();
+    assert_eq!(tokio::time::timeout(Duration::from_secs(1), waiting).await.unwrap().unwrap().unwrap(), vec![1; 16]);
+}

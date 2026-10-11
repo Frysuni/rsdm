@@ -1,6 +1,7 @@
 { python, native, application }:
 ''
     import tomllib
+    ${import ./control-authorization.nix { inherit application; }}
 
     def start_native_compositor(desktop):
         machine.succeed(user + "systemd-run --user --unit=rsdm-test-native-wm --collect -- ${python}/bin/python3 ${./native-compositor.py} " + desktop)
@@ -26,10 +27,14 @@
                 handshake = machine.succeed(user + "busctl --user call org.rsdm.TestNative " + path + " org.rsdm.TestNative VerifyHandshake")
                 assert generation in handshake, handshake
                 impostor = user + "RSDM_SESSION_GENERATION=" + generation + " XDG_SESSION_ID=" + record["identity"]["login_session_id"] + " "
-                machine.fail(impostor + "busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake")
+                before = machine.succeed("ls " + directory + "/apps")
+                for call in denied_control_calls(generation):
+                    assert_control_denied(impostor + shlex.join(["busctl", "--user", "call", "org.rsdm.Session1", "/org/rsdm/Session1", "org.rsdm.Session1"] + call))
+                assert machine.succeed("ls " + directory + "/apps") == before
                 launcher = machine.succeed("systemctl show rsdm-test-session -p MainPID -p InvocationID")
                 if phase == "running":
-                    machine.fail("systemd-run --unit=rsdm-test-other-login --wait --pipe --collect --uid=alice --property=PAMName=login --property=TTYPath=/dev/tty1 --setenv=XDG_SESSION_TYPE=wayland --setenv=XDG_RUNTIME_DIR=" + runtime + " --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus --setenv=RSDM_SESSION_GENERATION=" + generation + " --setenv=XDG_SESSION_ID=" + record["identity"]["login_session_id"] + " -- busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake")
+                    reject_other_login(generation, record["identity"]["login_session_id"])
+                    assert machine.succeed("ls " + directory + "/apps") == before
                     machine.succeed(control + "RSDM_SESSION_GENERATION=" + generation + " rsdm app -- ${application} handshake")
                     machine.wait_for_file(runtime + "/app-handshake-ready")
                     assert generation in machine.succeed("cat " + runtime + "/app-handshake-handshake")

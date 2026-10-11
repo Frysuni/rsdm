@@ -369,10 +369,11 @@ acknowledgements retain their slot until the coordinator receives them.
 `org.rsdm.Session1.Handshake` returns the generation after checking the caller's
 bus credentials, live process and logind session. A process without a logind
 session must match a registered unit cgroup and its current InvocationID.
-Environment hints alone cannot establish membership. Handshakes allow four
-concurrent queries, each within a five-second total budget. Existing control
-methods still use UID authorization; applying process membership checks to each
-request is required before standalone attach is complete.
+Environment hints alone cannot establish membership. Every control method
+performs these checks before queueing its request; authorization allows four
+concurrent queries, each within a five-second total budget. CLI app, finalize,
+stop and cancel obtain their generation through the handshake rather than
+trusting an environment token.
 
 ## Configuration and diagnostics
 

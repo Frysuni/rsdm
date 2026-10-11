@@ -67,7 +67,7 @@ pkgs.testers.runNixOSTest {
             machine.wait_until_succeeds(control + "rsdm session status | grep ': running '", timeout=30)
         except Exception:
             print(machine.succeed("journalctl --no-pager -u rsdm-test-session -n 80"))
-            print(machine.succeed(user + "journalctl --user --no-pager -u rsdm-test-power -n 80"))
+            print(machine.succeed(user + "journalctl --user --no-pager -n 80"))
             raise
         generation = machine.succeed(user + "systemctl --user show-environment | sed -n 's/^RSDM_SESSION_GENERATION=//p'").strip()
         assert generation in machine.succeed(control + "busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake")

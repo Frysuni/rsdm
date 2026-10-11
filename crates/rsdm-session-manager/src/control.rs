@@ -80,15 +80,22 @@ pub(super) enum Request {
 #[derive(Clone)]
 pub(super) struct Endpoint {
     requests: Sender<Request>,
-    identity: super::identity::SessionIdentity,
-    handshake_slots: Arc<tokio::sync::Semaphore>,
+    verifier: super::control_handshake::Verifier,
+    authorization_slots: Arc<tokio::sync::Semaphore>,
     admission: Admission,
 }
 
 impl Endpoint {
     pub fn for_session(identity: super::identity::SessionIdentity) -> (Self, Receiver<Request>) {
         let (requests, received) = mpsc::channel(admission::QUEUE_CAPACITY);
-        (Self { requests, identity, handshake_slots: Arc::new(tokio::sync::Semaphore::new(4)), admission: Admission::default() }, received)
+        (Self { requests, verifier: super::control_handshake::Verifier::new(identity), authorization_slots: Arc::new(tokio::sync::Semaphore::new(4)), admission: Admission::default() }, received)
+    }
+
+    #[cfg(test)]
+    pub(super) async fn for_test(identity: super::identity::SessionIdentity) -> (Self, Receiver<Request>) {
+        let (mut endpoint, received) = Self::for_session(identity.clone());
+        endpoint.verifier.context = Some(super::control_test_authority::Context::create(identity).await);
+        (endpoint, received)
     }
 
     #[cfg(test)]
@@ -102,6 +109,7 @@ impl Endpoint {
     async fn request<T: Send + 'static>(
         &self, permit: Arc<Permit>, make_request: impl FnOnce(Reply<T>) -> Request + Send,
     ) -> zbus::fdo::Result<T> {
+        self.admission.check_open()?;
         let (sender, mut result) = mpsc::channel(1);
         let reply = Reply::new(sender, permit.clone());
         self.requests.try_send(make_request(reply)).map_err(|error| match error {
@@ -114,20 +122,18 @@ impl Endpoint {
         outcome.map_err(zbus::fdo::Error::Failed)
     }
 
-    async fn authorize(&self, connection: &Connection, header: &Header<'_>) -> zbus::fdo::Result<()> {
-        let uid = if connection.is_bus() {
-            let sender = header.sender().ok_or_else(|| zbus::fdo::Error::AccessDenied("caller has no bus identity".into()))?;
-            let bus = zbus::Proxy::new(connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").await?;
-            bus.call::<_, _, u32>("GetConnectionUnixUser", &(sender,)).await?
-        } else {
-            connection.peer_creds().await
-                .map_err(|error| zbus::fdo::Error::AccessDenied(error.to_string()))?
-                .unix_user_id().ok_or_else(|| zbus::fdo::Error::AccessDenied("caller has no Unix credentials".into()))?
+    async fn authorize(&self, connection: &Connection, header: &Header<'_>) -> zbus::fdo::Result<String> {
+        let _slot = self.authorization_slots.try_acquire()
+            .map_err(|_| zbus::fdo::Error::LimitsExceeded("session authorization is busy; retry the request".into()))?;
+        let verified = tokio::select! {
+            biased;
+            _ = self.admission.wait_closed() => return Err(zbus::fdo::Error::Failed("session manager is disabled".into())),
+            result = self.verifier.verify(connection, header) => result,
         };
-        if uid != self.identity.uid {
-            return Err(zbus::fdo::Error::AccessDenied("session belongs to another user".into()));
-        }
-        Ok(())
+        let generation = verified
+            .map_err(|error| zbus::fdo::Error::AccessDenied(error.to_string()))?;
+        self.admission.check_open()?;
+        Ok(generation)
     }
 }
 
@@ -137,12 +143,7 @@ impl Endpoint {
         &self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<String> {
         let _permit = self.admission.acquire(Class::Regular)?;
-        let _slot = self.handshake_slots.try_acquire()
-            .map_err(|_| zbus::fdo::Error::LimitsExceeded("session handshake is busy; retry the request".into()))?;
-        let generation = super::control_handshake::verify(connection, &header, &self.identity).await
-            .map_err(|error| zbus::fdo::Error::AccessDenied(error.to_string()))?;
-        self.admission.check_open()?;
-        Ok(generation)
+        self.authorize(connection, &header).await
     }
 
     async fn launch(
