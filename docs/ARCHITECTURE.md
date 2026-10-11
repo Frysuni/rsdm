@@ -173,6 +173,14 @@ private XSMP worker. Already accepted external requests cannot be recalled.
 It leaves application units, WM, anchor and exported environment running.
 The launcher retains its child and compositor pidfd independently of coordinator
 workers and passively waits for the actual WM exit before returning to DM.
+For GNOME/Plasma it pins the process owning `org.gnome.Shell`/`org.kde.KWin`,
+after checking its bus credentials and stable unique owner. The desktop session
+manager exiting, or the WM releasing its bus name, does not release a pinned WM.
+Broker-provided `ProcessFD` takes precedence over the numeric PID. Older buses
+fall back to opening a pidfd for `ProcessID`; this cannot rule out reuse before
+the handle is opened. Without a compositor identity, the original launcher
+remains the lifetime fallback and does not prove the exit of a detached WM
+that never exposes either name.
 App stop commands preserve the coordinator's configuration path in their argv.
 Before closing XSMP peers, disabling cancels their pending saves and interactions.
 Worker shutdown allows up to 100 ms for this cleanup, then interrupts stalled

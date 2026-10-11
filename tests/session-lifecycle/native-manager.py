@@ -71,6 +71,10 @@ class Manager(dbus.service.Object):
         subprocess.run(["systemctl", "--user", "start", "test-native.target"], check=True)
 
     @dbus.service.method("org.rsdm.TestNative", in_signature="", out_signature="")
+    def ExitManager(self):
+        self.loop.quit()
+
+    @dbus.service.method("org.rsdm.TestNative", in_signature="", out_signature="")
     def Finish(self):
         subprocess.run(["systemctl", "--user", "stop", "test-native.target", "graphical-session.target"], check=True)
         (RUNTIME / "display-alive").unlink()

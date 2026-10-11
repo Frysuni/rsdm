@@ -5,6 +5,9 @@ use std::{io, os::fd::{AsRawFd, FromRawFd, OwnedFd}};
 pub struct ProcessHandle(OwnedFd);
 
 impl ProcessHandle {
+    /// Adopt a pidfd received from a trusted process-credential provider.
+    pub fn from_pidfd(descriptor: OwnedFd) -> Self { Self(descriptor) }
+
     pub fn open(pid: u32) -> io::Result<Option<Self>> {
         // SAFETY: pidfd_open takes a process ID and flags, and returns a new FD.
         let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };

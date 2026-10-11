@@ -24,6 +24,7 @@ mod deadline;
 mod env;
 mod identity;
 mod lifecycle;
+mod native_compositor;
 mod plain_launch;
 mod processes;
 mod provider;

@@ -83,6 +83,13 @@ impl SessionProcess {
         Ok(())
     }
 
+    pub(super) async fn pin_native_compositor(&self, manager: &UserManager, provider: &Provider) -> Result<(), SessionError> {
+        if !provider.native_desktop() || self.compositor.lock().unwrap().is_some() { return Ok(()); }
+        let handle = manager.read(|| async { super::native_compositor::pin(&manager.connection(), provider).await }).await?;
+        *self.compositor.lock().unwrap() = handle;
+        Ok(())
+    }
+
     pub async fn stop(&mut self, manager: &UserManager, provider: &Provider, generation: &str) -> Result<(), SessionError> {
         manager.actions.check()?;
         let mut failure = None;

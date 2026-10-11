@@ -390,6 +390,12 @@ Disable coordination with `enabled = false`. A running CLI session observes
 validated file updates, including atomic replacement. Disabling detaches the
 coordinator and its private XSMP server without stopping applications or the WM;
 the launcher still waits for the WM to exit before releasing its PAM session.
+GNOME/Plasma observation uses the Shell/KWin process rather than the desktop
+session manager. Once pinned, its process handle survives loss of the bus name.
+This requires an identifiable compositor on the user bus. A detached WM that
+never exposes its native name cannot be tracked through this path; the original
+launcher remains the fallback. Buses without process-FD credentials also retain
+a numeric-PID reuse gap before the handle is opened.
 Re-enabling does not resume that generation's hooks or recovery. A request
 already accepted by another service may still complete.
 Pending XSMP saves and dialogs receive `ShutdownCancelled` before disconnection,

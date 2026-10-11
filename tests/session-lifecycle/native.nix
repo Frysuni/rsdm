@@ -118,5 +118,6 @@ pkgs.testers.runNixOSTest {
         machine.succeed("grep -q saved " + runtime + "/app-detached")
         machine.wait_until_fails(user + "systemctl --user is-active --quiet test-external.service")
         machine.fail("test -e " + runtime + "/display-alive")
+    ${import ./native-disable.nix { inherit python native; }}
   '';
 }

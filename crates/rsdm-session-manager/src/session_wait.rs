@@ -34,6 +34,13 @@ pub(super) async fn wait(process: SessionProcess, record: &SessionRecord, provid
                 }
             }
             if process.unit.is_none() && !provider.native_desktop() { return finish_child(&process).await; }
+            if process.unit.is_none() && pinned.is_none() {
+                let exited = match &process.child {
+                    Some(child) => child.lock().await.try_wait()?.is_some(),
+                    None => false,
+                };
+                if exited { return finish_child(&process).await; }
+            }
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -79,14 +86,8 @@ async fn observe(connection: &Connection, process: &SessionProcess, record: &Ses
         return observe_unit(connection, unit, record).await;
     }
     if provider.native_desktop() {
-        let name = if provider.name() == "gnome" { "org.gnome.SessionManager" } else { "org.kde.ksmserver" };
-        let pid = connection.call_method(Some("org.freedesktop.DBus"), "/org/freedesktop/DBus",
-            Some("org.freedesktop.DBus"), "GetConnectionUnixProcessID", &(name,)).await;
-        return match pid {
-            Ok(reply) => Ok(ProcessHandle::open(reply.body().deserialize()?)?.map_or(Observed::Exited, |handle| Observed::Running(Arc::new(handle), Vec::new()))),
-            Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "org.freedesktop.DBus.Error.NameHasNoOwner" => Ok(Observed::Exited),
-            Err(error) => Err(error.into()),
-        };
+        return Ok(super::native_compositor::pin(connection, provider).await?
+            .map_or(Observed::Pending, |handle| Observed::Running(handle, Vec::new())));
     }
     Ok(Observed::Exited)
 }

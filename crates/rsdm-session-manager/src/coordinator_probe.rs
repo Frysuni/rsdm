@@ -167,6 +167,7 @@ async fn observe_process(
     let Some(process) = process else {
         return Ok(None);
     };
+    process.pin_native_compositor(manager, provider).await?;
     let code = process.exited(manager).await?;
     let Some(code) = code else {
         return Ok(None);
