@@ -35,22 +35,30 @@ pub(super) async fn run(
     manager: UserManager, runtime: Runtime, messages: UnboundedReceiver<Message>, notices: UnboundedSender<Notice>,
     ready: oneshot::Sender<Result<Vec<(String, String)>, SessionError>>, interrupt: Arc<Interrupt>,
 ) {
-    let result = tokio::select! {
+    let created = tokio::select! {
         biased;
-        _ = interrupt.stopped() => Ok(()),
-        result = async {
-            let mut server = match Server::create(manager, runtime, messages, notices.clone(), interrupt.clone()).await {
-                Ok(server) => server,
-                Err(error) => { let _ = ready.send(Err(error)); return Ok(()); }
-            };
-            let environment = vec![
-                ("SESSION_MANAGER".into(), server.listeners.networks.join(",")),
-                ("ICEAUTHORITY".into(), server._authority.path.to_string_lossy().into_owned()),
-            ];
-            if ready.send(Ok(environment)).is_err() { return Ok(()); }
-            server.run().await
-        } => result,
+        _ = interrupt.stopped() => return,
+        result = Server::create(manager, runtime, messages, notices.clone(), interrupt.clone()) => result,
     };
+    let mut server = match created {
+        Ok(server) => server,
+        Err(error) => { let _ = ready.send(Err(error)); return; }
+    };
+    let environment = vec![
+        ("SESSION_MANAGER".into(), server.listeners.networks.join(",")),
+        ("ICEAUTHORITY".into(), server._authority.path.to_string_lossy().into_owned()),
+    ];
+    let result = if ready.send(Ok(environment)).is_err() { Ok(()) } else {
+        tokio::select! {
+            biased;
+            _ = interrupt.stopped() => Ok(()),
+            result = server.run() => result,
+        }
+    };
+    server.peers.clear();
+    if let Err(error) = server._authority.remove().await {
+        let _ = notices.send(Notice::Failed(error.to_string()));
+    }
     if let Err(error) = result {
         let _ = notices.send(Notice::Failed(error.to_string()));
     }

@@ -10,6 +10,7 @@ mod file;
 
 pub(super) struct Authority {
     pub path: PathBuf,
+    removed: bool,
 }
 
 impl Authority {
@@ -29,15 +30,27 @@ impl Authority {
             unsafe { ffi::IceSetPaAuthData(1, &mut entry); }
         }
 
-        Ok(Self { path: prepared.path.take().expect("prepared ICE authority path") })
+        Ok(Self { path: prepared.path.take().expect("prepared ICE authority path"), removed: false })
+    }
+
+    pub async fn remove(&mut self) -> Result<(), SessionError> {
+        let path = self.path.clone();
+        crate::runtime::blocking(move || match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }).await?;
+        self.removed = true;
+        Ok(())
     }
 }
 
 impl Drop for Authority {
     fn drop(&mut self) {
+        if self.removed { return; }
         let path = self.path.clone();
-        // Server drops before its runtime; runtime shutdown drains this job
-        // before the XSMP worker reports completion.
+        // Cancellation during startup still needs a cleanup fallback. A live
+        // server explicitly awaits removal before reporting worker completion.
         tokio::task::spawn_blocking(move || { let _ = std::fs::remove_file(path); });
     }
 }
