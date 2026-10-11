@@ -2,6 +2,9 @@ use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
 use super::*;
 
+#[path = "app_retirement_tests.rs"]
+mod retirement;
+
 struct Fixture { directory: PathBuf, runtime: Runtime, app: AppRecord }
 
 impl Fixture {
@@ -26,7 +29,7 @@ async fn outcomes_are_private_and_survive_removal_of_the_app_and_its_lease() {
     let deadline = Deadline::default();
     begin(&fixture.runtime, &fixture.app, Some("tx"), &deadline).await.unwrap();
     assert_eq!(finish(&fixture.runtime, &fixture.app, Some("tx"), Outcome::Clean, &deadline).await.unwrap(), Outcome::Clean);
-    fixture.runtime.remove_app(&fixture.app.unit).unwrap();
+    fixture.runtime.remove_app_until(&fixture.app, &deadline).unwrap();
     fixture.runtime.reap_closed_app_locks().unwrap();
     let archived = fixture.runtime.archived_app(&fixture.app.unit).unwrap();
     assert_eq!(archived.invocation_id, fixture.app.invocation_id);
@@ -42,7 +45,7 @@ async fn an_unsafe_archive_does_not_remove_the_active_record() {
     let fixture = Fixture::new();
     begin(&fixture.runtime, &fixture.app, Some("tx"), &Deadline::default()).await.unwrap();
     std::os::unix::fs::symlink(&fixture.directory, fixture.runtime.path.join("results")).unwrap();
-    assert!(fixture.runtime.remove_app(&fixture.app.unit).is_err());
+    assert!(fixture.runtime.remove_app_until(&fixture.app, &Deadline::default()).is_err());
     assert!(fixture.runtime.app(&fixture.app.unit).is_ok());
 }
 
@@ -82,4 +85,66 @@ async fn stale_completions_cannot_replace_a_new_transaction_or_invocation() {
     fixture.runtime.save_app(&replacement).unwrap();
     assert_eq!(finish(&fixture.runtime, &fixture.app, Some("next"), Outcome::Cancelled, &deadline).await.unwrap(), Outcome::Unknown);
     assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().preparation.unwrap().outcome, Outcome::Unknown);
+}
+
+#[tokio::test]
+async fn retirement_waits_for_a_result_writer_and_archives_its_final_update() {
+    let fixture = Fixture::new();
+    let deadline = Deadline::default();
+    begin(&fixture.runtime, &fixture.app, Some("tx"), &deadline).await.unwrap();
+    let lease = fixture.runtime.app_lease(&fixture.app.unit).unwrap();
+    let runtime = fixture.runtime.clone();
+    let app = fixture.app.clone();
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let mut retirement = tokio::task::spawn_blocking(move || {
+        started.send(()).unwrap();
+        runtime.remove_app_until(&app, &Deadline::default())
+    });
+    ready.await.unwrap();
+    tokio::select! {
+        _ = tokio::time::sleep(std::time::Duration::from_millis(20)) => {},
+        result = &mut retirement => panic!("retirement overtook its result writer: {result:?}"),
+    }
+    let mut current = fixture.runtime.app(&fixture.app.unit).unwrap();
+    current.preparation.as_mut().unwrap().outcome = Outcome::Clean;
+    fixture.runtime.save_app(&current).unwrap();
+    drop(lease);
+    retirement.await.unwrap().unwrap();
+    assert!(!fixture.runtime.path.join("apps").join(format!("{}.toml", fixture.app.unit)).exists());
+    assert_eq!(fixture.runtime.archived_app(&fixture.app.unit).unwrap().preparation.unwrap().outcome, Outcome::Clean);
+}
+
+#[tokio::test]
+async fn a_late_result_updates_the_archive_without_recreating_the_active_record() {
+    let fixture = Fixture::new();
+    let deadline = Deadline::default();
+    begin(&fixture.runtime, &fixture.app, Some("tx"), &deadline).await.unwrap();
+    fixture.runtime.remove_app_until(&fixture.app, &deadline).unwrap();
+    assert_eq!(finish(&fixture.runtime, &fixture.app, Some("tx"), Outcome::Clean, &deadline).await.unwrap(), Outcome::Clean);
+    assert!(!fixture.runtime.path.join("apps").join(format!("{}.toml", fixture.app.unit)).exists());
+    assert_eq!(fixture.runtime.archived_app(&fixture.app.unit).unwrap().preparation.unwrap().outcome, Outcome::Clean);
+}
+
+#[test]
+fn stale_retirement_cannot_remove_a_replacement_invocation() {
+    let fixture = Fixture::new();
+    let mut replacement = fixture.app.clone();
+    replacement.invocation_id = vec![2; 16];
+    fixture.runtime.save_app(&replacement).unwrap();
+    assert!(fixture.runtime.remove_app_until(&fixture.app, &Deadline::default()).is_err());
+    assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().invocation_id, replacement.invocation_id);
+    assert!(!fixture.runtime.path.join("results").exists());
+}
+
+#[tokio::test]
+async fn retirement_cannot_wait_for_a_writer_beyond_the_shutdown_deadline() {
+    let fixture = Fixture::new();
+    let _lease = fixture.runtime.app_lease(&fixture.app.unit).unwrap();
+    let deadline = Deadline::default();
+    deadline.set(crate::processes::monotonic_usec().unwrap() + 20_000);
+    let runtime = fixture.runtime.clone();
+    let app = fixture.app.clone();
+    assert!(blocking(move || runtime.remove_app_until(&app, &deadline)).await.is_err());
+    assert!(fixture.runtime.app(&fixture.app.unit).is_ok());
+    assert!(!fixture.runtime.path.join("results").exists());
 }

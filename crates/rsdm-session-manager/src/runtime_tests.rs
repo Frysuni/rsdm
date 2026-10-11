@@ -262,7 +262,7 @@ fn closed_app_lock_is_reaped_only_after_its_record_is_gone() {
     assert_eq!(runtime.reap_closed_app_locks().unwrap(), 0);
     assert!(lock_path.exists());
     drop(lease);
-    runtime.remove_app(&record.unit).unwrap();
+    runtime.remove_app_until(&record, &Deadline::default()).unwrap();
     assert_eq!(runtime.reap_closed_app_locks().unwrap(), 1);
     assert!(!lock_path.exists());
 }

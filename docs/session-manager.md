@@ -394,6 +394,9 @@ intent is persisted so recovery cannot later report a clean exit. `clean`
 means the invocation exited without escalation; it does not guarantee saved
 data. Unknown legacy dispatch remains `unknown`. Completed app records are
 archived privately under the generation's `results` directory before removal.
+Reaping and cleanup take the result writer's record lease and recheck the
+InvocationID before archival, so stale cleanup cannot remove a replacement
+record or discard a result written while cleanup waited.
 
 The user-bus API accepts at most 4096 application arguments, 1024 environment
 entries, and 64 KiB per string. Quit commands allow up to 256 arguments and

@@ -173,6 +173,7 @@ impl Runtime {
         Ok(records)
     }
 
+    // The caller must hold the app lease through archival and removal.
     pub fn remove_app(&self, unit: &str) -> Result<(), SessionError> {
         let record = self.app(unit)?;
         if record.preparation.is_some() { self.archive_app(&record)?; }

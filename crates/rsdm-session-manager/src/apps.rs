@@ -166,7 +166,8 @@ pub(super) async fn release_closed(manager: &UserManager, runtime: &Runtime) -> 
         if stopped && super::processes::app_processes(manager, &app).await?.is_empty() {
             let _ = manager.unref(&app.unit).await;
             let records = runtime.clone();
-            blocking(move || records.remove_app(&app.unit)).await?;
+            let deadline = manager.deadline.clone();
+            blocking(move || records.remove_app_until(&app, &deadline)).await?;
         }
     }
     Ok(())
@@ -239,18 +240,23 @@ pub(super) async fn pin_pending(manager: &UserManager, runtime: &Runtime, unit: 
 }
 
 pub(super) async fn finish(manager: &UserManager, runtime: &Runtime, app: &AppRecord) -> Result<(), SessionError> {
+    let mut app = app.clone();
     if pin_pending(manager, runtime, &app.unit).await? {
         let records = runtime.clone();
         let unit = app.unit.clone();
         let current = blocking(move || records.app(&unit)).await?;
-        if super::processes::verify_invocation(manager, &current).await? {
+        if !app.invocation_id.is_empty() && current.invocation_id != app.invocation_id {
+            return Err(SessionError::State("application invocation changed before cleanup".into()));
+        }
+        app = current;
+        if super::processes::verify_invocation(manager, &app).await? {
             manager.stop(&app.unit, Duration::from_secs(10)).await?;
             manager.unref(&app.unit).await?;
         }
     }
     let runtime = runtime.clone();
-    let unit = app.unit.clone();
-    blocking(move || runtime.remove_app(&unit)).await
+    let deadline = manager.deadline.clone();
+    blocking(move || runtime.remove_app_until(&app, &deadline)).await
 }
 
 #[cfg(test)]

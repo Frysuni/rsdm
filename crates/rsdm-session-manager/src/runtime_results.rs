@@ -3,6 +3,19 @@
 use super::*;
 
 impl Runtime {
+    pub fn remove_app_until(&self, prepared: &AppRecord, deadline: &Deadline) -> Result<(), SessionError> {
+        let _lease = self.app_lease_until(&prepared.unit, deadline)?;
+        let current = match self.app(&prepared.unit) {
+            Ok(app) => app,
+            Err(SessionError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        if current.invocation_id != prepared.invocation_id {
+            return Err(SessionError::State("application invocation changed before record retirement".into()));
+        }
+        self.remove_app(&prepared.unit)
+    }
+
     pub fn archive_app(&self, app: &AppRecord) -> Result<(), SessionError> {
         let file = self.app_path(&app.unit)?;
         let directory = self.path.join("results");
