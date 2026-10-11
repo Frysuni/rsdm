@@ -241,6 +241,28 @@ save-dialog cancellation, foreign windows with the same app ID and an
 individual stop. Hardware rendering, XWayland and attached-compositor close
 are outside that verification.
 
+## Hyprland window close
+
+Finalize captures `HYPRLAND_INSTANCE_SIGNATURE` for the generation. IPC paths
+are derived only from that signature and the recorded `XDG_RUNTIME_DIR`.
+Command and event sockets authenticate the recorded compositor invocation;
+each short-lived command connection is checked against its pinned peer.
+Discovery requires the Lua API and native mapped clients with a positive PID
+and `stableId`. Older address-only clients and XWayland are excluded.
+
+The application invocation, cgroup and pidfd checks use the shared window-close
+path. The compositor then checks stable ID, address, PID and native mapped state
+and dispatches the addressed close in one synchronous Lua IPC call. A changed
+target returns a specific rejection before dispatch; other errors or lost
+responses remain unconfirmed. Window open/close events veto a changed address.
+The manager sends no focus command and does not rewrite compositor settings.
+Configurations without the Lua API retain TERM fallback.
+
+The isolated VM exercises Hyprland 0.55.4 with a Lua configuration, software
+rendering, GTK save-dialog cancellation, foreign windows with the same app ID
+and individual clean stop. Other versions, hardware rendering, XWayland and
+attached-compositor close are outside that verification.
+
 ## XSMP
 
 Official builds enable `xsmp`. Managed WM and native niri sessions publish

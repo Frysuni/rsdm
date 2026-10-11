@@ -36,8 +36,12 @@ pub(super) async fn request(manager: &UserManager, runtime: &Runtime, app: &AppR
 
 async fn prepare(manager: &UserManager, record: &SessionRecord, app: &AppRecord) -> Option<PreparedClose> {
     for (name, path) in &record.exported_environment {
-        if !matches!(name.as_str(), "NIRI_SOCKET" | "SWAYSOCK") { continue; }
-        match prepare_endpoint(manager, record, app, name, path).await {
+        if !matches!(name.as_str(), "NIRI_SOCKET" | "SWAYSOCK" | "HYPRLAND_INSTANCE_SIGNATURE") { continue; }
+        let path = if name == "HYPRLAND_INSTANCE_SIGNATURE" {
+            let Some(directory) = super::hyprland::socket_directory(&record.exported_environment, path) else { continue; };
+            directory
+        } else { Path::new(path).to_path_buf() };
+        match prepare_endpoint(manager, record, app, name, &path).await {
             Ok(Some(prepared)) => return Some(prepared),
             Ok(None) => {}
             Err(error) => { tracing::debug!(%error, endpoint = name, unit = app.unit, "window close is unavailable"); }
@@ -46,10 +50,10 @@ async fn prepare(manager: &UserManager, record: &SessionRecord, app: &AppRecord)
     None
 }
 
-async fn prepare_endpoint(manager: &UserManager, record: &SessionRecord, app: &AppRecord, name: &str, path: &str) -> Result<Option<PreparedClose>, SessionError> {
-    let mut connection = manager.request(async { Ok(Connection::connect(name, Path::new(path), record.identity.uid).await) }).await??;
+async fn prepare_endpoint(manager: &UserManager, record: &SessionRecord, app: &AppRecord, name: &str, path: &Path) -> Result<Option<PreparedClose>, SessionError> {
+    let mut connection = manager.request(async { Ok(Connection::connect(name, path, record.identity.uid).await) }).await??;
     if !owns_compositor(manager, record, connection.pid()).await? { return Ok(None); }
-    let subscriber = manager.request(async { Ok(Connection::connect(name, Path::new(path), record.identity.uid).await) }).await??;
+    let subscriber = manager.request(async { Ok(Connection::connect(name, path, record.identity.uid).await) }).await??;
     if subscriber.pid() != connection.pid() || !owns_compositor(manager, record, subscriber.pid()).await? { return Ok(None); }
     let (events, mut windows) = manager.request(async { Ok(connection.subscribe(subscriber).await) }).await??;
     let pids = processes::app_processes(manager, app).await?;

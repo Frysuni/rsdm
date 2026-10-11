@@ -34,6 +34,7 @@ mod native_compositor;
 mod niri;
 mod compositor_socket;
 mod sway;
+mod hyprland;
 mod window_backend;
 mod window_close;
 mod plain_launch;
