@@ -20,6 +20,22 @@ let
     touch "$XDG_RUNTIME_DIR/stubborn-ready"
     while :; do sleep 1; done
   '';
+  concurrentApplication = pkgs.writeShellScript "test-concurrent-application" ''
+    set -eu
+    report="$XDG_RUNTIME_DIR/app-parallel-$1"
+    finish() {
+      touch "$report-requested"
+      for index in 1 2 3 4 5 6 7 8; do
+        while ! test -e "$XDG_RUNTIME_DIR/app-parallel-$index-requested"; do sleep 0.05; done
+      done
+      test -e "$XDG_RUNTIME_DIR/display-alive"
+      touch "$report-saved"
+      exit 0
+    }
+    trap finish TERM
+    touch "$report-ready"
+    while :; do sleep 1; done
+  '';
   parent = pkgs.writeShellScript "test-application-with-child" ''
     set -eu
     trap 'touch "$XDG_RUNTIME_DIR/parent-saved"; exit 0' TERM
@@ -137,6 +153,16 @@ pkgs.testers.runNixOSTest {
             machine.wait_until_fails("systemctl is-active --quiet rsdm-test-session")
             machine.succeed("grep -q saved " + runtime + "/app-" + name)
             machine.fail("test -e " + runtime + "/display-alive")
+
+    with subtest("all eight applications receive requests before any earlier application exits"):
+        session = start_session()
+        for index in range(1, 9):
+            machine.succeed(session + "rsdm app -- ${concurrentApplication} " + str(index))
+            machine.wait_for_file(runtime + "/app-parallel-" + str(index) + "-ready")
+        machine.succeed(session + "rsdm session stop", timeout=20)
+        for index in range(1, 9):
+            machine.succeed("test -e " + runtime + "/app-parallel-" + str(index) + "-saved")
+        machine.fail("test -e " + runtime + "/display-alive")
 
     with subtest("signal-triggered preparation can cancel and a later signal can stop the session"):
         session = start_session()

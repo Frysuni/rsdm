@@ -75,6 +75,16 @@ impl UserManager {
         Proxy::new_owned(self.connection(), DESTINATION.to_string(), MANAGER_PATH.to_string(), MANAGER_INTERFACE.to_string()).await
     }
 
+    async fn request<T>(&self, operation: impl Future<Output = zbus::Result<T>>) -> zbus::Result<T> {
+        // Job and recovery futures compose these requests; keep their state
+        // off the caller's stack instead of growing every enclosing future.
+        self.deadline.bound(Box::pin(self.transport.request(async {
+            // The deadline can change while this request waits for a slot.
+            self.deadline.remaining(Duration::MAX)?;
+            operation.await
+        }))).await
+    }
+
     pub async fn start_service(&self, unit: &str, properties: &UnitProperties) -> Result<(), SessionError> {
         let submitted = AtomicBool::new(false);
         let result = self.deadline.bound(jobs::start(self, unit, properties, Duration::from_secs(10), &submitted)).await;
@@ -89,14 +99,14 @@ impl UserManager {
     }
 
     pub async fn unref(&self, unit: &str) -> Result<(), SessionError> {
-        self.deadline.bound(async {
+        self.request(async {
             self.transport.forget(unit);
             match self.proxy().await?.call::<_, _, ()>("UnrefUnit", &(unit,)).await {
                 Ok(()) => Ok(()),
                 Err(error) if missing_unit(&error) => Ok(()),
-                Err(error) => Err(error.into()),
+                Err(error) => Err(error),
             }
-        }).await
+        }).await.map_err(Into::into)
     }
 
     pub async fn active(&self, unit: &str) -> Result<bool, SessionError> {
@@ -171,7 +181,7 @@ impl UserManager {
     {
         self.deadline.bound(retry_read(|| async {
             let epoch = self.transport.epoch();
-            let result = query().await;
+            let result = self.request(query()).await;
             if result.as_ref().is_err_and(transport::disconnected) {
                 self.transport.reconnect(epoch).await?;
             }
@@ -180,17 +190,17 @@ impl UserManager {
     }
 
     pub async fn set_environment(&self, values: &[String]) -> Result<(), SessionError> {
-        self.deadline.bound(async {
+        self.request(async {
             self.proxy().await?.call::<_, _, ()>("SetEnvironment", &(values,)).await?;
             Ok(())
-        }).await
+        }).await.map_err(Into::into)
     }
 
     pub async fn unset_environment(&self, names: &[String]) -> Result<(), SessionError> {
-        self.deadline.bound(async {
+        self.request(async {
             self.proxy().await?.call::<_, _, ()>("UnsetEnvironment", &(names,)).await?;
             Ok(())
-        }).await
+        }).await.map_err(Into::into)
     }
 }
 
@@ -267,3 +277,7 @@ mod tests;
 #[cfg(test)]
 #[path = "bus_setup_tests.rs"]
 mod setup_tests;
+
+#[cfg(test)]
+#[path = "bus_concurrency_tests.rs"]
+mod concurrency_tests;

@@ -5,7 +5,9 @@ use std::{collections::BTreeMap, future::Future, pin::Pin, sync::{Arc, Mutex, at
 use super::*;
 
 #[derive(Clone)]
-pub(super) struct Transport(Arc<Mutex<State>>, Arc<AtomicBool>);
+pub(super) struct Transport(Arc<Mutex<State>>, Arc<AtomicBool>, Arc<tokio::sync::Semaphore>);
+
+const MAX_IN_FLIGHT: usize = 4;
 
 #[derive(Clone)]
 struct State {
@@ -68,7 +70,12 @@ impl Transport {
     pub fn new(connection: Connection) -> Self {
         Self(Arc::new(Mutex::new(State {
             connection, epoch: 0, revision: 0, references: BTreeMap::new(), activation_environment: BTreeMap::new(),
-        })), Arc::new(AtomicBool::new(false)))
+        })), Arc::new(AtomicBool::new(false)), Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT)))
+    }
+
+    pub async fn request<T>(&self, operation: impl Future<Output = T>) -> T {
+        let _slot = self.2.acquire().await.expect("user manager request slots remain open");
+        operation.await
     }
 
     pub fn connection(&self) -> Connection {
@@ -138,7 +145,7 @@ impl Transport {
         let values: BTreeMap<&str, &str> = pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
         tokio::select! {
             biased;
-            result = activation::update(&connection, values) => result,
+            result = self.request(activation::update(&connection, values)) => result,
             _ = tokio::time::sleep_until(deadline.into()) => {
                 Err(zbus::fdo::Error::TimedOut("activation environment update timed out".into()).into())
             },
@@ -193,11 +200,11 @@ impl Transport {
     async fn restore_candidate(&self, connection: &Connection, observed_epoch: u64) -> zbus::Result<bool> {
         let snapshot = self.0.lock().unwrap_or_else(|error| error.into_inner()).clone();
         if snapshot.epoch != observed_epoch { return Ok(false); }
-        validate_connection(connection).await?;
+        self.request(validate_connection(connection)).await?;
         for batch in snapshot.references.iter().collect::<Vec<_>>().chunks(REFERENCE_RESTORE_BATCH) {
-            restore_reference_batch(connection, batch).await?;
+            restore_reference_batch(self, connection, batch).await?;
         }
-        restore_activation(connection, snapshot.activation_environment).await?;
+        self.request(restore_activation(connection, snapshot.activation_environment)).await?;
 
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if state.epoch != observed_epoch || state.revision != snapshot.revision { return Ok(false); }
@@ -207,9 +214,10 @@ impl Transport {
     }
 }
 
-const REFERENCE_RESTORE_BATCH: usize = 8;
+const REFERENCE_RESTORE_BATCH: usize = MAX_IN_FLIGHT;
 
 async fn restore_reference_batch(
+    transport: &Transport,
     connection: &Connection,
     references: &[(&String, &Reference)],
 ) -> zbus::Result<()> {
@@ -220,7 +228,7 @@ async fn restore_reference_batch(
         let unit = (*unit).clone();
         let reference = (*reference).clone();
         combined = Box::pin(async move {
-            let ((), ()) = tokio::try_join!(combined, restore_reference(&connection, &unit, &reference))?;
+            let ((), ()) = tokio::try_join!(combined, transport.request(restore_reference(&connection, &unit, &reference)))?;
             Ok(())
         });
     }

@@ -128,6 +128,38 @@ async fn competing_preparations_claim_quit_once_and_preserve_the_deadline() {
 }
 
 #[tokio::test]
+async fn later_applications_are_prepared_while_the_first_four_still_run() {
+    let fixture = Fixture::new().await;
+    let mut apps = Vec::new();
+    for index in 0..8 {
+        let mut app = fixture.app.clone();
+        app.unit = format!("app-rsdm-example@{GENERATION}-{index}.service");
+        fixture.runtime.save_app(&app).unwrap();
+        apps.push(app);
+    }
+    let control = Arc::new(ShutdownControl::default());
+    control.recovery.store(true, Ordering::SeqCst);
+    control.xsmp_units.set(apps.iter().map(|app| app.unit.clone()).collect()).unwrap();
+    let manager = fixture.manager.clone();
+    let runtime = fixture.runtime.clone();
+    let worker_control = control.clone();
+    let worker = tokio::spawn(async move { prepare_apps(&manager, &runtime, apps, worker_control).await });
+
+    let prepared = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let runtime = fixture.runtime.clone();
+            let prepared = blocking(move || runtime.apps()).await.unwrap();
+            if prepared.iter().filter(|app| app.quit_started).count() == 8 { break; }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    }).await.is_ok();
+    control.cancelled.store(true, Ordering::SeqCst);
+    let forced = tokio::time::timeout(Duration::from_secs(2), worker).await.unwrap().unwrap().unwrap();
+    assert!(prepared, "later applications waited for an earlier application's exit");
+    assert!(forced.is_empty());
+}
+
+#[tokio::test]
 async fn a_contended_preparation_lease_preserves_the_teardown_budget() {
     let fixture = Fixture::new().await;
     let _lease = fixture.runtime.app_lease(&fixture.app.unit).unwrap();

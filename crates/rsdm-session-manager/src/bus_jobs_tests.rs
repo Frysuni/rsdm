@@ -146,3 +146,24 @@ async fn a_new_shutdown_deadline_interrupts_a_read_already_waiting_for_dbus() {
     assert!(worker.await.unwrap().is_err());
     assert!(before.elapsed() < Duration::from_secs(1));
 }
+
+#[tokio::test]
+async fn four_pending_stop_jobs_leave_slots_available_for_other_requests() {
+    let initial = state(false, true, 0);
+    initial.exists.store(true, Ordering::SeqCst);
+    let (manager, _server, state) = fixture(initial).await;
+    let mut workers = tokio::task::JoinSet::new();
+    for _ in 0..4 {
+        let manager = manager.clone();
+        workers.spawn(async move { manager.stop("example.service", Duration::from_secs(30)).await });
+    }
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while state.calls.load(Ordering::SeqCst) < 4 { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    let processes = tokio::time::timeout(Duration::from_secs(1), manager.processes("example.service")).await.unwrap().unwrap();
+    assert_eq!(processes.len(), 1);
+    assert_eq!(workers.len(), 4);
+    manager.deadline.set(1);
+    while let Some(result) = workers.join_next().await { assert!(result.unwrap().is_err()); }
+    assert_eq!(state.calls.load(Ordering::SeqCst), 4);
+}

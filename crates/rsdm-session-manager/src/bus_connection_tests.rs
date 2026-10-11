@@ -178,12 +178,13 @@ async fn reference_restoration_uses_bounded_parallel_batches() {
     let mut initial = state();
     initial.delay = Duration::from_millis(20);
     let (connection, _server, state) = fixture(initial).await;
+    let transport = Transport::new(connection.clone());
     let references: Vec<_> = (0..24)
         .map(|_| ("example.service".to_string(), Reference { invocation: Some(vec![1; 16]), ..Reference::new("ours".into()) }))
         .collect();
     let entries: Vec<_> = references.iter().map(|(unit, reference)| (unit, reference)).collect();
     for batch in entries.chunks(REFERENCE_RESTORE_BATCH) {
-        restore_reference_batch(&connection, batch).await.unwrap();
+        restore_reference_batch(&transport, &connection, batch).await.unwrap();
     }
     assert_eq!(state.refs.load(Ordering::SeqCst), 24);
     assert_eq!(state.unrefs.load(Ordering::SeqCst), 0);

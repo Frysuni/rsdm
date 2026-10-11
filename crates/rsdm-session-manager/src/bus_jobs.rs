@@ -24,15 +24,19 @@ pub(super) async fn start(
             Err(error) => return Err(error.into()),
         };
         let generation = generation(properties)?;
-        let proxy = manager.proxy().await?;
-        let mut signals = proxy.receive_signal_with_args("JobRemoved", &[(2, unit)]).await?;
+        let proxy = manager.request(manager.proxy()).await?;
+        let mut signals = manager.request(proxy.receive_signal_with_args("JobRemoved", &[(2, unit)])).await?;
         let auxiliary: Vec<(&str, UnitProperties)> = Vec::new();
-        let mut reference = if new_unit && properties.iter().any(|(name, value)| *name == "AddRef" && matches!(value, Value::Bool(true))) {
-            generation.as_ref().map(|generation| manager.transport.stage_reference(unit, generation.clone()))
-        } else { None };
-        if let Some(reference) = &mut reference { reference.submitted(); }
-        submitted.store(true, Ordering::Relaxed);
-        let reply = proxy.call("StartTransientUnit", &(unit, "fail", properties, auxiliary)).await;
+        let mut reference = None;
+        let reply = manager.request(async {
+            if Instant::now() >= deadline { return Err(job_timeout(unit)); }
+            reference = if new_unit && properties.iter().any(|(name, value)| *name == "AddRef" && matches!(value, Value::Bool(true))) {
+                generation.as_ref().map(|generation| manager.transport.stage_reference(unit, generation.clone()))
+            } else { None };
+            if let Some(reference) = &mut reference { reference.submitted(); }
+            submitted.store(true, Ordering::Relaxed);
+            proxy.call("StartTransientUnit", &(unit, "fail", properties, auxiliary)).await
+        }).await;
         if let Err(error) = &reply
             && rejected_start(manager, unit, error).await
         {
@@ -76,9 +80,12 @@ pub(super) async fn stop(manager: &UserManager, unit: &str, timeout: Duration) -
             Err(error) if missing_unit(&error) => return Ok(()),
             Err(error) => return Err(error.into()),
         }
-        let proxy = manager.proxy().await?;
-        let mut signals = proxy.receive_signal_with_args("JobRemoved", &[(2, unit)]).await?;
-        let reply = proxy.call::<_, _, OwnedObjectPath>("StopUnit", &(unit, "replace")).await;
+        let proxy = manager.request(manager.proxy()).await?;
+        let mut signals = manager.request(proxy.receive_signal_with_args("JobRemoved", &[(2, unit)])).await?;
+        let reply = manager.request(async {
+            if Instant::now() >= deadline { return Err(job_timeout(unit)); }
+            proxy.call::<_, _, OwnedObjectPath>("StopUnit", &(unit, "replace")).await
+        }).await;
         if reply.as_ref().is_err_and(missing_unit) { return Ok(()); }
         complete(manager, unit, &mut signals, reply, Operation::Stop, deadline).await
     }).await
@@ -87,16 +94,16 @@ pub(super) async fn stop(manager: &UserManager, unit: &str, timeout: Duration) -
 async fn within_deadline<T>(
     unit: &str, deadline: Instant, operation: impl Future<Output = Result<T, SessionError>>,
 ) -> Result<T, SessionError> {
-    if Instant::now() >= deadline { return Err(job_timeout(unit)); }
+    if Instant::now() >= deadline { return Err(job_timeout(unit).into()); }
     tokio::select! {
         biased;
         result = operation => result,
-        _ = tokio::time::sleep_until(deadline.into()) => Err(job_timeout(unit)),
+        _ = tokio::time::sleep_until(deadline.into()) => Err(job_timeout(unit).into()),
     }
 }
 
-fn job_timeout(unit: &str) -> SessionError {
-    zbus::Error::from(zbus::fdo::Error::TimedOut(format!("systemd job deadline expired for {unit}"))).into()
+fn job_timeout(unit: &str) -> zbus::Error {
+    zbus::fdo::Error::TimedOut(format!("systemd job deadline expired for {unit}")).into()
 }
 
 fn generation(properties: &UnitProperties) -> Result<Option<String>, SessionError> {
@@ -120,7 +127,7 @@ async fn complete(
     // Reconcile missing replies/signals inside the original operation budget.
     // Never start a second wait after the deadline or replay the mutation.
     loop {
-        if Instant::now() >= deadline { return Err(job_timeout(unit)); }
+        if Instant::now() >= deadline { return Err(job_timeout(unit).into()); }
         if let Some(job) = &job {
             if drain_job(signals, job).await? { return Ok(()); }
         }

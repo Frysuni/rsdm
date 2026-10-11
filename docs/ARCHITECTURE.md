@@ -135,6 +135,9 @@ checks keep cleanup/signals attached to the recorded processes.
 Executable lookup, procfs membership checks and XSMP record/credential files also
 use blocking filesystem tasks. Cookie registration stays on the libICE thread;
 unclaimed credential files are removed when a cancelled startup job completes.
+Cloned user-manager connections share four slots for short requests, including
+reference restoration. Job completion and application-exit waits release those
+slots; preparation starts for every application before collecting worker results.
 
 Bare compositors use a transient service and a per-generation anchor. The
 official `niri-session` runs unchanged outside that service and owns its real
