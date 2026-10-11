@@ -154,5 +154,6 @@ fn initial_record(
         config_path: None,
         exported_environment,
         shutdown_deadline_usec: None,
+        shutdown_transaction: None,
     }
 }

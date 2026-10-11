@@ -17,6 +17,10 @@ impl Coordinator {
         // Only logind may revise its shutdown budget or revoke its request.
         if self.action == "external-shutdown" && action != "external-shutdown" { return Ok(()); }
         if self.shutdown.is_none() {
+            let transaction = super::shutdown_transaction::ShutdownTransaction::start(&self.runtime, action, hard_deadline).await?;
+            self.manager.deadline.set(transaction.deadline_usec);
+            self.record.shutdown_deadline_usec = Some(transaction.deadline_usec);
+            self.record.shutdown_transaction = Some(transaction);
             self.forced_units.clear();
             self.action = action.to_string();
             self.shutdown = Some(Arc::new(ShutdownControl::for_manager(&self.manager)));
@@ -25,6 +29,10 @@ impl Coordinator {
             let control = self.shutdown.as_ref().expect("shutdown control");
             let old = control.hard_deadline.get();
             control.force(if old == 0 { proposed } else { old.min(proposed) });
+            self.record.shutdown_deadline_usec = Some(control.hard_deadline.get());
+            if let Some(transaction) = &mut self.record.shutdown_transaction {
+                transaction.shorten(control.hard_deadline.get());
+            }
             self.action = action.to_string();
         }
         self.stopping.store(true, Ordering::SeqCst);
@@ -111,7 +119,7 @@ impl Coordinator {
     }
 
     pub async fn delegated(&mut self, result: Result<(), SessionError>) -> Result<(), SessionError> {
-        if self.record.shutdown_deadline_usec.is_some() { return self.begin_finish().await; }
+        if self.action == "external-shutdown" { return self.begin_finish().await; }
         match result {
             Ok(()) => self.resume("delegated", "native desktop manager owns its shutdown dialogs and completion").await,
             Err(error) => self.resume("failed", &error.to_string()).await,
@@ -121,7 +129,7 @@ impl Coordinator {
     pub async fn power_requested(&mut self, result: Result<(), SessionError>) -> Result<(), SessionError> {
         match result {
             Ok(()) => self.begin_finish().await,
-            Err(error) if self.record.shutdown_deadline_usec.is_some() => {
+            Err(error) if self.action == "external-shutdown" => {
                 tracing::warn!(%error, "power request failed while external shutdown is in progress");
                 self.begin_finish().await
             }
@@ -178,6 +186,9 @@ impl Coordinator {
     }
 
     pub fn respond_stop(&mut self, result: &str, message: &str) {
+        if let Some(transaction) = &mut self.record.shutdown_transaction {
+            transaction.result = Some(result.into());
+        }
         for reply in self.stop_replies.drain(..) {
             if reply.try_send(Ok(StopOutcome { result: result.into(), forced_units: self.forced_units.clone(), message: message.into() })).is_ok() {
                 self.replies_pending += 1;

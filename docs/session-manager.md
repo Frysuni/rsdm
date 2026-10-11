@@ -358,7 +358,7 @@ If logind cannot grant the root inhibitor, RSDM logs the failure and retains the
 existing fallback behavior; the user coordinator still attempts its own guard.
 DM's detached root owner keeps a granted delay FD through user cleanup, PAM
 close and PAM end. Restarting DM does not terminate that leader's graphical session.
-Recovery installs its short shared budget before connecting to the user bus;
+Recovery installs its shared remaining budget before connecting to the user bus;
 authentication, validation, the coordinator-name lease, app preparation, and
 unit teardown use the same deadline. A saved or active deadline is never
 extended by recovery. A failed coordinator also drains its accepted workers
@@ -370,6 +370,14 @@ power requests asynchronously and retains opaque surfaces through rejection or
 cancellation; only authentication or privileged emergency unlock releases them.
 
 ## Control request limits
+
+Each preparation persists a shutdown transaction ID, action, monotonic start,
+absolute deadline and last result. An ordinary request reserves the largest
+registered application timeout (30 seconds when no apps are registered), plus
+90 seconds, measured from the start of preparation. Repeated requests reuse this
+transaction and deadline; logind may shorten the budget. Recovery uses the saved
+remaining budget rather than restarting it. Legacy records without a saved
+deadline retain the existing five-second recovery fallback.
 
 The user-bus API accepts at most 4096 application arguments, 1024 environment
 entries, and 64 KiB per string. Quit commands allow up to 256 arguments and

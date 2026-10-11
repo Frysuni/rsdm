@@ -126,8 +126,10 @@ async fn stop_compositor(manager: &UserManager, generation: &str, record: &mut S
 }
 
 pub(super) fn recovery_deadline(saved: Option<u64>, current: u64) -> Result<u64, SessionError> {
-    let mut deadline = super::processes::monotonic_usec()?.saturating_add(5_000_000);
-    if let Some(saved) = saved { deadline = deadline.min(saved); }
+    let mut deadline = match saved {
+        Some(saved) => saved,
+        None => super::processes::monotonic_usec()?.saturating_add(5_000_000),
+    };
     if current != 0 { deadline = deadline.min(current); }
     Ok(deadline)
 }

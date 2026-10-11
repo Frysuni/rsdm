@@ -130,6 +130,7 @@ fn serialized_size_limit_applies_to_session_records_too() {
         config_path: None,
         exported_environment: vec![("VALUE".into(), "x".repeat(MAX_RECORD_BYTES))],
         shutdown_deadline_usec: None,
+        shutdown_transaction: None,
     };
     assert!(write_record(&path, &record).is_err());
     assert!(!path.exists());

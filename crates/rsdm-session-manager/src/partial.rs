@@ -45,7 +45,7 @@ async fn create(actions: ActionGate, path: &std::path::Path, snapshot: Snapshot)
         anchor_unit: format!("rsdm-session-{}.service", identity.generation), identity,
         compositor_unit: None, compositor_invocation: Vec::new(), coordinator_unit: Some((super::attach::UNIT.into(), invocation)),
         provider: provider.name().into(), owns_targets: false, phase: SessionPhase::Running, disabled: false,
-        config_path: Some(config_path), exported_environment: environment.clone(), shutdown_deadline_usec: None,
+        config_path: Some(config_path), exported_environment: environment.clone(), shutdown_deadline_usec: None, shutdown_transaction: None,
     };
     let records = runtime.clone();
     let saved = record.clone();

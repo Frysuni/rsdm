@@ -56,7 +56,7 @@ impl Context {
             anchor_unit: format!("rsdm-session-{}.service", identity.generation), identity: identity.clone(),
             compositor_unit: None, compositor_invocation: Vec::new(), coordinator_unit: None, provider: "managed".into(),
             owns_targets: true, phase: SessionPhase::Running, disabled: false, config_path: None,
-            exported_environment: Vec::new(), shutdown_deadline_usec: None,
+            exported_environment: Vec::new(), shutdown_deadline_usec: None, shutdown_transaction: None,
         }).unwrap();
 
         let (server, client) = tokio::net::UnixStream::pair().unwrap();

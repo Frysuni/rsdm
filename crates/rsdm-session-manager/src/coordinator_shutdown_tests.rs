@@ -12,6 +12,9 @@ const GENERATION: &str = "0123456789abcdef0123456789abcdef";
 
 #[path = "coordinator_disable_tests.rs"]
 mod disable;
+
+#[path = "coordinator_transaction_tests.rs"]
+mod transaction;
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
 
 struct FixtureReady;
@@ -56,7 +59,7 @@ impl Fixture {
                 desktop_entry_id: None, uid },
             anchor_unit: format!("rsdm-session-{GENERATION}.service"), compositor_unit: None,
             compositor_invocation: Vec::new(), coordinator_unit: None, provider: "external".into(), owns_targets: false,
-            phase: SessionPhase::Running, disabled: false, config_path: None, exported_environment: Vec::new(), shutdown_deadline_usec: None,
+            phase: SessionPhase::Running, disabled: false, config_path: None, exported_environment: Vec::new(), shutdown_deadline_usec: None, shutdown_transaction: None,
         };
         runtime.save_session(&record).unwrap();
         let (endpoint, requests) = crate::control::Endpoint::channel(uid);
@@ -204,7 +207,7 @@ async fn compositor_cleanup_retains_its_explicit_five_second_deadline() {
     let deadline = monotonic_usec().unwrap() + 5_000_000;
     fixture.coordinator.begin_stop("compositor-exited", Some(deadline)).await.unwrap();
     assert_eq!(fixture.deadline(), deadline);
-    assert_eq!(fixture.coordinator.record.shutdown_deadline_usec, None);
+    assert_eq!(fixture.coordinator.record.shutdown_deadline_usec, Some(deadline));
     fixture.notify(true, 30_000_000).await;
     assert_eq!(fixture.deadline(), deadline);
     assert_eq!(fixture.coordinator.action, "external-shutdown");

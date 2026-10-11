@@ -136,7 +136,7 @@ impl Fixture {
             anchor_unit: format!("rsdm-session-{GENERATION}.service"), compositor_unit: None,
             compositor_invocation: Vec::new(), coordinator_unit: None, provider: "managed".into(), owns_targets: false,
             phase: rsdm_core::domain::SessionPhase::Running, disabled: false, config_path: None,
-            exported_environment: Vec::new(), shutdown_deadline_usec: None,
+            exported_environment: Vec::new(), shutdown_deadline_usec: None, shutdown_transaction: None,
         }).unwrap();
         let request = LaunchRequest {
             generation: GENERATION.into(), argv: vec![std::env::current_exe().unwrap().to_string_lossy().into_owned()],

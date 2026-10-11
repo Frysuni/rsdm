@@ -37,6 +37,7 @@ mod runtime;
 mod session_lease;
 mod session_process;
 mod session_wait;
+mod shutdown_transaction;
 mod signals;
 mod startup;
 mod unit_name;

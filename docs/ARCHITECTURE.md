@@ -180,6 +180,13 @@ completes, before readiness, so its Finalize request can prove membership.
 An early compositor caller waits for this publication within the same query
 budget. Closing admission interrupts pending authorization immediately.
 
+Shutdown preparation publishes a durable transaction ID and original monotonic
+budget before workers can dispatch application requests. Ordinary requests use
+the maximum registered timeout (30 seconds without apps) plus 90 seconds.
+Retries reuse that identity and budget; logind can shorten it, and recovery
+retains the saved absolute deadline. Cancellation records its result before
+admitting a new preparation.
+
 CLI attach starts a single independent transient user service. The private
 bootstrap socket is passed as its stdin; kernel credentials identify the actual
 originating process, whose UID, logind ID and graphical type are verified before

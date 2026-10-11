@@ -143,5 +143,5 @@ pub(super) fn record() -> SessionRecord {
             desktop_entry_id: None, uid: 0 },
         anchor_unit: format!("rsdm-session-{GENERATION}.service"), compositor_unit: None,
         compositor_invocation: Vec::new(), coordinator_unit: None, provider: "external".into(), owns_targets: false,
-        phase: SessionPhase::Running, disabled: false, config_path: None, exported_environment: Vec::new(), shutdown_deadline_usec: None }
+        phase: SessionPhase::Running, disabled: false, config_path: None, exported_environment: Vec::new(), shutdown_deadline_usec: None, shutdown_transaction: None }
 }

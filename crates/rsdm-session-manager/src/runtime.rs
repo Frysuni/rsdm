@@ -45,6 +45,8 @@ pub(super) struct SessionRecord {
     pub exported_environment: Vec<(String, String)>,
     #[serde(default)]
     pub shutdown_deadline_usec: Option<u64>,
+    #[serde(default)]
+    pub shutdown_transaction: Option<super::shutdown_transaction::ShutdownTransaction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

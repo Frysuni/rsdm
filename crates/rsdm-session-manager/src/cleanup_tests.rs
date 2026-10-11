@@ -41,7 +41,7 @@ fn a_new_recovery_attempt_has_one_five_second_budget() {
     let deadline = recovery_deadline(None, 0).unwrap();
     let after = super::super::processes::monotonic_usec().unwrap();
     assert!((before + 5_000_000..=after + 5_000_000).contains(&deadline));
-    assert!(recovery_deadline(Some(after + 30_000_000), after + 60_000_000).unwrap() <= after + 5_100_000);
+    assert_eq!(recovery_deadline(Some(after + 30_000_000), after + 60_000_000).unwrap(), after + 30_000_000);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
