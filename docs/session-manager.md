@@ -307,6 +307,11 @@ These phases share the original deadline and its revisions; they never create
 a new budget after expiry. An exhausted graceful phase escalates using the
 remaining time, while normal cancellable logout retains each app's policy.
 
+Independently running application `ExecStop` hooks follow reductions of the
+persisted deadline during connection setup, dispatch and exit waits. Once
+systemd has accepted a unit stop, a later transaction or revoked session budget
+does not extend that hook's remaining time.
+
 Per-app metadata leases normally wait at most 250 ms for contention. During
 shutdown/recovery their retries and sleeps also obey the shared deadline;
 revisions or revocation affect an already waiting lease. The lease is released

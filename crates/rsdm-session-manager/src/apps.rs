@@ -199,19 +199,15 @@ pub async fn stop_hook(generation: &str, unit: &str, actions: super::action_gate
     let actions = actions.with_generation(runtime.clone());
     let deadline = Deadline::default();
     if let Some(saved) = saved { deadline.set(saved); }
-    let manager = match UserManager::connect_guarded(deadline, actions.clone()).await {
-        Ok(manager) => manager,
-        Err(_) if actions.check().is_err() => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    let mut control = super::app_stop::ShutdownControl::for_manager(&manager);
-    control.transaction_id = transaction_id;
-    control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
-    let result = async {
+    let result = super::runtime_deadline::follow(&runtime, &deadline, async {
+        let manager = UserManager::connect_guarded(deadline.clone(), actions.clone()).await?;
+        let mut control = super::app_stop::ShutdownControl::for_manager(&manager);
+        control.transaction_id = transaction_id;
+        control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
         pin_pending(&manager, &runtime, unit).await?;
         super::app_stop::prepare_app(&manager, &runtime, unit, &control).await?;
         Ok(())
-    }.await;
+    }).await;
     if actions.check().is_err() { return Ok(()); }
     result
 }

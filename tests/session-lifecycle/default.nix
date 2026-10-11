@@ -253,6 +253,31 @@ pkgs.testers.runNixOSTest {
         machine.succeed("test -e " + runtime + "/display-alive")
         machine.succeed(session + "rsdm session stop")
 
+    with subtest("an independent app hook consumes a later reduction of the saved deadline"):
+        session = start_session()
+        machine.succeed(session + "rsdm app --shutdown-method term --shutdown-timeout 30 -- ${stubborn}")
+        machine.wait_for_file(runtime + "/stubborn-ready")
+        generation = session.split("RSDM_SESSION_GENERATION=")[1].split()[0]
+        directory = runtime + "/rsdm/sessions/" + generation
+        app = tomllib.loads(machine.succeed("cat " + directory + "/apps/*.toml"))
+        unit = shlex.quote(app["unit"])
+        machine.succeed(user + "systemctl --user stop --no-block " + unit)
+        machine.wait_until_succeeds(user + "systemctl --user show " + unit + " -p ControlPID --value | grep -E '^[1-9][0-9]*$'")
+        machine.wait_until_succeeds("grep '^quit_started = true$' " + directory + "/apps/*.toml")
+        record = tomllib.loads(machine.succeed("cat " + directory + "/session.toml"))
+        assert "shutdown_deadline_usec" not in record
+        deadline = int(float(machine.succeed("cut -d ' ' -f1 /proc/uptime")) * 1_000_000) + 3_000_000
+        machine.succeed("sed -i '1i shutdown_deadline_usec = " + str(deadline) + "' " + directory + "/session.toml")
+        machine.wait_until_succeeds(user + "systemctl --user show " + unit + " -p ActiveState --value | grep -E '^(inactive|failed)$'", timeout=10)
+        result_path = shlex.quote(directory + "/results/" + app["unit"] + ".toml")
+        machine.wait_until_succeeds("test -f " + result_path, timeout=10)
+        result = tomllib.loads(machine.succeed("cat " + result_path))
+        assert result["preparation"]["outcome"] == "forced"
+        assert result["preparation"]["escalated"]
+        machine.succeed("test -e " + runtime + "/display-alive")
+        machine.succeed(session + "rsdm session status | grep ': running '")
+        machine.succeed(session + "rsdm session stop")
+
     with subtest("an explicit quit command uses the app environment and a separate cgroup"):
         session = start_session()
         machine.succeed(session + "rsdm app --quit-command ${quitCommand} -- ${commandApplication}")
