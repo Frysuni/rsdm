@@ -2,7 +2,7 @@
 
 pub(super) use rsdm_system::{clock::monotonic_usec, process_handle::ProcessHandle};
 
-use super::{SessionError, bus::{UserManager, missing_unit}, runtime::AppRecord};
+use super::{SessionError, app_stop::ShutdownControl, bus::{UserManager, missing_unit}, runtime::AppRecord};
 
 const SERVICE: &str = "org.freedesktop.systemd1.Service";
 
@@ -55,40 +55,46 @@ pub(super) async fn generation_invocation(
     }
 }
 
-pub(super) async fn signal_app(manager: &UserManager, app: &AppRecord, signal: i32) -> Result<(), SessionError> {
+pub(super) async fn signal_app(manager: &UserManager, app: &AppRecord, signal: i32, control: &ShutdownControl) -> Result<bool, SessionError> {
     let processes = app_processes(manager, app).await?;
-    if processes.is_empty() { return Ok(()); }
+    if processes.is_empty() || control.cancelled() { return Ok(false); }
     let group: String = manager.unit_property(&app.unit, SERVICE, "ControlGroup").await?;
     if !group.starts_with('/') || group == "/" {
         return Err(SessionError::State(format!("{} has no dedicated cgroup", app.unit)));
     }
 
-    // Bound live descriptors even for large browser cgroups. Each batch is
-    // pinned before checking InvocationID, and membership uses procfs directly.
+    // Bound live descriptors even for large browser cgroups. Prepare the
+    // owned pidfds before the final invocation and cancellation checks.
+    let mut sent = false;
     for batch in processes.chunks(32) {
-        let mut pinned = Vec::new();
-        for &pid in batch {
-            if let Some(handle) = ProcessHandle::open(pid)? { pinned.push((pid, handle)); }
-        }
-        if !verify_invocation(manager, app).await? { return Ok(()); }
+        let batch = batch.to_vec();
         let group = group.clone();
-        let actions = manager.actions.clone();
-        super::runtime::blocking(move || {
-            for (pid, handle) in pinned {
-                let membership = match std::fs::read_to_string(format!("/proc/{pid}/cgroup")) {
-                    Ok(membership) => membership,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                    Err(error) => return Err(error.into()),
-                };
-                if belongs_to_cgroup(&membership, &group) {
-                    actions.check_generation()?;
-                    handle.signal(signal)?;
-                }
-            }
-            Ok(())
-        }).await?;
+        let owned = super::runtime::blocking(move || owned_process_handles(&batch, &group)).await?;
+        if control.cancelled() { return Ok(sent); }
+        if !verify_invocation(manager, app).await? { return Ok(sent); }
+        for handle in owned {
+            manager.actions.check_generation_async().await?;
+            if control.cancelled() { return Ok(sent); }
+            manager.actions.check()?;
+            handle.signal(signal)?;
+            sent = true;
+        }
     }
-    Ok(())
+    Ok(sent)
+}
+
+fn owned_process_handles(processes: &[u32], group: &str) -> Result<Vec<ProcessHandle>, SessionError> {
+    let mut owned = Vec::new();
+    for &pid in processes {
+        let Some(handle) = ProcessHandle::open(pid)? else { continue; };
+        let membership = match std::fs::read_to_string(format!("/proc/{pid}/cgroup")) {
+            Ok(membership) => membership,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if belongs_to_cgroup(&membership, group) { owned.push(handle); }
+    }
+    Ok(owned)
 }
 
 pub(super) fn belongs_to_cgroup(membership: &str, group: &str) -> bool {
@@ -113,22 +119,25 @@ pub(super) async fn stop_invocation(manager: &UserManager, unit: &str, expected:
     }
 }
 
-pub(super) async fn terminate_main(manager: &UserManager, app: &AppRecord) -> Result<(), SessionError> {
-    if !verify_invocation(manager, app).await? {
-        return Ok(());
+pub(super) async fn terminate_main(manager: &UserManager, app: &AppRecord, control: &ShutdownControl) -> Result<bool, SessionError> {
+    if control.cancelled() || !verify_invocation(manager, app).await? {
+        return Ok(false);
     }
     let main: u32 = manager.unit_property(&app.unit, SERVICE, "MainPID").await?;
     if main == 0 {
-        return signal_app(manager, app, libc::SIGTERM).await;
+        return signal_app(manager, app, libc::SIGTERM, control).await;
     }
     let Some(handle) = ProcessHandle::open(main)? else {
-        return signal_app(manager, app, libc::SIGTERM).await;
+        return signal_app(manager, app, libc::SIGTERM, control).await;
     };
     if app_processes(manager, app).await?.contains(&main) {
         manager.actions.check_generation_async().await?;
+        if control.cancelled() { return Ok(false); }
+        manager.actions.check()?;
         handle.signal(libc::SIGTERM)?;
+        return Ok(true);
     }
-    Ok(())
+    Ok(false)
 }
 
 

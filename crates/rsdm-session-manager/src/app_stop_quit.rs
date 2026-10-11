@@ -46,16 +46,20 @@ pub(super) async fn request_quit(manager: &UserManager, runtime: &Runtime, app: 
     {
         return Ok(None);
     }
-    if control.cancelled() { return Ok(None); }
-    if crate::app_dispatch::claim(runtime, app, control.transaction_id.as_deref(), crate::app_dispatch::Method::Term, &manager.deadline).await? {
-        if control.cancelled() {
-            crate::app_dispatch::finish(runtime, app, control.transaction_id.as_deref(), crate::app_dispatch::Method::Term, crate::app_dispatch::State::NotSent, &manager.deadline).await?;
-            return Ok(None);
-        }
-        terminate_main(manager, app).await?;
-        crate::app_dispatch::finish(runtime, app, control.transaction_id.as_deref(), crate::app_dispatch::Method::Term, crate::app_dispatch::State::Sent, &manager.deadline).await?;
-    }
+    request_term(manager, runtime, app, control).await?;
     Ok(None)
+}
+
+async fn request_term(manager: &UserManager, runtime: &Runtime, app: &AppRecord, control: &ShutdownControl) -> Result<(), SessionError> {
+    if control.cancelled() { return Ok(()); }
+    let transaction = control.transaction_id.as_deref();
+    if !crate::app_dispatch::claim(runtime, app, transaction, crate::app_dispatch::Method::Term, &manager.deadline).await? {
+        return Ok(());
+    }
+
+    let sent = terminate_main(manager, app, control).await?;
+    let state = if sent { crate::app_dispatch::State::Sent } else { crate::app_dispatch::State::NotSent };
+    crate::app_dispatch::finish(runtime, app, transaction, crate::app_dispatch::Method::Term, state, &manager.deadline).await
 }
 
 pub(super) async fn prepare_xsmp(
@@ -120,3 +124,7 @@ pub(super) async fn release_quit(manager: &UserManager, unit: &str) {
 #[cfg(test)]
 #[path = "app_stop_quit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "app_stop_signal_tests.rs"]
+mod signal_tests;

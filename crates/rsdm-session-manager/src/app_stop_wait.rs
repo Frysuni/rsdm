@@ -30,14 +30,14 @@ pub(super) async fn force_exit(
     if app_processes(&force_manager, app).await?.is_empty() { return Ok(AppOutcome::Clean); }
 
     crate::app_result::escalating(runtime, app, control.transaction_id.as_deref(), &force_manager.deadline).await?;
-    signal_app(&force_manager, app, libc::SIGTERM).await?;
+    signal_app(&force_manager, app, libc::SIGTERM, control).await?;
     let mut grace_manager = force_manager.clone();
     grace_manager.deadline = grace.clone();
     if let Some(outcome) = wait_until(&grace_manager, app, monotonic_usec()?.saturating_add(5_000_000), control).await? {
         return Ok(if outcome == AppOutcome::Clean { AppOutcome::Forced } else { outcome });
     }
     if control.cancelled() { return Ok(AppOutcome::Cancelled); }
-    signal_app(&force_manager, app, libc::SIGKILL).await?;
+    signal_app(&force_manager, app, libc::SIGKILL, control).await?;
     match wait_until(&force_manager, app, monotonic_usec()?.saturating_add(5_000_000), control).await? {
         Some(AppOutcome::Clean) => Ok(AppOutcome::Forced),
         Some(outcome) => Ok(outcome),
