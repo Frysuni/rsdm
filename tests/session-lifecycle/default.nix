@@ -266,9 +266,21 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds("grep '^quit_started = true$' " + directory + "/apps/*.toml")
         record = tomllib.loads(machine.succeed("cat " + directory + "/session.toml"))
         assert "shutdown_deadline_usec" not in record
-        deadline = int(float(machine.succeed("cut -d ' ' -f1 /proc/uptime")) * 1_000_000) + 3_000_000
-        machine.succeed("sed -i '1i shutdown_deadline_usec = " + str(deadline) + "' " + directory + "/session.toml")
-        machine.wait_until_succeeds(user + "systemctl --user show " + unit + " -p ActiveState --value | grep -E '^(inactive|failed)$'", timeout=10)
+        # The actor rewrites its record after observations. Pause that writer
+        # while injecting the independent hook's synthetic shared budget.
+        coordinator_pid = machine.succeed("systemctl show rsdm-test-session.service -p MainPID --value").strip()
+        machine.succeed("kill -STOP " + coordinator_pid)
+        try:
+            deadline = int(float(machine.succeed("cut -d ' ' -f1 /proc/uptime")) * 1_000_000) + 3_000_000
+            machine.succeed("sed -i '1i shutdown_deadline_usec = " + str(deadline) + "' " + directory + "/session.toml")
+            machine.wait_until_succeeds(user + "systemctl --user show " + unit + " -p ActiveState --value | grep -E '^(inactive|failed)$'", timeout=10)
+        except Exception:
+            print(machine.succeed("cat " + directory + "/session.toml"))
+            print(machine.succeed("cat " + directory + "/apps/*.toml"))
+            print(machine.succeed("journalctl --no-pager -n 80 _UID=1000"))
+            raise
+        finally:
+            machine.succeed("kill -CONT " + coordinator_pid)
         result_path = shlex.quote(directory + "/results/" + app["unit"] + ".toml")
         machine.wait_until_succeeds("test -f " + result_path, timeout=10)
         result = tomllib.loads(machine.succeed("cat " + result_path))
