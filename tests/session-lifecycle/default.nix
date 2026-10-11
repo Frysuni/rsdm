@@ -87,6 +87,7 @@ pkgs.testers.runNixOSTest {
   testScript = ''
     import shlex
     import time
+    import tomllib
 
     start_all()
     machine.wait_for_unit("multi-user.target")
@@ -148,6 +149,37 @@ pkgs.testers.runNixOSTest {
                 raise
             machine.fail(user + "systemctl --user is-active --quiet graphical-session.target")
             machine.wait_until_succeeds("test \"$(systemctl show --property=LoadState --value rsdm-test-startup.service)\" = not-found")
+
+    with subtest("disabled generation hooks stay passive after configuration is reenabled"):
+        session = start_session()
+        machine.succeed(session + "rsdm app -- ${application} disabled-record")
+        machine.wait_for_file(runtime + "/app-disabled-record-ready")
+        generation = session.split("RSDM_SESSION_GENERATION=")[1].split()[0]
+        directory = runtime + "/rsdm/sessions/" + generation
+        record = tomllib.loads(machine.succeed("cat " + directory + "/session.toml"))
+        app = machine.succeed("basename -s .toml " + directory + "/apps/*.toml").strip()
+        app_state = machine.succeed(user + "systemctl --user show " + app + " -p MainPID -p InvocationID")
+        wm_state = machine.succeed(user + "systemctl --user show " + record["compositor_unit"] + " -p MainPID -p InvocationID")
+        machine.succeed("systemctl kill --kill-whom=main --signal=KILL rsdm-test-session")
+        machine.wait_until_fails("systemctl is-active --quiet rsdm-test-session")
+        machine.succeed(user + "sed -i 's/^disabled = false$/disabled = true/' " + directory + "/session.toml")
+        saved = machine.succeed("cat " + directory + "/session.toml")
+        assert tomllib.loads(saved)["disabled"]
+        registered = machine.succeed("cat " + directory + "/apps/" + app + ".toml")
+        for enabled in ["false", "true"]:
+            machine.succeed("printf '[session_manager]\\nenabled = " + enabled + "\\n' > /run/rsdm-toggle.toml")
+            hooks = user + "rsdm --config /run/rsdm-toggle.toml session "
+            machine.succeed(hooks + "app-stop --generation " + generation + " --unit " + app)
+            machine.succeed(hooks + "cleanup --generation " + generation)
+            assert machine.succeed("cat " + directory + "/session.toml") == saved
+            assert machine.succeed("cat " + directory + "/apps/" + app + ".toml") == registered
+            assert machine.succeed(user + "systemctl --user show " + app + " -p MainPID -p InvocationID") == app_state
+            assert machine.succeed(user + "systemctl --user show " + record["compositor_unit"] + " -p MainPID -p InvocationID") == wm_state
+            machine.succeed("test -e " + runtime + "/display-alive")
+            machine.fail("test -e " + runtime + "/app-disabled-record")
+            assert ("RSDM_SESSION_GENERATION=" + generation) in machine.succeed(user + "systemctl --user show-environment")
+        machine.succeed(user + "systemctl --user stop graphical-session.target")
+        machine.wait_until_fails("test -e " + runtime + "/display-alive")
 
     with subtest("applications save before the compositor is stopped"):
         session = start_session()

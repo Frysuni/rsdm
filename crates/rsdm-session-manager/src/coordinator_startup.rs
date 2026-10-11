@@ -142,6 +142,7 @@ fn initial_record(
         provider: provider.name().into(),
         owns_targets: false,
         phase: SessionPhase::Starting,
+        disabled: false,
         exported_environment,
         shutdown_deadline_usec: None,
     }

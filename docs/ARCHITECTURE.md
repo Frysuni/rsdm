@@ -159,6 +159,12 @@ workers, so in-place edits, atomic replacement and recreation are observed.
 Invalid or missing updates retain the last validated policy. Unchanged session
 policy does not notify receivers; dropping all receivers ends monitoring.
 
+Recovery records can permanently mark a generation disabled. Once marked, app
+stop hooks and recovery leave its applications, compositor, anchor and exported
+environment untouched, even when the current configuration enables SM again.
+An attempt to save that generation as enabled is rejected. Older records without
+the marker retain their original recovery behavior.
+
 Orderly logout closes the launch gate, drains accepted jobs and prepares
 registered `rsdm app` processes in parallel before infrastructure teardown.
 Each app also has a synchronous ExecStop backstop sharing the saved deadline.

@@ -53,7 +53,7 @@ impl Fixture {
                 desktop_entry_id: None, uid },
             anchor_unit: format!("rsdm-session-{GENERATION}.service"), compositor_unit: None,
             compositor_invocation: Vec::new(), provider: "external".into(), owns_targets: false,
-            phase: SessionPhase::Running, exported_environment: Vec::new(), shutdown_deadline_usec: None,
+            phase: SessionPhase::Running, disabled: false, exported_environment: Vec::new(), shutdown_deadline_usec: None,
         };
         runtime.save_session(&record).unwrap();
         let (endpoint, requests) = crate::control::Endpoint::channel(uid);

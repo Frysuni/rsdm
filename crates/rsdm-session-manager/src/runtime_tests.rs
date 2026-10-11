@@ -126,6 +126,7 @@ fn serialized_size_limit_applies_to_session_records_too() {
         anchor_unit: format!("rsdm-session-{GENERATION}.service"),
         compositor_unit: None, compositor_invocation: Vec::new(),
         provider: "managed".into(), owns_targets: true, phase: SessionPhase::Starting,
+        disabled: false,
         exported_environment: vec![("VALUE".into(), "x".repeat(MAX_RECORD_BYTES))],
         shutdown_deadline_usec: None,
     };

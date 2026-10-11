@@ -33,6 +33,8 @@ pub(super) struct SessionRecord {
     pub owns_targets: bool,
     pub phase: SessionPhase,
     #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
     pub exported_environment: Vec<(String, String)>,
     #[serde(default)]
     pub shutdown_deadline_usec: Option<u64>,
@@ -93,6 +95,16 @@ impl Runtime {
     pub fn save_session(&self, record: &SessionRecord) -> Result<(), SessionError> {
         if record.identity.generation != self.generation {
             return Err(SessionError::State("session record generation mismatch".into()));
+        }
+        if !record.disabled {
+            match self.session() {
+                Ok(previous) if previous.disabled => {
+                    return Err(SessionError::State("disabled session generation cannot be reactivated".into()));
+                }
+                Ok(_) => {}
+                Err(SessionError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
         }
         write_record(&self.path.join("session.toml"), record)
     }

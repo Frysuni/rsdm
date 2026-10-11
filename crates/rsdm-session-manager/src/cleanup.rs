@@ -30,14 +30,18 @@ fn open_recovery(generation: &str) -> Result<Option<(Runtime, super::session_lea
     if !runtime.path.join("session.toml").try_exists()? && runtime.apps()?.is_empty() {
         return Ok(None);
     }
+    let record = runtime.session()?;
+    if record.disabled { return Ok(None); }
     let lease = super::session_lease::SessionLease::acquire()?;
-    let deadline = runtime.session()?.shutdown_deadline_usec;
-    Ok(Some((runtime, lease, deadline)))
+    let record = runtime.session()?;
+    if record.disabled { return Ok(None); }
+    Ok(Some((runtime, lease, record.shutdown_deadline_usec)))
 }
 
 pub(super) async fn recover(manager: &UserManager, runtime: &Runtime) -> Result<(), SessionError> {
     let records = runtime.clone();
     let mut record = super::runtime::blocking(move || records.session()).await?;
+    if record.disabled { return Ok(()); }
     let control = std::sync::Arc::new(ShutdownControl::for_manager(manager));
     control.noncancelable.store(true, std::sync::atomic::Ordering::SeqCst);
     control.recovery.store(true, std::sync::atomic::Ordering::SeqCst);

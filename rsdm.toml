@@ -20,6 +20,7 @@
 # False runs app/session start commands normally; finalize, stop hooks and cleanup do nothing.
 # DM and Lock power actions continue through logind when session management is disabled.
 # Configuration monitoring retains the last valid policy if an update cannot be loaded.
+# Re-enabling does not resume stop hooks or recovery for a generation recorded as disabled.
 enabled = true # optional | bool | default: true | values: true, false
 # Extra environment variable names exported after the Wayland socket appears.
 extra_env = [] # optional | array<string> | default: [] | values: environment variable names

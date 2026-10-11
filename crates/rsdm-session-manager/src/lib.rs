@@ -40,6 +40,9 @@ mod helper_start_fixture;
 #[cfg(test)]
 mod enabled_tests;
 
+#[cfg(test)]
+mod disabled_generation_tests;
+
 use rsdm_core::domain::{SessionManagerConfig, ShutdownPolicy};
 use thiserror::Error;
 

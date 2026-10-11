@@ -167,11 +167,12 @@ pub(super) async fn reset_preparation(runtime: &Runtime) -> Result<(), SessionEr
 
 pub async fn stop_hook(generation: &str, unit: &str) -> Result<(), SessionError> {
     let generation = generation.to_string();
-    let (runtime, saved) = blocking(move || {
+    let Some((runtime, saved)) = blocking(move || {
         let runtime = Runtime::open(&generation)?.ok_or_else(|| SessionError::State("session recovery record is missing".into()))?;
-        let saved = runtime.session()?.shutdown_deadline_usec;
-        Ok((runtime, saved))
-    }).await?;
+        let record = runtime.session()?;
+        if record.disabled { return Ok(None); }
+        Ok(Some((runtime, record.shutdown_deadline_usec)))
+    }).await? else { return Ok(()); };
     let deadline = Deadline::default();
     if let Some(saved) = saved { deadline.set(saved); }
     let manager = UserManager::connect_until(deadline).await?;
