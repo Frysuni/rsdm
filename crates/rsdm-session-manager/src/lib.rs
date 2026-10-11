@@ -31,6 +31,8 @@ mod env;
 mod identity;
 mod lifecycle;
 mod native_compositor;
+mod niri;
+mod window_close;
 mod plain_launch;
 mod partial;
 mod processes;

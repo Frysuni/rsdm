@@ -118,6 +118,12 @@ impl Coordinator {
         self.pending_ready = false;
         self.ready_busy = false;
         if ready {
+            if self.provider.kind == ProviderKind::Niri {
+                let environment = self.manager.environment().await?.into_iter()
+                    .filter_map(|entry| entry.split_once('=').map(|(name, value)| (name.to_string(), value.to_string())))
+                    .filter(|(name, _)| super::env::WAYLAND_VARS.contains(&name.as_str())).collect::<Vec<_>>();
+                super::activation::claim_environment(&mut self.record, &environment)?;
+            }
             self.ready_once = true;
             self.lifecycle.ready();
         }

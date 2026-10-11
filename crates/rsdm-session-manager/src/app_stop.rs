@@ -41,7 +41,7 @@ impl ShutdownControl {
         self.hard_deadline.set(deadline);
     }
 
-    fn cancelled(&self) -> bool {
+    pub(super) fn cancelled(&self) -> bool {
         !self.noncancelable.load(Ordering::SeqCst) && self.cancelled.load(Ordering::SeqCst)
     }
 }

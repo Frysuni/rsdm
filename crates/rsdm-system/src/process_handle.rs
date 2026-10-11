@@ -5,6 +5,20 @@ use std::{io, os::fd::{AsRawFd, FromRawFd, OwnedFd}};
 pub struct ProcessHandle(OwnedFd);
 
 impl ProcessHandle {
+    /// Pin a Unix socket's authenticated peer without reopening a numeric PID.
+    pub fn socket_peer(socket: &impl AsRawFd) -> io::Result<Self> {
+        let mut descriptor = -1;
+        let mut length = std::mem::size_of_val(&descriptor) as libc::socklen_t;
+        // SAFETY: both output pointers are valid; success returns an owned FD.
+        let result = unsafe {
+            libc::getsockopt(socket.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERPIDFD,
+                (&mut descriptor as *mut i32).cast(), &mut length)
+        };
+        if result < 0 { return Err(io::Error::last_os_error()); }
+        // SAFETY: SO_PEERPIDFD returned a new descriptor owned by this caller.
+        Ok(Self(unsafe { OwnedFd::from_raw_fd(descriptor) }))
+    }
+
     /// Adopt a pidfd received from a trusted process-credential provider.
     pub fn from_pidfd(descriptor: OwnedFd) -> Self { Self(descriptor) }
 
@@ -43,6 +57,14 @@ impl ProcessHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn socket_credentials_provide_a_live_peer_pidfd() {
+        let (socket, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let handle = ProcessHandle::socket_peer(&socket).unwrap();
+        assert!(handle.alive().unwrap());
+        handle.signal(0).unwrap();
+    }
 
     #[test]
     fn an_exited_handle_cannot_signal_a_later_child() {

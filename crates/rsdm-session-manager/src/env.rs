@@ -21,10 +21,11 @@ pub(super) const WAYLAND_VARS: &[&str] = &[
     "XDG_CURRENT_DESKTOP",
     "XDG_SESSION_DESKTOP",
     "DESKTOP_SESSION",
+    "NIRI_SOCKET",
 ];
 
 /// Display endpoints must not come from a previous login in the user manager.
-pub(super) const DISPLAY_VARS: &[&str] = &["WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY"];
+pub(super) const DISPLAY_VARS: &[&str] = &["WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "NIRI_SOCKET"];
 
 /// Names of every variable we manage, for export/unset.
 pub(super) fn all_var_names(extra_env: &[String], extra_names: &[String]) -> Vec<String> {

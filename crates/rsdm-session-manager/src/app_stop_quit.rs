@@ -41,6 +41,11 @@ pub(super) async fn request_quit(manager: &UserManager, runtime: &Runtime, app: 
             return Err(SessionError::State("this application has no XSMP connection".into()));
         }
     }
+    if app.policy.method == ShutdownMethod::Auto && !control.cancelled()
+        && crate::window_close::request(manager, runtime, app, control).await?
+    {
+        return Ok(None);
+    }
     if crate::app_dispatch::claim(runtime, app, control.transaction_id.as_deref(), crate::app_dispatch::Method::Term, &manager.deadline).await? {
         terminate_main(manager, app).await?;
         crate::app_dispatch::finish(runtime, app, control.transaction_id.as_deref(), crate::app_dispatch::Method::Term, crate::app_dispatch::State::Sent, &manager.deadline).await?;

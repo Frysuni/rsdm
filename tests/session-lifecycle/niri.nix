@@ -2,6 +2,7 @@
 
 let
   controller = import ./controller.nix { inherit pkgs; };
+  windows = import ./niri-windows.nix { inherit pkgs; };
   application = pkgs.writeShellScript "test-niri-application" ''
     set -eu
     trap 'systemctl --user is-active --quiet niri.service; test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"; touch "$XDG_RUNTIME_DIR/niri-app-saved"; exit 0' TERM
@@ -70,6 +71,7 @@ pkgs.testers.runNixOSTest {
         machine.fail(user + "systemctl --user list-units --all --plain --no-legend 'session-rsdm-*' | grep session-rsdm")
         machine.succeed(session + "rsdm session status | grep 'RSDM XSMP: available'")
 
+  '' + windows.testScript + ''
     with subtest("denied power preserves native niri and registered apps"):
         machine.succeed(session + "rsdm app -- ${application}")
         machine.wait_for_file("/run/user/1000/niri-app-ready")
