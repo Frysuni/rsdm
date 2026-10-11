@@ -205,14 +205,21 @@ stored with the generation. Bare niri can publish it with `rsdm session finalize
 The socket's UID and peer pidfd must match the recorded compositor unit's
 MainPID and InvocationID. The selected window's PID must belong to the current
 application invocation and cgroup; its pidfd stays pinned across a second
-window snapshot and dispatch. Titles and app IDs do not establish ownership.
+window snapshot and dispatch. A separate connection to the same pinned peer
+subscribes to EventStream before selecting a window. Its initial WindowsChanged
+snapshot supplies candidates; queued events are checked immediately before
+close. A closed, replaced or missing target cannot be restored by a later event
+in that burst. Disconnects, malformed or incomplete events and oversized bursts
+prevent close. Neither connection waits for application exit. Titles and app
+IDs do not establish ownership.
 
 Only one addressed window receives close. Durable intent prevents another
 close after a lost reply, cancellation or recovery; application exit still
 requires an empty cgroup. Missing PID, unverified compositor ownership or an
 unavailable transport leaves TERM available when no close was dispatched.
 Attached compositors currently use fallback because their lifecycle ownership
-does not establish this Niri proof. Event-stream observation remains pending.
+does not establish this Niri proof. Events only validate the selected target;
+they do not establish application exit or trigger additional closes.
 
 ## XSMP
 

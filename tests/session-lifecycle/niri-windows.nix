@@ -21,6 +21,9 @@ let
         if prefix == "clean":
             app.quit()
             return False
+        if prefix == "linger":
+            window.destroy()
+            return True
         dialog = Gtk.Window(application=app, title=prefix + " save", transient_for=window)
         dialog.set_default_size(160, 100)
         dialog.present()
@@ -102,5 +105,23 @@ in {
         assert machine.succeed("cat /run/user/1000/clean-closes").splitlines() == ["close"]
         machine.fail("test -e /run/user/1000/clean-term")
         machine.succeed(user + "systemctl --user is-active --quiet niri.service")
+
+    with subtest("a vanished window does not prove application exit or close its sibling"):
+        machine.succeed(session + "rsdm app --shutdown-timeout 1 --on-timeout cancel -- ${command} linger")
+        machine.wait_until_succeeds(session + "niri msg --json windows | grep 'linger 1'")
+        record = tomllib.loads(machine.succeed("cat " + directory + "/apps/*.toml"))
+        machine.fail(session + "rsdm session stop")
+        remaining = [window for window in windows() if window["title"].startswith("linger ")]
+        assert len(remaining) == 1
+        assert machine.succeed("cat /run/user/1000/linger-closes").splitlines() == ["close"]
+        machine.fail("test -e /run/user/1000/linger-term")
+        machine.succeed(user + "systemctl --user is-active --quiet " + record["unit"] + " niri.service")
+        saved = tomllib.loads(machine.succeed("cat " + directory + "/apps/" + record["unit"] + ".toml"))
+        assert saved["preparation"]["outcome"] == "cancelled"
+        machine.fail(session + "rsdm session stop")
+        assert machine.succeed("cat /run/user/1000/linger-closes").splitlines() == ["close"]
+        assert len([window for window in windows() if window["title"].startswith("linger ")]) == 1
+        machine.succeed("touch /run/user/1000/linger-finish")
+        machine.wait_until_fails("test -e " + directory + "/apps/" + record["unit"] + ".toml")
   '';
 }

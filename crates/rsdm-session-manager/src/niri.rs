@@ -8,6 +8,10 @@ use tokio::{io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}, net::
 
 use super::{SessionError, processes::ProcessHandle};
 
+#[path = "niri_events.rs"]
+mod events;
+pub(super) use events::EventStream;
+
 const MAX_FRAME_BYTES: u64 = 1_048_576;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -58,13 +62,17 @@ impl Connection {
             let mut request = serde_json::to_vec(request).map_err(|error| SessionError::State(error.to_string()))?;
             request.push(b'\n');
             self.stream.get_mut().write_all(&request).await?;
-            let mut frame = Vec::new();
-            (&mut self.stream).take(MAX_FRAME_BYTES + 1).read_until(b'\n', &mut frame).await?;
-            if frame.len() as u64 > MAX_FRAME_BYTES || frame.last() != Some(&b'\n') {
-                return Err(SessionError::State("incomplete or oversized Niri frame".into()));
-            }
-            serde_json::from_slice(&frame).map_err(|error| SessionError::State(format!("invalid Niri frame: {error}")))
+            self.read_frame().await
         }).await.map_err(|_| SessionError::State("Niri IPC timed out".into()))?
+    }
+
+    async fn read_frame(&mut self) -> Result<Value, SessionError> {
+        let mut frame = Vec::new();
+        (&mut self.stream).take(MAX_FRAME_BYTES + 1).read_until(b'\n', &mut frame).await?;
+        if frame.len() as u64 > MAX_FRAME_BYTES || frame.last() != Some(&b'\n') {
+            return Err(SessionError::State("incomplete or oversized Niri frame".into()));
+        }
+        serde_json::from_slice(&frame).map_err(|error| SessionError::State(format!("invalid Niri frame: {error}")))
     }
 }
 

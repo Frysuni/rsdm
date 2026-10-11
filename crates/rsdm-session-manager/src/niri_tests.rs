@@ -6,10 +6,10 @@ use tokio::net::UnixListener;
 
 use super::*;
 
-struct Fixture { directory: PathBuf, path: PathBuf, listener: UnixListener }
+pub(super) struct Fixture { directory: PathBuf, path: PathBuf, listener: UnixListener }
 
 impl Fixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let directory = std::env::temp_dir().join(format!("rsdm-niri-{}", zbus::Guid::generate()));
         fs::create_dir(&directory).unwrap();
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
@@ -18,7 +18,7 @@ impl Fixture {
         Self { directory, path, listener }
     }
 
-    async fn connect(&self) -> (Connection, BufReader<UnixStream>) {
+    pub(super) async fn connect(&self) -> (Connection, BufReader<UnixStream>) {
         // SAFETY: geteuid has no preconditions.
         let connection = Connection::connect(&self.path, unsafe { libc::geteuid() }).await.unwrap();
         let (peer, _) = self.listener.accept().await.unwrap();
@@ -30,7 +30,7 @@ impl Drop for Fixture {
     fn drop(&mut self) { let _ = fs::remove_dir_all(&self.directory); }
 }
 
-async fn read_request(peer: &mut BufReader<UnixStream>) -> Value {
+pub(super) async fn read_request(peer: &mut BufReader<UnixStream>) -> Value {
     let mut frame = Vec::new();
     peer.read_until(b'\n', &mut frame).await.unwrap();
     serde_json::from_slice(&frame).unwrap()

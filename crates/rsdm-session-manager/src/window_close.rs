@@ -7,13 +7,20 @@ use super::{SessionError, app_dispatch::{self, Method, State}, app_stop::Shutdow
 
 const SERVICE: &str = "org.freedesktop.systemd1.Service";
 
+struct PreparedClose {
+    connection: niri::Connection,
+    events: niri::EventStream,
+    window: niri::Window,
+    process: ProcessHandle,
+}
+
 pub(super) async fn request(manager: &UserManager, runtime: &Runtime, app: &AppRecord, control: &ShutdownControl) -> Result<bool, SessionError> {
     let records = runtime.clone();
     let record = runtime::blocking(move || records.session()).await?;
     if record.disabled { return Err(SessionError::Disabled); }
     let Some((_, path)) = record.exported_environment.iter().find(|(name, _)| name == "NIRI_SOCKET") else { return Ok(false); };
     let prepared = prepare(manager, &record, app, path).await;
-    let (mut connection, window, process) = match prepared {
+    let mut prepared = match prepared {
         Ok(Some(prepared)) => prepared,
         Ok(None) => return Ok(false),
         Err(error) => { tracing::debug!(%error, unit = app.unit, "Niri window close is unavailable"); return Ok(false); }
@@ -23,7 +30,7 @@ pub(super) async fn request(manager: &UserManager, runtime: &Runtime, app: &AppR
     if !app_dispatch::claim(runtime, app, transaction, Method::WindowClose, &manager.deadline).await? { return Ok(true); }
     // All fallible ownership checks precede the write. After it begins, an
     // interrupted operation is potentially delivered and cannot fall back.
-    let dispatched = dispatch(manager, &record, app, &mut connection, &window, &process, control).await;
+    let dispatched = dispatch(manager, &record, app, &mut prepared, control).await;
     let state = match dispatched {
         Ok(true) => State::Sent,
         Ok(false) => State::NotSent,
@@ -33,23 +40,28 @@ pub(super) async fn request(manager: &UserManager, runtime: &Runtime, app: &AppR
     Ok(state != State::NotSent)
 }
 
-async fn prepare(manager: &UserManager, record: &SessionRecord, app: &AppRecord, path: &str) -> Result<Option<(niri::Connection, niri::Window, ProcessHandle)>, SessionError> {
-    let mut connection = manager.request(async { Ok(niri::Connection::connect(Path::new(path), record.identity.uid).await) }).await??;
+async fn prepare(manager: &UserManager, record: &SessionRecord, app: &AppRecord, path: &str) -> Result<Option<PreparedClose>, SessionError> {
+    let connection = manager.request(async { Ok(niri::Connection::connect(Path::new(path), record.identity.uid).await) }).await??;
     if !owns_compositor(manager, record, connection.pid).await? { return Ok(None); }
+    let subscriber = manager.request(async { Ok(niri::Connection::connect(Path::new(path), record.identity.uid).await) }).await??;
+    if subscriber.pid != connection.pid || !owns_compositor(manager, record, subscriber.pid).await? { return Ok(None); }
+    let (events, mut windows) = manager.request(async { Ok(niri::EventStream::subscribe(subscriber).await) }).await??;
     let pids = processes::app_processes(manager, app).await?;
-    let mut windows = manager.request(async { Ok(connection.windows().await) }).await??;
     windows.sort_by_key(|window| window.id);
     for window in windows {
         let Some(pid) = window.pid.and_then(|pid| u32::try_from(pid).ok()).filter(|pid| pids.contains(pid)) else { continue; };
         // Pin one candidate, rather than every browser cgroup process. The
         // second window snapshot in dispatch is checked while it stays pinned.
         let Some(handle) = ProcessHandle::open(pid)? else { continue; };
-        if owns_process(manager, app, pid, &handle).await? { return Ok(Some((connection, window, handle))); }
+        if owns_process(manager, app, pid, &handle).await? {
+            return Ok(Some(PreparedClose { connection, events, window, process: handle }));
+        }
     }
     Ok(None)
 }
 
-async fn dispatch(manager: &UserManager, record: &SessionRecord, app: &AppRecord, connection: &mut niri::Connection, window: &niri::Window, handle: &ProcessHandle, control: &ShutdownControl) -> Result<bool, SessionError> {
+async fn dispatch(manager: &UserManager, record: &SessionRecord, app: &AppRecord, prepared: &mut PreparedClose, control: &ShutdownControl) -> Result<bool, SessionError> {
+    let PreparedClose { connection, events, window, process: handle } = prepared;
     let pid = window.pid.and_then(|pid| u32::try_from(pid).ok()).unwrap_or(0);
     if !owns_compositor(manager, record, connection.pid).await? || !owns_process(manager, app, pid, handle).await? { return Ok(false); }
     let windows = manager.request(async { Ok(connection.windows().await) }).await??;
@@ -57,6 +69,11 @@ async fn dispatch(manager: &UserManager, record: &SessionRecord, app: &AppRecord
     manager.request(async {
         manager.actions.check_generation_async().await.map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
         if control.cancelled() || !handle.alive()? { return Ok(Ok(false)); }
+        match events.unchanged(window) {
+            Ok(true) => {}
+            Ok(false) => return Ok(Ok(false)),
+            Err(error) => { tracing::debug!(%error, "Niri window events cannot authorize close"); return Ok(Ok(false)); }
+        }
         Ok(connection.close(window.id).await)
     }).await?
 }
