@@ -30,10 +30,15 @@ pub(super) struct Admission {
 impl Admission {
     pub fn close(&self) { self.closed.store(true, Ordering::Release); }
 
-    pub fn acquire(&self, class: Class) -> zbus::fdo::Result<Arc<Permit>> {
+    pub fn check_open(&self) -> zbus::fdo::Result<()> {
         if self.closed.load(Ordering::Acquire) {
             return Err(zbus::fdo::Error::Failed("session manager is disabled".into()));
         }
+        Ok(())
+    }
+
+    pub fn acquire(&self, class: Class) -> zbus::fdo::Result<Arc<Permit>> {
+        self.check_open()?;
         let (pending, limit) = match class {
             Class::Regular => (&self.regular, MAX_REGULAR_REQUESTS),
             Class::Stop => (&self.stop, MAX_STOP_REQUESTS),
@@ -45,9 +50,7 @@ impl Admission {
             Some(count + 1)
         }).map_err(|_| zbus::fdo::Error::LimitsExceeded("session coordinator is busy; retry the request".into()))?;
         let permit = Arc::new(Permit { pending: pending.clone() });
-        if self.closed.load(Ordering::Acquire) {
-            return Err(zbus::fdo::Error::Failed("session manager is disabled".into()));
-        }
+        self.check_open()?;
         Ok(permit)
     }
 }

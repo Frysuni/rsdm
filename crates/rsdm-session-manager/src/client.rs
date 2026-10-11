@@ -11,7 +11,8 @@ use super::{
 
 pub async fn generation(cfg: &SessionManagerConfig) -> Result<String, SessionError> {
     if !cfg.enabled { return Err(SessionError::State("session manager is disabled".into())); }
-    current_generation()
+    let connection = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await?;
+    Ok(control::proxy(&connection).await?.call("Handshake", &()).await?)
 }
 
 fn current_generation() -> Result<String, SessionError> {

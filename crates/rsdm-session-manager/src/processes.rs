@@ -91,7 +91,7 @@ pub(super) async fn signal_app(manager: &UserManager, app: &AppRecord, signal: i
     Ok(())
 }
 
-fn belongs_to_cgroup(membership: &str, group: &str) -> bool {
+pub(super) fn belongs_to_cgroup(membership: &str, group: &str) -> bool {
     membership.lines().any(|line| {
         let mut fields = line.splitn(3, ':');
         let (Some(hierarchy), Some(controllers), Some(path)) = (fields.next(), fields.next(), fields.next())

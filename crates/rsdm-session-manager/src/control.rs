@@ -80,14 +80,23 @@ pub(super) enum Request {
 #[derive(Clone)]
 pub(super) struct Endpoint {
     requests: Sender<Request>,
-    uid: u32,
+    identity: super::identity::SessionIdentity,
+    handshake_slots: Arc<tokio::sync::Semaphore>,
     admission: Admission,
 }
 
 impl Endpoint {
-    pub fn channel(uid: u32) -> (Self, Receiver<Request>) {
+    pub fn for_session(identity: super::identity::SessionIdentity) -> (Self, Receiver<Request>) {
         let (requests, received) = mpsc::channel(admission::QUEUE_CAPACITY);
-        (Self { requests, uid, admission: Admission::default() }, received)
+        (Self { requests, identity, handshake_slots: Arc::new(tokio::sync::Semaphore::new(4)), admission: Admission::default() }, received)
+    }
+
+    #[cfg(test)]
+    pub fn channel(uid: u32) -> (Self, Receiver<Request>) {
+        Self::for_session(super::identity::SessionIdentity {
+            generation: "0123456789abcdef0123456789abcdef".into(), login_session_id: "test".into(),
+            desktop_entry_id: None, uid,
+        })
     }
 
     async fn request<T: Send + 'static>(
@@ -115,7 +124,7 @@ impl Endpoint {
                 .map_err(|error| zbus::fdo::Error::AccessDenied(error.to_string()))?
                 .unix_user_id().ok_or_else(|| zbus::fdo::Error::AccessDenied("caller has no Unix credentials".into()))?
         };
-        if uid != self.uid {
+        if uid != self.identity.uid {
             return Err(zbus::fdo::Error::AccessDenied("session belongs to another user".into()));
         }
         Ok(())
@@ -124,6 +133,18 @@ impl Endpoint {
 
 #[zbus_macros::interface(name = "org.rsdm.Session1")]
 impl Endpoint {
+    async fn handshake(
+        &self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<String> {
+        let _permit = self.admission.acquire(Class::Regular)?;
+        let _slot = self.handshake_slots.try_acquire()
+            .map_err(|_| zbus::fdo::Error::LimitsExceeded("session handshake is busy; retry the request".into()))?;
+        let generation = super::control_handshake::verify(connection, &header, &self.identity).await
+            .map_err(|error| zbus::fdo::Error::AccessDenied(error.to_string()))?;
+        self.admission.check_open()?;
+        Ok(generation)
+    }
+
     async fn launch(
         &self, request: LaunchRequest,
         #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,

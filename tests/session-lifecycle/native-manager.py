@@ -74,6 +74,13 @@ class Manager(dbus.service.Object):
     def ExitManager(self):
         self.loop.quit()
 
+    @dbus.service.method("org.rsdm.TestNative", in_signature="", out_signature="s")
+    def VerifyHandshake(self):
+        return subprocess.check_output([
+            "busctl", "--user", "call", "org.rsdm.Session1", "/org/rsdm/Session1",
+            "org.rsdm.Session1", "Handshake",
+        ], text=True).strip()
+
     @dbus.service.method("org.rsdm.TestNative", in_signature="", out_signature="")
     def Finish(self):
         subprocess.run(["systemctl", "--user", "stop", "test-native.target", "graphical-session.target"], check=True)

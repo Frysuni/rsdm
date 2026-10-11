@@ -74,6 +74,14 @@ async fn no_hint_queries_the_current_process_instead() {
 }
 
 #[tokio::test]
+async fn caller_verification_queries_the_supplied_process_instead_of_the_coordinator() {
+    let (connection, _server, calls) = fixture(1000).await;
+    let manager = zbus::Proxy::new(&connection, "org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager").await.unwrap();
+    assert_eq!(login_session_for_process(&manager, 12345, 1000).await.unwrap(), "verified-session");
+    assert_eq!(*calls.lock().unwrap(), ["pid:12345"]);
+}
+
+#[tokio::test]
 async fn a_session_owned_by_another_uid_is_rejected() {
     let (connection, _server, _) = fixture(1001).await;
     let result = verified_login_session(async { Ok(connection) }, 1000, Some("hint")).await;

@@ -166,6 +166,15 @@ policy does not notify receivers; dropping all receivers ends monitoring.
 Updates retain a disable counter, so a receiver that skips intermediate values
 still observes a validated false-to-true transition as disabling its generation.
 
+The control endpoint exposes `Handshake` for generation discovery. It checks
+bus UID/PID credentials, pins the caller, and verifies its actual logind login.
+Processes without a logind login must belong to a registered application or
+compositor cgroup with the current recorded InvocationID. Another login of the
+same UID is rejected. Queries have a five-second total budget and four concurrent
+slots; disabling closes admission before a successful handshake can return.
+The existing request methods retain their UID authorization until caller
+verification is applied to each request; handshake alone does not secure them.
+
 CLI start, stop hooks and recovery consume these updates. A disabled generation
 closes control admission and cancels pending manager calls and preparation. It
 persists its disabled marker, releases the shutdown inhibitor and interrupts the

@@ -8,8 +8,15 @@ let
   application = pkgs.writeShellScript "test-native-application" ''
     set -eu
     report="$XDG_RUNTIME_DIR/app-$1"
-    touch "$report-ready"
     trap 'test -e "$XDG_RUNTIME_DIR/display-alive"; echo saved > "$report"; exit 0' TERM
+    if [ "$1" = handshake ]; then
+      for attempt in $(seq 1 100); do
+        if busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake > "$report-handshake"; then break; fi
+        sleep 0.05
+      done
+      test -s "$report-handshake"
+    fi
+    touch "$report-ready"
     while :; do sleep 1; done
   '';
   detached = pkgs.writeShellScript "test-detached-session" ''
@@ -118,6 +125,6 @@ pkgs.testers.runNixOSTest {
         machine.succeed("grep -q saved " + runtime + "/app-detached")
         machine.wait_until_fails(user + "systemctl --user is-active --quiet test-external.service")
         machine.fail("test -e " + runtime + "/display-alive")
-    ${import ./native-disable.nix { inherit python native; }}
+    ${import ./native-disable.nix { inherit python native application; }}
   '';
 }

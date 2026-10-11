@@ -22,7 +22,7 @@ impl Coordinator {
             .ok_or_else(|| SessionError::State("readiness timeout is too large".into()))?;
         let identity = actions.guard(SessionIdentity::discover()).await??;
         let lease = actions.guard(super::runtime::blocking(super::session_lease::SessionLease::acquire)).await??;
-        let (endpoint, requests) = control::Endpoint::channel(identity.uid);
+        let (endpoint, requests) = control::Endpoint::for_session(identity.clone());
         // Acquire the one-session lease before changing shared manager state.
         let bus = actions.guard(control::ControlServer::start(endpoint)).await??;
         let manager = UserManager::connect_guarded(super::deadline::Deadline::default(), actions).await?;

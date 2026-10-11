@@ -366,6 +366,14 @@ may be retried after outstanding work finishes. Slots remain held through
 queued/worker work and replies, including when a caller disconnects. Stop
 acknowledgements retain their slot until the coordinator receives them.
 
+`org.rsdm.Session1.Handshake` returns the generation after checking the caller's
+bus credentials, live process and logind session. A process without a logind
+session must match a registered unit cgroup and its current InvocationID.
+Environment hints alone cannot establish membership. Handshakes allow four
+concurrent queries, each within a five-second total budget. Existing control
+methods still use UID authorization; applying process membership checks to each
+request is required before standalone attach is complete.
+
 ## Configuration and diagnostics
 
 No WM/DE tables or app profiles are needed in `rsdm.toml`:

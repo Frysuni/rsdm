@@ -1,4 +1,4 @@
-{ python, native }:
+{ python, native, application }:
 ''
     import tomllib
 
@@ -14,7 +14,7 @@
         for phase in ["starting", "running"]:
             with subtest(provider + " disable in " + phase + " retains PAM until WM exits"):
                 machine.wait_until_succeeds("test \"$(systemctl show --property=LoadState --value rsdm-test-session.service)\" = not-found")
-                machine.succeed("rm -f " + runtime + "/native-* " + runtime + "/display-alive")
+                machine.succeed("rm -f " + runtime + "/native-* " + runtime + "/app-* " + runtime + "/display-alive")
                 wm = start_native_compositor(desktop) if phase == "running" else None
                 mode = " defer" if phase == "starting" else ""
                 machine.succeed("systemd-run --unit=rsdm-test-session --collect --uid=alice --property=PAMName=login --property=TTYPath=/dev/tty1 --setenv=XDG_SESSION_TYPE=wayland --setenv=XDG_CURRENT_DESKTOP=" + desktop + " --setenv=XDG_RUNTIME_DIR=" + runtime + " --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus -- rsdm session start -- ${native} " + desktop + mode)
@@ -23,8 +23,16 @@
                 generation = machine.succeed(user + "systemctl --user show-environment | sed -n 's/^RSDM_SESSION_GENERATION=//p'").strip()
                 directory = runtime + "/rsdm/sessions/" + generation
                 record = tomllib.loads(machine.succeed("cat " + directory + "/session.toml"))
+                handshake = machine.succeed(user + "busctl --user call org.rsdm.TestNative " + path + " org.rsdm.TestNative VerifyHandshake")
+                assert generation in handshake, handshake
+                impostor = user + "RSDM_SESSION_GENERATION=" + generation + " XDG_SESSION_ID=" + record["identity"]["login_session_id"] + " "
+                machine.fail(impostor + "busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake")
                 launcher = machine.succeed("systemctl show rsdm-test-session -p MainPID -p InvocationID")
                 if phase == "running":
+                    machine.fail("systemd-run --unit=rsdm-test-other-login --wait --pipe --collect --uid=alice --property=PAMName=login --property=TTYPath=/dev/tty1 --setenv=XDG_SESSION_TYPE=wayland --setenv=XDG_RUNTIME_DIR=" + runtime + " --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus --setenv=RSDM_SESSION_GENERATION=" + generation + " --setenv=XDG_SESSION_ID=" + record["identity"]["login_session_id"] + " -- busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake")
+                    machine.succeed(impostor + "rsdm app -- ${application} handshake")
+                    machine.wait_for_file(runtime + "/app-handshake-ready")
+                    assert generation in machine.succeed("cat " + runtime + "/app-handshake-handshake")
                     launcher_pid = machine.succeed("systemctl show rsdm-test-session -p MainPID --value").strip()
                     wm_pid = machine.succeed(user + "systemctl --user show rsdm-test-native-wm -p MainPID --value").strip()
                     machine.wait_until_succeeds("grep -Eq '^Pid:[[:space:]]+" + wm_pid + "$' /proc/" + launcher_pid + "/fdinfo/*")
