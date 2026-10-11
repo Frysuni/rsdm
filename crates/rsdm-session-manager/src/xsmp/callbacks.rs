@@ -17,7 +17,11 @@ pub(super) unsafe extern "C" fn new_client(
         // SAFETY: Admission lives until all connections have been closed; the
         // server sets its peer only for the current IceProcessMessages call.
         let peer = unsafe { &*(data.cast::<Admission>()) }.peer.get();
-        if peer.is_null() || unsafe { (*peer).ice != ffi::SmsGetIceConnection(sms) || !(*peer).sms.is_null() } {
+        if peer.is_null() { return 0; }
+        let current = unsafe { &*peer };
+        if current.actions.check().is_err()
+            || current.ice != unsafe { ffi::SmsGetIceConnection(sms) } || !current.sms.is_null()
+        {
             return 0;
         }
         unsafe {
@@ -67,6 +71,7 @@ unsafe extern "C" fn register(sms: SmsConn, data: Data, previous: *mut c_char) -
         return 0;
     }
     with_peer(data, |peer| {
+        if peer.actions.check().is_err() { return 0; }
         let id = unsafe { ffi::SmsGenerateClientID(sms) };
         if id.is_null() { peer.phase = Phase::Failed; return 0; }
         let registered = unsafe { ffi::SmsRegisterClientReply(sms, id) };
@@ -104,6 +109,7 @@ unsafe extern "C" fn save_request(
 
 unsafe extern "C" fn phase2(sms: SmsConn, data: Data) {
     with_peer(data, |peer| {
+        if peer.actions.check().is_err() { return; }
         if peer.phase == Phase::Saving { peer.phase = Phase::Phase2Waiting; }
         else if peer.phase == Phase::InitialSave { unsafe { ffi::SmsSaveYourselfPhase2(sms); } }
     });
@@ -128,7 +134,10 @@ unsafe extern "C" fn delete_properties(_sms: SmsConn, data: Data, count: c_int, 
 }
 
 unsafe extern "C" fn get_properties(sms: SmsConn, data: Data) {
-    with_peer(data, |peer| unsafe { peer.properties.reply(sms); });
+    with_peer(data, |peer| {
+        if peer.actions.check().is_err() { return; }
+        unsafe { peer.properties.reply(sms); }
+    });
 }
 
 pub(super) unsafe extern "C" fn protocol_error(
@@ -136,3 +145,7 @@ pub(super) unsafe extern "C" fn protocol_error(
 ) {}
 
 pub(super) unsafe extern "C" fn io_error(_connection: ffi::IceConn) {}
+
+#[cfg(test)]
+#[path = "callbacks_tests.rs"]
+mod tests;

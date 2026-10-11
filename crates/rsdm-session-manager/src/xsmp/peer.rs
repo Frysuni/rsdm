@@ -24,9 +24,29 @@ pub(super) struct Peer {
     pub cancel_on_timeout: bool,
     pub properties: Properties,
     pub accepted: Instant,
+    pub actions: crate::action_gate::ActionGate,
 }
 
 impl Peer {
+    #[cfg(test)]
+    pub(super) fn disabled_for_test() -> Box<Self> {
+        use std::os::fd::AsRawFd;
+
+        let (reader, _writer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let interrupt = Interrupt::default().register(reader.as_raw_fd()).unwrap();
+        let actions = crate::action_gate::ActionGate::default();
+        actions.close();
+        let pid = std::process::id();
+        Box::new(Self {
+            ice: ptr::null_mut(), sms: ptr::null_mut(), unit: String::new(), invocation: Vec::new(),
+            pid, process: ProcessHandle::open(pid).unwrap().unwrap(), _interrupt: interrupt,
+            phase: Phase::InitialSave, selected: false, interaction_requested: false,
+            interacting: false, cancellation_requested: false, local_save_requested: false,
+            deadline: 0, cancel_on_timeout: false, properties: Properties::default(),
+            accepted: Instant::now(), actions,
+        })
+    }
+
     pub async fn accept(listener: ffi::ListenObj, manager: &UserManager, runtime: &Runtime, interrupt: &Interrupt) -> Result<Box<Self>, SessionError> {
         let mut status = 0;
         // SAFETY: the listener belongs to the server; a successful accept gives
@@ -67,6 +87,7 @@ impl Peer {
             phase: Phase::Registering, selected: false, interaction_requested: false, interacting: false,
             cancellation_requested: false, local_save_requested: false, deadline: 0,
             cancel_on_timeout: false, properties: Properties::default(), accepted: Instant::now(),
+            actions: manager.actions.clone(),
         }))
     }
 
