@@ -1,5 +1,6 @@
 { pkgs, rsdm }:
 let
+  controller = import ./controller.nix { inherit pkgs; };
   compositor = pkgs.writeShellScript "test-bootstrap-compositor" ''
     set -eu
     report="$XDG_RUNTIME_DIR/bootstrap"
@@ -69,7 +70,7 @@ in
         machine.wait_for_file(runtime + "/bootstrap-starts")
         directory = runtime + "/rsdm/sessions/" + generation
         record = tomllib.loads(machine.succeed("cat " + directory + "/session.toml"))
-        machine.succeed(user + "rsdm session status | grep ': starting '")
+        machine.succeed("${controller} system rsdm-test-bootstrap.service rsdm session status | grep ': starting '")
         wm = machine.succeed(user + "systemctl --user show " + record["compositor_unit"] + " -p MainPID -p InvocationID")
         launcher = machine.succeed("systemctl show rsdm-test-bootstrap -p MainPID -p InvocationID")
         machine.succeed("printf '[session_manager]\\nenabled = false\\n' > /etc/rsdm-toggle.toml; mv /etc/rsdm-toggle.toml /etc/rsdm.toml")

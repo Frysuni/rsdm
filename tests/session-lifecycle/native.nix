@@ -1,6 +1,7 @@
 { pkgs, rsdm }:
 
 let
+  controller = import ./controller.nix { inherit pkgs; };
   python = pkgs.python3.withPackages (packages: [ packages.dbus-python packages.pygobject3 ]);
   native = pkgs.writeShellScript "test-native-session" ''
     exec ${python}/bin/python3 ${./native-manager.py} "$@"
@@ -55,6 +56,7 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_unit("user@1000.service")
     runtime = "/run/user/1000"
     user = "runuser -u alice -- env XDG_RUNTIME_DIR=" + runtime + " DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus "
+    control = "${controller} system rsdm-test-session.service "
 
     for desktop, provider, path in [
         ("GNOME", "gnome", "/org/gnome/SessionManager"),
@@ -67,16 +69,17 @@ pkgs.testers.runNixOSTest {
             machine.wait_for_file(runtime + "/native-manager-ready")
             # Let the coordinator observe the ready native API without its target.
             machine.sleep(2)
-            machine.succeed(user + "rsdm session status | grep ': starting '")
+            machine.succeed(control + "rsdm session status | grep ': starting '")
             machine.fail(user + "systemctl --user is-active --quiet graphical-session.target")
             machine.succeed(user + "busctl --user call org.rsdm.TestNative " + shlex.quote(path) + " org.rsdm.TestNative Activate")
             try:
-                machine.wait_until_succeeds(user + "rsdm session status | grep '^" + provider + ": running '", timeout=30)
+                machine.wait_until_succeeds(control + "rsdm session status | grep '^" + provider + ": running '", timeout=30)
             except Exception:
                 print(machine.succeed("journalctl --no-pager -u rsdm-test-session -n 80"))
                 raise
             generation = machine.succeed(user + "systemctl --user show-environment | sed -n 's/^RSDM_SESSION_GENERATION=//p'").strip()
-            session = user + "RSDM_SESSION_GENERATION=" + generation + " "
+            assert generation in machine.succeed(control + "busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake")
+            session = control + "RSDM_SESSION_GENERATION=" + generation + " "
             assert "XSMP: unavailable" in machine.succeed(session + "rsdm session status")
             machine.fail(session + "rsdm app --on-timeout cancel -- ${application} rejected")
             machine.fail(session + "rsdm app --shutdown-method xsmp -- ${application} rejected")
@@ -115,9 +118,10 @@ pkgs.testers.runNixOSTest {
         logout = "busctl --user call org.rsdm.TestNative /LogoutPrompt org.rsdm.TestNative Finish"
         argv = shlex.join(["rsdm", "session", "start", "--mode", "external", "--logout-command", logout, "--", "${detached}"])
         machine.succeed("systemd-run --unit=rsdm-test-session --collect --uid=alice --property=PAMName=login --property=TTYPath=/dev/tty1 --setenv=XDG_RUNTIME_DIR=" + runtime + " --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus -- " + argv)
-        machine.wait_until_succeeds(user + "rsdm session status | grep '^external: running '", timeout=30)
+        machine.wait_until_succeeds(control + "rsdm session status | grep '^external: running '", timeout=30)
         generation = machine.succeed(user + "systemctl --user show-environment | sed -n 's/^RSDM_SESSION_GENERATION=//p'").strip()
-        session = user + "RSDM_SESSION_GENERATION=" + generation + " "
+        assert generation in machine.succeed(control + "busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake")
+        session = control + "RSDM_SESSION_GENERATION=" + generation + " "
         machine.succeed(user + "systemctl --user is-active --quiet test-external.service")
         machine.succeed(session + "rsdm app -- ${application} detached")
         machine.wait_for_file(runtime + "/app-detached-ready")

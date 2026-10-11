@@ -1,6 +1,7 @@
 { pkgs, rsdm }:
 
 let
+  controller = import ./controller.nix { inherit pkgs; };
   python = pkgs.python3.withPackages (packages: [ packages.dbus-python packages.pygobject3 ]);
   compositor = pkgs.writeShellScript "test-power-compositor" ''
     set -eu
@@ -49,6 +50,7 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_unit("user@1000.service")
     runtime = "/run/user/1000"
     user = "runuser -u alice -- env XDG_RUNTIME_DIR=" + runtime + " DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus "
+    control = "${controller} system rsdm-test-session.service "
     machine.succeed(user + "dbus-daemon --session --fork --nopidfile --address=unix:path=" + runtime + "/power-bus")
     private = user + "DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/power-bus "
     machine.succeed(user + "systemd-run --user --unit=rsdm-test-power --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/power-bus -- ${python}/bin/python3 ${./power-manager.py}")
@@ -62,13 +64,14 @@ pkgs.testers.runNixOSTest {
         machine.succeed("rm -f " + runtime + "/app-* " + runtime + "/display-alive " + runtime + "/power-deny-*")
         machine.succeed("systemd-run --unit=rsdm-test-session --collect --uid=alice --property=PAMName=login --property=TTYPath=/dev/tty1 --setenv=XDG_RUNTIME_DIR=" + runtime + " --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus --setenv=DBUS_SYSTEM_BUS_ADDRESS=unix:path=" + runtime + "/power-bus -- rsdm session start " + options + " -- ${compositor}")
         try:
-            machine.wait_until_succeeds(user + "rsdm session status | grep ': running '", timeout=30)
+            machine.wait_until_succeeds(control + "rsdm session status | grep ': running '", timeout=30)
         except Exception:
             print(machine.succeed("journalctl --no-pager -u rsdm-test-session -n 80"))
             print(machine.succeed(user + "journalctl --user --no-pager -u rsdm-test-power -n 80"))
             raise
         generation = machine.succeed(user + "systemctl --user show-environment | sed -n 's/^RSDM_SESSION_GENERATION=//p'").strip()
-        return user + "RSDM_SESSION_GENERATION=" + generation + " "
+        assert generation in machine.succeed(control + "busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake")
+        return control + "RSDM_SESSION_GENERATION=" + generation + " "
 
     with subtest("authorization denial leaves apps and compositor untouched"):
         session = start_session()

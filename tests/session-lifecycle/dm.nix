@@ -1,6 +1,7 @@
 { pkgs, rsdm }:
 
 let
+  controller = import ./controller.nix { inherit pkgs; };
   module = import ../../packaging/nix/module.nix {
     packages.${pkgs.stdenv.hostPlatform.system}.rsdm-stable = rsdm;
   };
@@ -63,8 +64,9 @@ pkgs.testers.runNixOSTest {
     machine.send_chars("test-password")
     machine.send_key("ret")
     user = "runuser -u alice -- env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
+    control = "${controller} published alice "
     try:
-        machine.wait_until_succeeds(user + "rsdm session status | grep ': running '", timeout=45)
+        machine.wait_until_succeeds(control + "rsdm session status | grep ': running '", timeout=45)
     except Exception:
         print(machine.succeed("journalctl --no-pager -b -n 100"))
         raise
@@ -73,7 +75,8 @@ pkgs.testers.runNixOSTest {
     values = dict(line.split("=", 1) for line in environment.splitlines())
     generation = values["RSDM_SESSION_GENERATION"]
     session_id = values["XDG_SESSION_ID"]
-    session = user + "RSDM_SESSION_GENERATION=" + generation + " WAYLAND_DISPLAY=" + values["WAYLAND_DISPLAY"] + " SWAYSOCK=" + values["SWAYSOCK"] + " "
+    assert generation in machine.succeed(control + "busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake")
+    session = control + "RSDM_SESSION_GENERATION=" + generation + " WAYLAND_DISPLAY=" + values["WAYLAND_DISPLAY"] + " SWAYSOCK=" + values["SWAYSOCK"] + " "
     machine.succeed(session + "swaymsg -t get_outputs --raw | grep '\"active\": true'")
     compositor = machine.succeed(user + "systemctl --user list-units --plain --no-legend 'session-rsdm-*' | awk '{print $1}'").strip()
     compositor_pid = machine.succeed(user + "systemctl --user show --property=MainPID --value " + shlex.quote(compositor)).strip()

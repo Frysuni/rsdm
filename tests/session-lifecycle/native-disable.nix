@@ -19,7 +19,7 @@
                 mode = " defer" if phase == "starting" else ""
                 machine.succeed("systemd-run --unit=rsdm-test-session --collect --uid=alice --property=PAMName=login --property=TTYPath=/dev/tty1 --setenv=XDG_SESSION_TYPE=wayland --setenv=XDG_CURRENT_DESKTOP=" + desktop + " --setenv=XDG_RUNTIME_DIR=" + runtime + " --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus -- rsdm session start -- ${native} " + desktop + mode)
                 machine.wait_for_file(runtime + "/native-manager-ready")
-                machine.wait_until_succeeds(user + "rsdm session status | grep '^" + provider + ": " + phase + " '")
+                machine.wait_until_succeeds(control + "rsdm session status | grep '^" + provider + ": " + phase + " '")
                 generation = machine.succeed(user + "systemctl --user show-environment | sed -n 's/^RSDM_SESSION_GENERATION=//p'").strip()
                 directory = runtime + "/rsdm/sessions/" + generation
                 record = tomllib.loads(machine.succeed("cat " + directory + "/session.toml"))
@@ -30,7 +30,7 @@
                 launcher = machine.succeed("systemctl show rsdm-test-session -p MainPID -p InvocationID")
                 if phase == "running":
                     machine.fail("systemd-run --unit=rsdm-test-other-login --wait --pipe --collect --uid=alice --property=PAMName=login --property=TTYPath=/dev/tty1 --setenv=XDG_SESSION_TYPE=wayland --setenv=XDG_RUNTIME_DIR=" + runtime + " --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus --setenv=RSDM_SESSION_GENERATION=" + generation + " --setenv=XDG_SESSION_ID=" + record["identity"]["login_session_id"] + " -- busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake")
-                    machine.succeed(impostor + "rsdm app -- ${application} handshake")
+                    machine.succeed(control + "RSDM_SESSION_GENERATION=" + generation + " rsdm app -- ${application} handshake")
                     machine.wait_for_file(runtime + "/app-handshake-ready")
                     assert generation in machine.succeed("cat " + runtime + "/app-handshake-handshake")
                     launcher_pid = machine.succeed("systemctl show rsdm-test-session -p MainPID --value").strip()

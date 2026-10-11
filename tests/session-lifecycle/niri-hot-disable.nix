@@ -6,12 +6,13 @@
 
         machine.succeed("rm -f /run/user/1000/niri-app-ready /run/user/1000/niri-app-saved")
         machine.send_chars("rsdm session start -- niri-session > /tmp/rsdm-niri-hot.log 2>&1; touch /tmp/rsdm-niri-hot-exited\n")
-        machine.wait_until_succeeds(user + "rsdm session status | grep '^niri: running '", timeout=60)
+        machine.wait_until_succeeds(control + "rsdm session status | grep '^niri: running '", timeout=60)
         environment = machine.succeed(user + "systemctl --user show-environment")
         values = dict(line.split("=", 1) for line in environment.splitlines())
         generation = values["RSDM_SESSION_GENERATION"]
         directory = "/run/user/1000/rsdm/sessions/" + generation
-        session = user + "RSDM_SESSION_GENERATION=" + generation + " "
+        assert generation in machine.succeed(control + "busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake")
+        session = control + "RSDM_SESSION_GENERATION=" + generation + " "
         machine.succeed(session + "rsdm app -- ${application}")
         machine.wait_for_file("/run/user/1000/niri-app-ready")
         record = tomllib.loads(machine.succeed("cat " + directory + "/session.toml"))

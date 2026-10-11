@@ -1,6 +1,7 @@
 { pkgs, rsdm }:
 
 let
+  controller = import ./controller.nix { inherit pkgs; };
   application = pkgs.writeShellScript "test-niri-application" ''
     set -eu
     trap 'systemctl --user is-active --quiet niri.service; test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"; touch "$XDG_RUNTIME_DIR/niri-app-saved"; exit 0' TERM
@@ -51,14 +52,16 @@ pkgs.testers.runNixOSTest {
     start_all()
     machine.wait_for_unit("multi-user.target")
     user = "runuser -u alice -- env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
+    control = "${controller} published alice "
     try:
-        machine.wait_until_succeeds(user + "rsdm session status | grep '^niri: running '", timeout=60)
+        machine.wait_until_succeeds(control + "rsdm session status | grep '^niri: running '", timeout=60)
     except Exception:
         print(machine.succeed("journalctl --no-pager -n 150"))
         raise
     environment = machine.succeed(user + "systemctl --user show-environment")
     values = dict(line.split("=", 1) for line in environment.splitlines())
-    session = user + "RSDM_SESSION_GENERATION=" + values["RSDM_SESSION_GENERATION"] + " WAYLAND_DISPLAY=" + values["WAYLAND_DISPLAY"] + " NIRI_SOCKET=" + values["NIRI_SOCKET"] + " "
+    assert values["RSDM_SESSION_GENERATION"] in machine.succeed(control + "busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake")
+    session = control + "RSDM_SESSION_GENERATION=" + values["RSDM_SESSION_GENERATION"] + " WAYLAND_DISPLAY=" + values["WAYLAND_DISPLAY"] + " NIRI_SOCKET=" + values["NIRI_SOCKET"] + " "
 
     with subtest("the original wrapper owns a real notify niri.service"):
         assert machine.succeed(user + "systemctl --user show niri.service --property=Type --value").strip() == "notify"
