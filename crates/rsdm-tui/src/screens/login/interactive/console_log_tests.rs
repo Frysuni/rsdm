@@ -3,6 +3,7 @@
 use std::{
     os::unix::{fs::{PermissionsExt, symlink}, process::ExitStatusExt},
     process::{Child, Command, Stdio},
+    sync::atomic::{AtomicUsize, Ordering},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -11,6 +12,7 @@ use super::*;
 
 const ORIGINAL: &str = "7 4 1 7\n";
 const QUIET: &str = "1\t4\t1\t7\n";
+static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
 struct Fixture {
     path: PathBuf,
@@ -22,7 +24,8 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let path = std::env::temp_dir().join(format!("rsdm-console-log-{}-{nonce}", std::process::id()));
+        let sequence = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("rsdm-console-log-{}-{nonce}-{sequence}", std::process::id()));
         fs::create_dir(&path).unwrap();
         let printk = path.join("printk");
         fs::write(&printk, ORIGINAL).unwrap();
