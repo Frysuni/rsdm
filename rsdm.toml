@@ -17,6 +17,8 @@
 
 [session_manager]
 # Wrap the compositor in a systemd --user graphical session and supervise it.
+# False runs app/session start commands normally; finalize, stop hooks and cleanup do nothing.
+# DM and Lock power actions continue through logind when session management is disabled.
 enabled = true # optional | bool | default: true | values: true, false
 # Extra environment variable names exported after the Wayland socket appears.
 extra_env = [] # optional | array<string> | default: [] | values: environment variable names

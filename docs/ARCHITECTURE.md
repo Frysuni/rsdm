@@ -145,6 +145,14 @@ notify `niri.service`. GNOME and Plasma retain their native session managers.
 RSDM publishes selected environment values, preserves native graphical-target
 ownership and creates graphical/autostart targets only for its managed lifecycle.
 
+Public Session Manager commands receive their configuration explicitly. When
+disabled at command entry, app and session start run the original command with
+its inherited environment and exit status. Finalize, stop hooks and recovery do
+nothing; status, stop and cancel report disabled without consulting a bus or
+runtime record. CLI configuration reads run on blocking workers. DM power uses
+logind directly; Lock reads the current policy on its power worker and also uses
+logind when SM is disabled, even with an old generation in its environment.
+
 Orderly logout closes the launch gate, drains accepted jobs and prepares
 registered `rsdm app` processes in parallel before infrastructure teardown.
 Each app also has a synchronous ExecStop backstop sharing the saved deadline.

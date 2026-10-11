@@ -22,6 +22,7 @@ mod deadline;
 mod env;
 mod identity;
 mod lifecycle;
+mod plain_launch;
 mod processes;
 mod provider;
 mod runtime;
@@ -36,12 +37,13 @@ mod xsmp;
 #[cfg(test)]
 mod helper_start_fixture;
 
+#[cfg(test)]
+mod enabled_tests;
+
 use rsdm_core::domain::{SessionManagerConfig, ShutdownPolicy};
 use thiserror::Error;
 
-pub use apps::stop_hook;
 pub use client::{cancel, generation, status, stop};
-pub use cleanup::cleanup;
 pub use control::{SessionStatus, StopOutcome};
 pub use provider::StartOptions;
 
@@ -77,19 +79,32 @@ pub async fn start(argv: &[String], cfg: &SessionManagerConfig) -> Result<i32, S
 }
 
 pub async fn start_with_options(argv: &[String], cfg: &SessionManagerConfig, options: &StartOptions) -> Result<i32, SessionError> {
+    if !cfg.enabled { return plain_launch::run(argv).await; }
     coordinator::start(argv, cfg, options).await
 }
 
-pub async fn run_app(argv: &[String]) -> Result<i32, SessionError> {
-    run_app_with_policy(argv, &ShutdownPolicy::default()).await
+pub async fn run_app(argv: &[String], cfg: &SessionManagerConfig) -> Result<i32, SessionError> {
+    run_app_with_policy(argv, &ShutdownPolicy::default(), cfg).await
 }
 
-pub async fn run_app_with_policy(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, SessionError> {
+pub async fn run_app_with_policy(argv: &[String], policy: &ShutdownPolicy, cfg: &SessionManagerConfig) -> Result<i32, SessionError> {
+    if !cfg.enabled { return plain_launch::run(argv).await; }
     client::run_app(argv, policy).await
 }
 
 pub async fn finalize(cfg: &SessionManagerConfig, names: &[String]) -> Result<(), SessionError> {
+    if !cfg.enabled { return Ok(()); }
     client::finalize(cfg, names).await
+}
+
+pub async fn stop_hook(generation: &str, unit: &str, cfg: &SessionManagerConfig) -> Result<(), SessionError> {
+    if !cfg.enabled { return Ok(()); }
+    apps::stop_hook(generation, unit).await
+}
+
+pub async fn cleanup(generation: &str, cfg: &SessionManagerConfig) -> Result<(), SessionError> {
+    if !cfg.enabled { return Ok(()); }
+    cleanup::cleanup(generation).await
 }
 
 impl From<rsdm_system::logind::LogindError> for SessionError {

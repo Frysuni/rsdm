@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use rsdm_core::domain::{SessionMode, ShutdownMethod, ShutdownPolicy, TimeoutAction};
-use rsdm_infra::{config::load_config, unix::split_exec};
+use rsdm_infra::{config::load_config_async, unix::split_exec};
 use rsdm_session_manager as session_manager;
 
 use crate::output;
@@ -11,10 +11,11 @@ use crate::output;
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum PowerAction { Reboot, Poweroff }
 
-pub async fn power(action: PowerAction) -> Result<()> {
+pub async fn power(path: &Path, action: PowerAction) -> Result<()> {
     let action = match action { PowerAction::Reboot => "reboot", PowerAction::Poweroff => "poweroff" };
     if std::env::var_os("RSDM_SESSION_GENERATION").is_some() {
-        return print_outcome(session_manager::stop(action).await?);
+        let cfg = load_config_async(path).await?.session_manager;
+        if cfg.enabled { return print_outcome(session_manager::stop(action, &cfg).await?); }
     }
     rsdm_system::logind::request_direct(action).await?;
     print_outcome(session_manager::StopOutcome {
@@ -81,46 +82,53 @@ pub struct AppOptions {
 }
 
 pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
+    let cfg = load_config_async(path).await?.session_manager;
     match action {
         SessionAction::Start { mode, native_unit, logout_command, compositor } => {
-            let config = load_config(path)?;
-            let options = session_manager::StartOptions { mode, native_unit, logout_command: parse_command(logout_command)? };
-            let code = session_manager::start_with_options(&compositor, &config.session_manager, &options).await
+            let logout_command = if cfg.enabled { parse_command(logout_command)? } else { Vec::new() };
+            let options = session_manager::StartOptions { mode, native_unit, logout_command };
+            let code = session_manager::start_with_options(&compositor, &cfg, &options).await
                 .context("running the graphical session")?;
             std::process::exit(code);
         }
         SessionAction::Finalize { names } => {
-            let config = load_config(path)?;
-            session_manager::finalize(&config.session_manager, &names).await.context("finalizing the graphical session")?;
+            session_manager::finalize(&cfg, &names).await.context("finalizing the graphical session")?;
+            if !cfg.enabled { return print_outcome(session_manager::StopOutcome::disabled()); }
             output::notice("ENVIRONMENT PUBLISHED", "Session environment published.\n", output::SUCCESS).interactive_stdout()?;
             Ok(())
         }
-        SessionAction::Stop => print_outcome(session_manager::stop("logout").await?),
+        SessionAction::Stop => print_outcome(session_manager::stop("logout", &cfg).await?),
         SessionAction::Cancel => {
-            session_manager::cancel().await.context("cancelling session preparation")?;
+            let outcome = session_manager::cancel(&cfg).await.context("cancelling session preparation")?;
+            if outcome.result == "disabled" { return print_outcome(outcome); }
             output::notice("CANCELLATION REQUESTED", "Shutdown cancellation requested.\n", output::WARNING).interactive_stdout()?;
             Ok(())
         }
         SessionAction::Status => {
-            let status = session_manager::status().await?;
+            let status = session_manager::status(&cfg).await?;
             output::session_status(&status)?;
             Ok(())
         }
         SessionAction::AppStop { generation, unit } => {
-            session_manager::stop_hook(&generation, &unit).await.context("completing application shutdown")
+            session_manager::stop_hook(&generation, &unit, &cfg).await.context("completing application shutdown")
         }
         SessionAction::Cleanup { generation } => {
-            session_manager::cleanup(&generation).await.context("recovering the graphical session")
+            session_manager::cleanup(&generation, &cfg).await.context("recovering the graphical session")
         }
     }
 }
 
-pub async fn run_app(options: AppOptions) -> Result<()> {
+pub async fn run_app(path: &Path, options: AppOptions) -> Result<()> {
+    let cfg = load_config_async(path).await?.session_manager;
+    if !cfg.enabled {
+        let code = session_manager::run_app(&options.argv, &cfg).await.context("launching app")?;
+        std::process::exit(code);
+    }
     let policy = ShutdownPolicy {
         timeout_secs: options.shutdown_timeout, on_timeout: options.on_timeout,
         method: options.shutdown_method, quit_command: parse_command(options.quit_command)?,
     };
-    let code = session_manager::run_app_with_policy(&options.argv, &policy).await.context("launching app")?;
+    let code = session_manager::run_app_with_policy(&options.argv, &policy, &cfg).await.context("launching app")?;
     if code == 0 {
         output::application(&options.argv, &policy)?;
     }

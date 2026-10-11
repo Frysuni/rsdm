@@ -15,6 +15,9 @@ use terminal_output::{assert_only_styles, terminal};
 
 static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 const GENERATION: &str = "0123456789abcdef0123456789abcdef";
+
+#[path = "support/disabled_session.rs"]
+mod disabled;
 type Calls = Arc<Mutex<Vec<String>>>;
 type Launch = (String, Vec<String>, Vec<(String, String)>, String, u64, String, String, Vec<String>);
 

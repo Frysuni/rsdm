@@ -1,5 +1,8 @@
 { pkgs, rsdm }:
 
+let
+  python = pkgs.python3.withPackages (packages: [ packages.dbus-python packages.pygobject3 ]);
+in
 pkgs.testers.runNixOSTest {
   name = "rsdm-lock-power";
   extraPythonPackages = packages: [ packages.pillow ];
@@ -11,7 +14,7 @@ pkgs.testers.runNixOSTest {
     users.groups.alice = {};
     services.getty.autologinUser = "alice";
     programs.sway.enable = true;
-    environment.systemPackages = [ rsdm ];
+    environment.systemPackages = [ rsdm pkgs.dbus ];
     environment.variables = { SWAYSOCK = "/tmp/sway-ipc.sock"; WLR_RENDERER = "pixman"; };
     environment.etc."sway/config".text = ''
       output * bg #ff00ff solid_color
@@ -67,5 +70,28 @@ pkgs.testers.runNixOSTest {
     machine.screenshot("desktop-after-emergency-unlock")
     unlocked = Image.open(machine.out_dir / "desktop-after-emergency-unlock.png").convert("RGB")
     assert unlocked.getpixel((unlocked.width // 2, unlocked.height // 2)) == (255, 0, 255)
+
+    with subtest("disabled SM with a stale generation still sends Lock power requests to logind"):
+        machine.succeed("printf '[session_manager]\\nenabled = false\\n[lock]\\nenable = true\\n' > /run/rsdm-lock-disabled.toml")
+        bus = "unix:path=/run/user/1000/lock-power-bus"
+        machine.succeed(user + "dbus-daemon --session --fork --nopidfile --address=" + bus)
+        machine.succeed(user + "systemd-run --user --unit=rsdm-test-lock-logind --setenv=DBUS_SESSION_BUS_ADDRESS=" + bus + " -- ${python}/bin/python3 ${./power-manager.py}")
+        machine.wait_for_file("/run/user/1000/power-manager-ready")
+        machine.succeed("touch /run/user/1000/power-deny-request")
+        machine.succeed(user + "systemd-run --user --unit=rsdm-test-disabled-lock --collect --setenv=WAYLAND_DISPLAY=wayland-1 --setenv=RSDM_SESSION_GENERATION=invalid --setenv=DBUS_SYSTEM_BUS_ADDRESS=" + bus + " -- rsdm --config /run/rsdm-lock-disabled.toml lock")
+        machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: pid '")
+        before = machine.succeed(user + "rsdm status | grep 'active lock: pid '")
+        machine.send_key("f12", delay=0.2)
+        machine.send_key("f12", delay=0.2)
+        machine.wait_for_file("/run/user/1000/power-requests")
+        assert machine.succeed("cat /run/user/1000/power-requests") == "1000\n"
+        machine.wait_until_succeeds(user + "journalctl --user --no-pager -u rsdm-test-disabled-lock | grep 'power request denied'")
+        assert machine.succeed(user + "rsdm status | grep 'active lock: pid '") == before
+        machine.succeed(user + "systemctl --user is-active --quiet rsdm-test-disabled-lock.service")
+        machine.screenshot("disabled-sm-lock-after-power-denial")
+        locked = Image.open(machine.out_dir / "disabled-sm-lock-after-power-denial.png").convert("RGB")
+        assert (255, 0, 255) not in locked.getdata(), "desktop background leaked through the lock"
+        machine.succeed("rsdm unlock --uid 1000")
+        machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: none '")
   '';
 }

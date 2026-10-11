@@ -49,6 +49,19 @@ pub struct StopOutcome {
     pub message: String,
 }
 
+impl SessionStatus {
+    pub(super) fn disabled() -> Self {
+        Self { generation: String::new(), login_session_id: String::new(), desktop_entry_id: String::new(),
+            provider: "disabled".into(), phase: "disabled".into(), xsmp_available: false, apps: Vec::new() }
+    }
+}
+
+impl StopOutcome {
+    pub fn disabled() -> Self {
+        Self { result: "disabled".into(), forced_units: Vec::new(), message: "session manager is disabled".into() }
+    }
+}
+
 #[path = "control_admission.rs"]
 mod admission;
 use admission::{Admission, Class, Permit};

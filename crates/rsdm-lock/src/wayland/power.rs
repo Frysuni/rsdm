@@ -1,6 +1,6 @@
 //! Power requests run separately so the lock keeps servicing Wayland events.
 
-use std::{sync::mpsc::{self, Receiver, TryRecvError}, thread};
+use std::{path::{Path, PathBuf}, sync::mpsc::{self, Receiver, TryRecvError}, thread};
 
 use rsdm_session_manager::{SessionError, StopOutcome};
 use rsdm_ui::LockPending;
@@ -29,22 +29,27 @@ pub(super) fn start_capability_query() -> Option<Receiver<rsdm_infra::power::Pow
 }
 
 impl PowerJob {
-    fn start(action: LockPending) -> Self {
+    fn start(action: LockPending, config_path: PathBuf) -> Self {
         let verb = match action {
             LockPending::Reboot => "reboot", LockPending::Shutdown => "poweroff",
             LockPending::Hibernate => "hibernate", LockPending::Sleep => "suspend",
         };
         let (sender, result) = mpsc::channel();
-        thread::spawn(move || { let _ = sender.send(request(verb)); });
+        thread::spawn(move || { let _ = sender.send(request(verb, &config_path)); });
         Self { result }
     }
 }
 
-fn request(verb: &str) -> Result<StopOutcome, SessionError> {
+fn request(verb: &str, config_path: &Path) -> Result<StopOutcome, SessionError> {
+    // Read the current policy on this worker before creating its runtime.
+    let cfg = if matches!(verb, "reboot" | "poweroff") && std::env::var_os("RSDM_SESSION_GENERATION").is_some() {
+        Some(rsdm_infra::config::load_config(config_path)
+            .map_err(|error| SessionError::State(error.to_string()))?.session_manager)
+    } else { None };
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     runtime.block_on(async {
-        if matches!(verb, "reboot" | "poweroff") && std::env::var_os("RSDM_SESSION_GENERATION").is_some() {
-            return rsdm_session_manager::stop(verb).await;
+        if let Some(cfg) = cfg.filter(|cfg| cfg.enabled) {
+            return rsdm_session_manager::stop(verb, &cfg).await;
         }
         rsdm_system::logind::request_direct(verb).await?;
         Ok(StopOutcome {
@@ -70,7 +75,7 @@ impl App {
 
     pub(super) fn start_power_action(&mut self, action: LockPending) {
         if self.power_action.is_some() { return; }
-        self.power_action = Some(PowerJob::start(action));
+        self.power_action = Some(PowerJob::start(action, self.ctx.config_path.clone()));
         self.needs_redraw = true;
     }
 

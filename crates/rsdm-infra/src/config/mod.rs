@@ -30,6 +30,13 @@ pub fn load_config(path: &Path) -> Result<AppConfig, ConfigLoadError> {
     Ok(config)
 }
 
+pub async fn load_config_async(path: &Path) -> Result<AppConfig, ConfigLoadError> {
+    let path = path.to_path_buf();
+    let display = path.display().to_string();
+    tokio::task::spawn_blocking(move || load_config(&path)).await
+        .map_err(|source| ConfigLoadError::Worker { path: display, source })?
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct LockRuntimeFile {
@@ -149,6 +156,12 @@ fn display_path(path: Option<&Path>) -> String {
 
 #[derive(Debug, Error)]
 pub enum ConfigLoadError {
+    #[error("config worker failed for {path}: {source}")]
+    Worker {
+        path: String,
+        #[source]
+        source: tokio::task::JoinError,
+    },
     #[error("failed to read config at {path}: {source}")]
     Io {
         path: String,

@@ -107,6 +107,24 @@ pkgs.testers.runNixOSTest {
         generation = machine.succeed(user + "systemctl --user show-environment | sed -n 's/^RSDM_SESSION_GENERATION=//p'").strip()
         return user + "RSDM_SESSION_GENERATION=" + generation + " "
 
+    with subtest("disabled entry points launch ordinary commands without session infrastructure"):
+        machine.succeed("printf '[session_manager]\\nenabled = false\\n' > /run/rsdm-disabled.toml")
+        disabled = user + "RSDM_SESSION_GENERATION=invalid rsdm --config /run/rsdm-disabled.toml "
+        for command in [
+            "session finalize 'INVALID NAME'", "session stop", "session cancel",
+            "session app-stop --generation ../invalid --unit ../invalid",
+            "session cleanup --generation ../invalid",
+        ]:
+            machine.succeed(disabled + command)
+        machine.succeed(disabled + "session status | grep '^disabled:'")
+        for command in ["app --shutdown-timeout 0 --shutdown-method xsmp", "session start --mode external --native-unit missing.service"]:
+            code, output = machine.execute(disabled + command + " -- /bin/sh -c 'printf done; exit 7'")
+            assert code == 7 and output == "done", (code, output)
+        machine.fail("test -e " + runtime + "/rsdm")
+        machine.fail(user + "systemctl --user list-units --all --no-legend 'app-rsdm-*' 'rsdm-session-*' | grep .")
+        machine.fail(user + "busctl --user list | grep org.rsdm.Session1")
+        machine.fail("systemd-inhibit --list --no-pager | grep RSDM")
+
     with subtest("startup failures leave no published environment or unrecoverable empty generation"):
         for generation, options in [
             ("ffffffffffffffffffffffffffffff01", []),

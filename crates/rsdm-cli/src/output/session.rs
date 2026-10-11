@@ -7,6 +7,9 @@ use rsdm_session_manager::SessionStatus;
 use super::{ACCENT, MUTED, Report, SUCCESS, WARNING, badge, safe_text, state_color};
 
 pub fn session_status(status: &SessionStatus) -> io::Result<()> {
+    if status.phase == "disabled" {
+        return super::notice("SESSION STATUS", "disabled: session manager is disabled\n", MUTED).stdout();
+    }
     let mut report = Report::new("SESSION STATUS", ACCENT);
     let summary = format!("{}: {} (login {}, desktop {}, generation {})\n", status.provider,
         status.phase, status.login_session_id, status.desktop_entry_id, status.generation);
