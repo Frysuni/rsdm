@@ -70,20 +70,36 @@ impl Handle {
     }
 
     pub async fn shutdown(&mut self, deadline: &Deadline) -> Result<(), SessionError> {
-        self.interrupt.stop();
         self.sender.take();
 
-        let Some(finished) = self.finished.as_mut() else { return Ok(()); };
+        let Some(finished) = self.finished.as_mut() else {
+            self.interrupt.stop();
+            return Ok(());
+        };
         if finished.try_recv().is_ok() {
+            self.interrupt.stop();
             self.finished.take();
             return Ok(());
         }
 
+        let limit = tokio::time::Instant::now() + Duration::from_millis(500);
+        let interrupt = &self.interrupt;
         let result = deadline.bound(async {
-            tokio::time::timeout(Duration::from_millis(500), finished).await
-                .map_err(|_| SessionError::State("XSMP worker shutdown timed out".into()))?
-                .map_err(|_| SessionError::State("XSMP worker failed during shutdown".into()))
+            let mut completion = std::pin::pin!(async {
+                finished.await.map_err(|_| SessionError::State("XSMP worker failed during shutdown".into()))
+            });
+            tokio::select! {
+                result = &mut completion => result,
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                    // Responsive workers can first send ShutdownCancelled.
+                    // Stalled FFI or admission still uses the same total budget.
+                    interrupt.stop();
+                    tokio::time::timeout_at(limit, completion).await
+                        .map_err(|_| SessionError::State("XSMP worker shutdown timed out".into()))?
+                }
+            }
         }).await;
+        self.interrupt.stop();
         if result.is_ok() { self.finished.take(); }
         result
     }

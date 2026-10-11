@@ -169,6 +169,10 @@ It leaves application units, WM, anchor and exported environment running.
 The launcher retains its child and compositor pidfd independently of coordinator
 workers and passively waits for the actual WM exit before returning to DM.
 App stop commands preserve the coordinator's configuration path in their argv.
+Before closing XSMP peers, disabling cancels their pending saves and interactions.
+Worker shutdown allows up to 100 ms for this cleanup, then interrupts stalled
+sockets within the same 500 ms completion budget; the caller's deadline can
+shorten either wait. It never sends a new SaveYourself, phase 2 or Die after disable.
 
 Each generation reserves a private one-byte retirement file before publishing
 its session record. Disabling updates that file independently of atomic record

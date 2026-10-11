@@ -392,6 +392,10 @@ coordinator and its private XSMP server without stopping applications or the WM;
 the launcher still waits for the WM to exit before releasing its PAM session.
 Re-enabling does not resume that generation's hooks or recovery. A request
 already accepted by another service may still complete.
+Pending XSMP saves and dialogs receive `ShutdownCancelled` before disconnection,
+as defined by the [XSMP protocol](https://xorg.freedesktop.org/archive/X11R7.7/doc/libSM/xsmp.html).
+Unresponsive peers are interrupted within the existing worker shutdown budget;
+cancellation delivery cannot be confirmed for a broken or stalled connection.
 The generation reserves a separate retirement file before startup. It keeps old
 hooks passive when replacing `session.toml` fails, provided the retirement file
 can still be updated. Storage errors do not bypass infrastructure shutdown or

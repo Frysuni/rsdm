@@ -23,6 +23,10 @@ struct client {
 
 static struct client *active_client;
 
+static int hot_disable(struct client *client) {
+    return strncmp(client->mode, "hot-", 4) == 0;
+}
+
 static void marker(struct client *client, const char *event) {
     char path[1024];
     snprintf(path, sizeof(path), "%s/xsmp-%s-%s", client->runtime, client->id, event);
@@ -60,6 +64,7 @@ static void interact(SmcConn connection, SmPointer data) {
     struct client *client = data;
     display_alive(client);
     marker(client, "interacted");
+    if (strcmp(client->mode, "hot-interact") == 0) return;
     SmcInteractDone(connection, True);
 }
 
@@ -74,14 +79,17 @@ static void save(SmcConn connection, SmPointer data, int kind, Bool shutdown, in
     display_alive(client);
     marker(client, "saving");
     client->saving = 1;
-    if (strcmp(client->mode, "phase2") == 0) {
+    if (strcmp(client->mode, "phase2") == 0 || strcmp(client->mode, "hot-phase2") == 0) {
         if (!SmcRequestSaveYourselfPhase2(connection, phase2, client)) exit(7);
+        marker(client, "phase2-requested");
+    } else if (strcmp(client->mode, "hot-interact") == 0) {
+        if (!SmcInteractRequest(connection, SmDialogNormal, interact, client)) exit(8);
     } else if (strcmp(client->mode, "cancel") == 0 && !client->cancelled) {
         if (!SmcInteractRequest(connection, SmDialogNormal, interact, client)) exit(8);
     } else if (strcmp(client->mode, "failed") == 0 && !client->cancelled) {
         client->saving = 0;
         SmcSaveYourselfDone(connection, False);
-    } else if (strcmp(client->mode, "silent") != 0) {
+    } else if (strcmp(client->mode, "silent") != 0 && strcmp(client->mode, "hot-save") != 0) {
         if (strcmp(client->mode, "slow-first") == 0) pause_millis(400);
         marker(client, "first-done");
         marker(client, "saved");
@@ -120,6 +128,7 @@ static void shutdown_cancelled(SmcConn connection, SmPointer data) {
 
 static void io_error(IceConn connection) {
     (void) connection;
+    if (active_client && hot_disable(active_client)) return;
     if (active_client && strcmp(active_client->mode, "rejected") == 0) {
         marker(active_client, "rejected");
         exit(0);
@@ -133,7 +142,7 @@ int main(int argc, char **argv) {
     client = (struct client) { .mode = argv[1], .id = argv[2], .runtime = getenv("XDG_RUNTIME_DIR") };
     active_client = &client;
     if (!client.runtime) return 2;
-    signal(SIGTERM, SIG_IGN);
+    signal(SIGTERM, hot_disable(&client) ? SIG_DFL : SIG_IGN);
     IceSetIOErrorHandler(io_error);
     SmcCallbacks callbacks = {
         .save_yourself = { save, &client },
@@ -160,5 +169,11 @@ int main(int argc, char **argv) {
     SmcSetProperties(client.connection, 1, properties);
     IceConn ice = SmcGetIceConnection(client.connection);
     while (IceProcessMessages(ice, NULL, NULL) == IceProcessMessagesSuccess) {}
+    if (hot_disable(&client)) {
+        if (client.saving && !client.cancelled) marker(&client, "cancel-missing");
+        SmcCloseConnection(client.connection, 0, NULL);
+        marker(&client, "disconnected");
+        while (1) pause();
+    }
     return 12;
 }
