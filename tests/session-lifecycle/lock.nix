@@ -43,6 +43,7 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_file("/tmp/sway-ipc.sock")
     user = "runuser -u alice -- env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus SWAYSOCK=/tmp/sway-ipc.sock "
+    machine.wait_until_succeeds(user + "swaymsg -t get_outputs --raw")
     outputs = json.loads(machine.succeed(user + "swaymsg -t get_outputs --raw"))
     assert outputs and all(output["active"] for output in outputs)
     machine.screenshot("desktop-before-lock")
