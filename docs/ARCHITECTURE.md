@@ -153,6 +153,12 @@ runtime record. CLI configuration reads run on blocking workers. DM power uses
 logind directly; Lock reads the current policy on its power worker and also uses
 logind when SM is disabled, even with an old generation in its environment.
 
+The configuration loader provides `watch_session_config`, a typed Tokio watch
+receiver for session policy. It reopens the path every 250 ms on blocking
+workers, so in-place edits, atomic replacement and recreation are observed.
+Invalid or missing updates retain the last validated policy. Unchanged session
+policy does not notify receivers; dropping all receivers ends monitoring.
+
 Orderly logout closes the launch gate, drains accepted jobs and prepares
 registered `rsdm app` processes in parallel before infrastructure teardown.
 Each app also has a synchronous ExecStop backstop sharing the saved deadline.

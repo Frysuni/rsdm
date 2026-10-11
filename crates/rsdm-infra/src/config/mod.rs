@@ -9,8 +9,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod save;
+mod watch;
 
 pub use save::{ConfigSaveError, save_lock_runtime_settings};
+pub use watch::watch_session_config;
 
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/rsdm.toml";
 
