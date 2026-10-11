@@ -46,7 +46,12 @@ pub(super) async fn request_quit(manager: &UserManager, runtime: &Runtime, app: 
     {
         return Ok(None);
     }
+    if control.cancelled() { return Ok(None); }
     if crate::app_dispatch::claim(runtime, app, control.transaction_id.as_deref(), crate::app_dispatch::Method::Term, &manager.deadline).await? {
+        if control.cancelled() {
+            crate::app_dispatch::finish(runtime, app, control.transaction_id.as_deref(), crate::app_dispatch::Method::Term, crate::app_dispatch::State::NotSent, &manager.deadline).await?;
+            return Ok(None);
+        }
         terminate_main(manager, app).await?;
         crate::app_dispatch::finish(runtime, app, control.transaction_id.as_deref(), crate::app_dispatch::Method::Term, crate::app_dispatch::State::Sent, &manager.deadline).await?;
     }
