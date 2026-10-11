@@ -201,7 +201,8 @@ using niri's systemd integration.
 
 For `auto`, Niri's direct JSON IPC follows quit-command and confirmed XSMP,
 before TERM. `NIRI_SOCKET` is captured by finalize or native niri readiness and
-stored with the generation. Bare niri can publish it with `rsdm session finalize`.
+stored with the generation. Bare niri uses the managed provider and can publish
+both endpoints through `rsdm session start -- niri -- rsdm session finalize`.
 The socket's UID and peer pidfd must match the recorded compositor unit's
 MainPID and InvocationID. The selected window's PID must belong to the current
 application invocation and cgroup; its pidfd stays pinned across a second

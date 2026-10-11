@@ -69,8 +69,16 @@ spawn-at-startup "rsdm" "app" "--" "waybar"
 
 ## Finalizing (optional)
 
-niri raises the session target itself, so you do not need this. If you run a bare
-setup that does not, you can finalize explicitly:
+`niri-session` raises the session target itself, so it does not need this.
+Direct bare niri runs under the managed provider and needs to publish its display
+and IPC endpoints with finalize. It can do that through its startup command:
+
+```sh
+rsdm session start -- niri -- rsdm session finalize
+```
+
+This leaves the niri configuration unchanged. A bare setup can also finalize
+from its existing startup configuration:
 
 ```kdl
 spawn-at-startup "rsdm" "session" "finalize"
