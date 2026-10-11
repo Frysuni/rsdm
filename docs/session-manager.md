@@ -388,6 +388,13 @@ request permits fallback. Cancellation preserves command and window-close
 claims; a confirmed cancelled XSMP save can start again in a new transaction.
 Legacy `quit_started=true` records are treated as possibly dispatched.
 
+Application preparation records retain `clean`, `forced`, `cancelled` or
+`unknown`, bound to the transaction and InvocationID. Before escalation, its
+intent is persisted so recovery cannot later report a clean exit. `clean`
+means the invocation exited without escalation; it does not guarantee saved
+data. Unknown legacy dispatch remains `unknown`. Completed app records are
+archived privately under the generation's `results` directory before removal.
+
 The user-bus API accepts at most 4096 application arguments, 1024 environment
 entries, and 64 KiB per string. Quit commands allow up to 256 arguments and
 64 KiB of encoded data. Each complete Launch/Finalize/XSMP request body is

@@ -238,6 +238,10 @@ pkgs.testers.runNixOSTest {
         machine.fail(session + "rsdm session stop")
         machine.succeed("test -e " + runtime + "/display-alive")
         machine.succeed(session + "rsdm session status | grep ': running '")
+        generation = session.split("RSDM_SESSION_GENERATION=")[1].split()[0]
+        record = tomllib.loads(machine.succeed("cat " + runtime + "/rsdm/sessions/" + generation + "/apps/*.toml"))
+        assert record["preparation"]["outcome"] == "cancelled"
+        assert not record["preparation"]["escalated"]
         machine.succeed(user + "systemctl --user kill --signal=KILL app-rsdm-*service")
         machine.succeed(session + "rsdm session stop")
 
@@ -262,6 +266,11 @@ pkgs.testers.runNixOSTest {
         assert "dispatch" not in prepared
         machine.succeed(session + "rsdm session stop")
         machine.succeed("test -e " + runtime + "/command-saved")
+        result = tomllib.loads(machine.succeed("cat " + runtime + "/rsdm/sessions/" + generation + "/results/*.toml"))
+        assert result["invocation_id"] == prepared["invocation_id"]
+        assert result["preparation"]["outcome"] == "clean"
+        assert not result["preparation"]["escalated"]
+        assert result["preparation"]["transaction_id"] == result["dispatch"]["transaction_id"]
 
     with subtest("generation recovery saves apps after the coordinator was killed"):
         session = start_session()
@@ -355,11 +364,15 @@ pkgs.testers.runNixOSTest {
 
     with subtest("remaining child processes are forced before the compositor exits"):
         session = start_session()
+        generation = session.split("RSDM_SESSION_GENERATION=")[1].split()[0]
         machine.succeed(session + "rsdm app --shutdown-timeout 1 -- ${parent}")
         machine.wait_for_file(runtime + "/parent-ready")
         machine.wait_for_file(runtime + "/stubborn-ready")
         output = machine.succeed(session + "rsdm session stop 2>&1")
         assert "forced shutdown:" in output
+        result = tomllib.loads(machine.succeed("cat " + runtime + "/rsdm/sessions/" + generation + "/results/*.toml"))
+        assert result["preparation"]["outcome"] == "forced"
+        assert result["preparation"]["escalated"]
         machine.succeed("test -e " + runtime + "/parent-saved")
         machine.fail("test -e " + runtime + "/display-alive")
 

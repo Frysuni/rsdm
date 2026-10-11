@@ -16,6 +16,9 @@ const MAX_RECORD_BYTES: usize = 1_048_576;
 #[path = "runtime_disable.rs"]
 mod disable;
 
+#[path = "runtime_results.rs"]
+mod results;
+
 pub(super) async fn blocking<T: Send + 'static>(
     operation: impl FnOnce() -> Result<T, SessionError> + Send + 'static,
 ) -> Result<T, SessionError> {
@@ -61,6 +64,8 @@ pub(super) struct AppRecord {
     pub dispatch: Option<super::app_dispatch::Dispatch>,
     #[serde(default)]
     pub window_close_sent: bool,
+    #[serde(default)]
+    pub preparation: Option<super::app_result::Preparation>,
 }
 
 #[derive(Debug, Clone)]
@@ -169,7 +174,10 @@ impl Runtime {
     }
 
     pub fn remove_app(&self, unit: &str) -> Result<(), SessionError> {
+        let record = self.app(unit)?;
+        if record.preparation.is_some() { self.archive_app(&record)?; }
         fs::remove_file(self.app_path(unit)?)?;
+        sync_directory(&self.path.join("apps"))?;
         Ok(())
     }
 

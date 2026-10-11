@@ -12,7 +12,7 @@ impl Fixture {
         let runtime = Runtime::create_at(&directory, "0123456789abcdef0123456789abcdef").unwrap();
         let app = AppRecord { unit: "app-rsdm-dispatch@0123456789abcdef0123456789abcdef-1.service".into(),
             invocation_id: vec![1; 16], policy: Default::default(), deadline_usec: None, quit_started: false,
-            dispatch: None, window_close_sent: false };
+            dispatch: None, window_close_sent: false, preparation: None };
         runtime.save_app(&app).unwrap();
         Self { directory, runtime, app }
     }

@@ -60,7 +60,7 @@ impl Fixture {
         let runtime = Runtime { path, generation: GENERATION.into() };
         let app = AppRecord {
             unit: format!("app-rsdm-example@{GENERATION}-1.service"), invocation_id: vec![1; 16],
-            policy: ShutdownPolicy::default(), deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false,
+            policy: ShutdownPolicy::default(), deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, preparation: None,
         };
         runtime.save_app(&app).unwrap();
         let queries = Arc::new(AtomicUsize::new(0));
@@ -240,7 +240,7 @@ async fn cancellation_while_waiting_for_a_record_lease_does_not_dispatch_quit() 
     assert_eq!(fixture.queries.load(Ordering::SeqCst), 1);
     control.cancelled.store(true, Ordering::SeqCst);
     drop(lease);
-    assert!(matches!(preparation.await.unwrap(), Preparation::Finished(AppOutcome::Cancelled)));
+    assert!(matches!(preparation.await.unwrap(), Preparation::Finished(_, AppOutcome::Cancelled)));
     let saved = fixture.runtime.app(&fixture.app.unit).unwrap();
     assert!(!saved.quit_started);
     assert_eq!(saved.deadline_usec, None);

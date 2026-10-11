@@ -6,11 +6,11 @@ use std::{sync::atomic::Ordering, time::Duration};
 use super::{AppOutcome, ShutdownControl};
 use crate::{
     SessionError, bus::UserManager, deadline::Deadline,
-    processes::{app_processes, monotonic_usec, signal_app}, runtime::AppRecord,
+    processes::{app_processes, monotonic_usec, signal_app}, runtime::{AppRecord, Runtime},
 };
 
 pub(super) async fn await_exit(
-    manager: &UserManager, app: &AppRecord, control: &ShutdownControl,
+    manager: &UserManager, runtime: &Runtime, app: &AppRecord, control: &ShutdownControl,
 ) -> Result<AppOutcome, SessionError> {
     let deadline = app.deadline_usec.expect("prepared deadline");
     if let Some(outcome) = wait_until(manager, app, deadline, control).await? { return Ok(outcome); }
@@ -18,27 +18,28 @@ pub(super) async fn await_exit(
         control.cancelled.store(true, Ordering::SeqCst);
         return Ok(AppOutcome::Cancelled);
     }
-    force_exit(manager, app, control, &manager.deadline).await
+    force_exit(manager, runtime, app, control, &manager.deadline).await
 }
 
 pub(super) async fn force_exit(
-    manager: &UserManager, app: &AppRecord, control: &ShutdownControl, grace: &Deadline,
+    manager: &UserManager, runtime: &Runtime, app: &AppRecord, control: &ShutdownControl, grace: &Deadline,
 ) -> Result<AppOutcome, SessionError> {
     if control.cancelled() { return Ok(AppOutcome::Cancelled); }
     let mut force_manager = manager.clone();
     force_manager.deadline = control.hard_deadline.reserving(Duration::from_secs(1))?;
-    if app_processes(&force_manager, app).await?.is_empty() { return Ok(AppOutcome::Closed); }
+    if app_processes(&force_manager, app).await?.is_empty() { return Ok(AppOutcome::Clean); }
 
+    crate::app_result::escalating(runtime, app, control.transaction_id.as_deref(), &force_manager.deadline).await?;
     signal_app(&force_manager, app, libc::SIGTERM).await?;
     let mut grace_manager = force_manager.clone();
     grace_manager.deadline = grace.clone();
     if let Some(outcome) = wait_until(&grace_manager, app, monotonic_usec()?.saturating_add(5_000_000), control).await? {
-        return Ok(if outcome == AppOutcome::Closed { AppOutcome::Forced } else { outcome });
+        return Ok(if outcome == AppOutcome::Clean { AppOutcome::Forced } else { outcome });
     }
     if control.cancelled() { return Ok(AppOutcome::Cancelled); }
     signal_app(&force_manager, app, libc::SIGKILL).await?;
     match wait_until(&force_manager, app, monotonic_usec()?.saturating_add(5_000_000), control).await? {
-        Some(AppOutcome::Closed) => Ok(AppOutcome::Forced),
+        Some(AppOutcome::Clean) => Ok(AppOutcome::Forced),
         Some(outcome) => Ok(outcome),
         None => Err(SessionError::State(format!("{} still has processes after SIGKILL", app.unit))),
     }
@@ -57,7 +58,7 @@ async fn wait_until(
         let remaining = effective.saturating_sub(monotonic_usec()?);
         if remaining == 0 { return Ok(None); }
         match app_processes(manager, app).await {
-            Ok(processes) if processes.is_empty() => return Ok(Some(AppOutcome::Closed)),
+            Ok(processes) if processes.is_empty() => return Ok(Some(AppOutcome::Clean)),
             Ok(_) => {}
             Err(_) if manager.deadline.remaining(Duration::MAX).is_err() => return Ok(None),
             Err(error) => return Err(error),

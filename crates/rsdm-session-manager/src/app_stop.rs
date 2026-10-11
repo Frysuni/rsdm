@@ -46,17 +46,15 @@ impl ShutdownControl {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum AppOutcome {
-    Closed,
-    Cancelled,
-    Forced,
-}
+pub(super) use crate::app_result::Outcome as AppOutcome;
 
 pub(super) async fn prepare_apps(
     manager: &UserManager, runtime: &Runtime, apps: Vec<AppRecord>, control: Arc<ShutdownControl>,
 ) -> Result<Vec<String>, SessionError> {
     let phase_manager = preparation_manager(manager, &control)?;
+    for app in &apps {
+        crate::app_result::begin(runtime, app, control.transaction_id.as_deref(), &phase_manager.deadline).await?;
+    }
     let selected = prepare_xsmp(
         &phase_manager, runtime, &apps.iter().map(|app| app.unit.clone()).collect::<Vec<_>>(), &control,
     ).await?;
@@ -104,21 +102,24 @@ pub(super) async fn prepare_app(
     let phase_manager = preparation_manager(manager, control)?;
     let prepared = begin_preparation(&phase_manager, runtime, unit, control).await;
     let (app, quit_unit) = match prepared {
-        Ok(Preparation::Finished(outcome)) => return Ok(outcome),
+        Ok(Preparation::Finished(app, outcome)) => {
+            return crate::app_result::finish(runtime, &app, control.transaction_id.as_deref(), outcome, &control.hard_deadline).await;
+        }
         Ok(Preparation::Waiting(app, quit_unit)) => (app, quit_unit),
         Err(_) if phase_manager.deadline.remaining(Duration::MAX).is_err()
             && control.noncancelable.load(Ordering::SeqCst) => {
                 let mut force_manager = manager.clone();
                 force_manager.deadline = control.hard_deadline.reserving(Duration::from_secs(1))?;
-                if !super::apps::pin_pending(&force_manager, runtime, unit).await? { return Ok(AppOutcome::Closed); }
+                if !super::apps::pin_pending(&force_manager, runtime, unit).await? { return Ok(AppOutcome::Unknown); }
                 let records = runtime.clone();
                 let unit = unit.to_string();
                 let app = blocking(move || records.app(&unit)).await?;
-                return wait::force_exit(&force_manager, &app, control, &phase_manager.deadline).await;
+                let outcome = wait::force_exit(&force_manager, runtime, &app, control, &phase_manager.deadline).await?;
+                return crate::app_result::finish(runtime, &app, control.transaction_id.as_deref(), outcome, &control.hard_deadline).await;
             }
         Err(error) => return Err(error),
     };
-    let result = wait::await_exit(&phase_manager, &app, control).await;
+    let result = wait::await_exit(&phase_manager, runtime, &app, control).await;
     if let Some(unit) = quit_unit {
         let mut cleanup_manager = manager.clone();
         cleanup_manager.deadline = control.hard_deadline.reserving(Duration::from_secs(1))?;
@@ -127,11 +128,12 @@ pub(super) async fn prepare_app(
     if matches!(result, Ok(AppOutcome::Cancelled)) {
         reset_preparation(runtime, &app, &control.hard_deadline).await?;
     }
-    result
+    let outcome = result?;
+    crate::app_result::finish(runtime, &app, control.transaction_id.as_deref(), outcome, &control.hard_deadline).await
 }
 
 enum Preparation {
-    Finished(AppOutcome),
+    Finished(AppRecord, AppOutcome),
     Waiting(AppRecord, Option<String>),
 }
 
@@ -144,23 +146,24 @@ fn preparation_manager(manager: &UserManager, control: &ShutdownControl) -> Resu
 async fn begin_preparation(
     manager: &UserManager, runtime: &Runtime, unit: &str, control: &ShutdownControl,
 ) -> Result<Preparation, SessionError> {
-    if !super::apps::pin_pending(manager, runtime, unit).await? {
-        return Ok(Preparation::Finished(AppOutcome::Closed));
-    }
+    let pinned = super::apps::pin_pending(manager, runtime, unit).await?;
     let records = runtime.clone();
     let app_unit = unit.to_string();
     let app = blocking(move || records.app(&app_unit)).await?;
-    if app_processes(manager, &app).await?.is_empty() {
-        return Ok(Preparation::Finished(AppOutcome::Closed));
+    let running = pinned && !app_processes(manager, &app).await?.is_empty();
+    crate::app_result::begin(runtime, &app, control.transaction_id.as_deref(), &manager.deadline).await?;
+    if !pinned { return Ok(Preparation::Finished(app, AppOutcome::Unknown)); }
+    if !running {
+        return Ok(Preparation::Finished(app, AppOutcome::Clean));
     }
     if control.cancelled() {
-        return Ok(Preparation::Finished(AppOutcome::Cancelled));
+        return Ok(Preparation::Finished(app, AppOutcome::Cancelled));
     }
 
     let (app, claimed) = claim_preparation(runtime, unit, control, &manager.deadline).await?;
     if control.cancelled() {
         if claimed { reset_preparation(runtime, &app, &control.hard_deadline).await?; }
-        return Ok(Preparation::Finished(AppOutcome::Cancelled));
+        return Ok(Preparation::Finished(app, AppOutcome::Cancelled));
     }
     // A saved deadline can precede dispatch after a crash. The dispatch claim,
     // rather than the deadline reservation, decides whether an action can run.

@@ -40,6 +40,7 @@ pub(super) async fn claim(runtime: &Runtime, prepared: &AppRecord, transaction_i
         }
         app.quit_started = true;
         if method == Method::WindowClose { app.window_close_sent = true; }
+        super::app_result::start(&mut app, transaction_id.as_deref());
         app.dispatch = Some(Dispatch { transaction_id, invocation_id: app.invocation_id.clone(), method, state: State::Intent });
         runtime.save_app(&app)?;
         Ok(true)
