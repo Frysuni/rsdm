@@ -30,6 +30,43 @@ impl NativeBus {
     }
 }
 
+struct LifecycleManager { missing: bool }
+
+#[derive(Debug, zbus_macros::DBusError)]
+#[zbus(prefix = "org.freedesktop.systemd1")]
+enum LifecycleError { NoSuchUnit(String) }
+
+#[zbus_macros::interface(name = "org.freedesktop.systemd1.Manager")]
+impl LifecycleManager {
+    fn get_unit(&self, unit: &str) -> Result<zbus::zvariant::OwnedObjectPath, LifecycleError> {
+        assert_eq!(unit, "compositor.service");
+        if self.missing { return Err(LifecycleError::NoSuchUnit("compositor unit is absent".into())); }
+        Ok(zbus::zvariant::OwnedObjectPath::try_from("/compositor").unwrap())
+    }
+}
+
+struct LifecycleUnit { case: &'static str, reads: AtomicUsize }
+
+#[zbus_macros::interface(name = "org.freedesktop.systemd1.Unit")]
+impl LifecycleUnit {
+    #[zbus(property, name = "InvocationID")]
+    async fn invocation_id(&self) -> zbus::fdo::Result<Vec<u8>> {
+        if self.case == "pending" { std::future::pending::<()>().await; }
+        if self.case == "failed" { return Err(zbus::fdo::Error::Failed("manager query failed".into())); }
+        let reads = self.reads.fetch_add(1, Ordering::SeqCst);
+        let byte = match self.case {
+            "zero" | "unrecorded" => 0,
+            "reused" => 2,
+            "changed" if reads > 0 => 2,
+            _ => 1,
+        };
+        Ok(vec![byte; 16])
+    }
+
+    #[zbus(property)]
+    fn active_state(&self) -> &str { if self.case == "inactive" { "inactive" } else { "active" } }
+}
+
 fn prepared(outcome: Outcome, method: Method) -> crate::runtime::AppRecord {
     let mut app = crate::helper_start_fixture::app();
     app.preparation = Some(Preparation { transaction_id: Some("transaction".into()), outcome, escalated: false, escalation_pending: Some(0) });
@@ -98,6 +135,46 @@ async fn partial_status_reports_external_lifecycle_limits() {
     assert!(details.limitations[0].contains("prepared"));
     assert!(details.capabilities.iter().any(|capability| capability.name == "compositor-lifecycle" && capability.state == "unavailable"));
     assert!(details.capabilities.iter().any(|capability| capability.name == "native-logout" && capability.state == "unavailable"));
+}
+
+#[tokio::test]
+async fn compositor_status_requires_the_same_active_invocation_throughout_the_query() {
+    for (provider, kind) in [("managed", ProviderKind::Managed), ("niri", ProviderKind::Niri), ("external", ProviderKind::External)] {
+        for case in ["current", "reused", "inactive", "zero", "unrecorded", "empty-record", "missing", "changed", "failed", "pending"] {
+            let mut fixture = Fixture::new().await;
+            fixture._server.object_server().at("/org/freedesktop/systemd1", LifecycleManager { missing: case == "missing" }).await.unwrap();
+            fixture._server.object_server().at("/compositor", LifecycleUnit { case, reads: AtomicUsize::new(0) }).await.unwrap();
+            fixture.coordinator.provider.kind = kind;
+            fixture.coordinator.record.provider = provider.into();
+            fixture.coordinator.record.compositor_unit = Some("compositor.service".into());
+            fixture.coordinator.record.compositor_invocation = match case {
+                "empty-record" => Vec::new(), "unrecorded" => vec![0; 16], _ => vec![1; 16],
+            };
+            fixture.coordinator.runtime.save_session(&fixture.coordinator.record).unwrap();
+            let before = fs::read(fixture.directory.join("session.toml")).unwrap();
+            let details = query(&mut fixture).await;
+            assert_eq!(details.state, if case == "current" { "full" } else { "partial" }, "{provider}: {case}");
+            assert_eq!(details.status.provider, provider);
+            let lifecycle = details.capabilities.iter().find(|capability| capability.name == "compositor-lifecycle").unwrap();
+            let expected = match case { "current" => "available", "failed" | "pending" => "unknown", _ => "unavailable" };
+            assert_eq!(lifecycle.state, expected, "{provider}: {case}");
+            assert_eq!(details.limitations.is_empty(), case == "current");
+            if case != "current" { assert!(details.limitations[0].contains(&lifecycle.reason)); }
+            if case == "pending" { assert!(lifecycle.reason.contains("timed out")); }
+            assert_eq!(fs::read(fixture.directory.join("session.toml")).unwrap(), before);
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_managed_record_without_a_compositor_unit_cannot_report_full_control() {
+    let mut fixture = Fixture::new().await;
+    fixture.coordinator.provider.kind = ProviderKind::Managed;
+    fixture.coordinator.record.provider = "managed".into();
+    let details = query(&mut fixture).await;
+    assert_eq!(details.state, "partial");
+    assert!(details.limitations[0].contains("No managed compositor unit"));
+    assert_eq!(details.status.provider, "managed");
 }
 
 #[tokio::test]

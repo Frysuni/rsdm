@@ -100,6 +100,11 @@ unavailable or unknown, with the probe's reason in the limitations. The provider
 and legacy status fields stay unchanged; optional window backends still do not
 affect the manager's scope.
 
+For a recorded compositor unit, status verifies that the captured InvocationID
+is still active and remains unchanged through the query. A missing, stopped or
+reused invocation also reports `partial`; a failed or timed-out query reports
+unknown lifecycle capability with its reason. These probes only read state.
+
 Preparation results include the application InvocationID, transaction, selected
 method, dispatch state, `clean`/`forced`/`cancelled`/`unknown` result and escalation
 flag. Retired app records remain visible for the current generation. `clean`

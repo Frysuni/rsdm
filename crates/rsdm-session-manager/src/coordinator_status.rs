@@ -63,7 +63,8 @@ async fn snapshot(manager: &UserManager, runtime: Runtime, record: SessionRecord
         if let Some(preparation) = status::preparation(app) { preparations.insert((app.unit.clone(), app.invocation_id.clone()), preparation); }
     }
     let native = native_logout(manager, &record).await;
-    let mut details = base_details(status, &record, native);
+    let lifecycle = compositor_lifecycle(manager, &record, &native).await;
+    let mut details = base_details(status, &record, native, lifecycle);
     details.preparations = preparations.into_values().collect();
     details.capabilities.push(crate::window_capability::capability(manager, &record).await);
     if manager.actions.check().is_err() { return Ok(SessionStatusDetails::disabled()); }
@@ -72,21 +73,15 @@ async fn snapshot(manager: &UserManager, runtime: Runtime, record: SessionRecord
 
 fn app_state(app: &AppRecord) -> &'static str { if app.quit_started { "quitting" } else { "registered" } }
 
-fn base_details(status: SessionStatus, record: &SessionRecord, native: Capability) -> SessionStatusDetails {
+fn base_details(status: SessionStatus, record: &SessionRecord, native: Capability, lifecycle: Capability) -> SessionStatusDetails {
     let attached = record.provider == "partial";
-    let native_limited = matches!(record.provider.as_str(), "gnome" | "plasma") && native.state != "available";
-    let partial = attached || native_limited;
+    let partial = lifecycle.state != "available";
     let mut capabilities = vec![
         Capability::new("app-registration", "available", "Only explicitly registered application units are managed."),
         Capability::new("quit-command", "available", "Application-specific quit commands use the registered invocation's environment."),
         Capability::new("process-observation", "available", "Completion is observed through the unit and its cgroup."),
         Capability::new("term-kill", "available", "Signals require current invocation, cgroup and pinned process ownership."),
     ];
-    capabilities.push(if attached {
-        Capability::new("compositor-lifecycle", "unavailable", "The external WM, shared targets and PAM login are not owned.")
-    } else if native_limited {
-        Capability::new("compositor-lifecycle", &native.state, &native.reason)
-    } else { Capability::new("compositor-lifecycle", "available", "The session launcher or native provider controls the session lifecycle.") });
     capabilities.push(if status.xsmp_available {
         Capability::new("xsmp", "available", "The private XSMP server accepts authenticated registered application peers.")
     } else if matches!(record.provider.as_str(), "gnome" | "plasma") {
@@ -96,13 +91,51 @@ fn base_details(status: SessionStatus, record: &SessionRecord, native: Capabilit
     } else { Capability::new("xsmp", "not-applicable", "This provider does not run a private XSMP server.") });
     let limitations = if attached {
         vec!["Only registered apps are prepared; compositor and PAM lifecycle are not owned. Non-native logout returns prepared and leaves the external WM running.".into()]
-    } else if native_limited {
+    } else if partial && matches!(record.provider.as_str(), "gnome" | "plasma") {
         vec![format!("Native desktop lifecycle control could not be verified: {}", native.reason)]
+    } else if partial {
+        vec![format!("Compositor lifecycle control could not be verified: {}", lifecycle.reason)]
     } else { Vec::new() };
+    capabilities.push(lifecycle);
     capabilities.push(native);
     SessionStatusDetails { enabled: true, state: if partial { "partial" } else { "full" }.into(), status, capabilities,
         limitations,
         preparations: Vec::new() }
+}
+
+async fn compositor_lifecycle(manager: &UserManager, record: &SessionRecord, native: &Capability) -> Capability {
+    let name = "compositor-lifecycle";
+    if record.provider == "partial" {
+        return Capability::new(name, "unavailable", "The external WM, shared targets and PAM login are not owned.");
+    }
+    if matches!(record.provider.as_str(), "gnome" | "plasma") {
+        return Capability::new(name, &native.state, &native.reason);
+    }
+    let Some(unit) = &record.compositor_unit else {
+        return if record.provider == "managed" {
+            Capability::new(name, "unavailable", "No managed compositor unit is recorded.")
+        } else { Capability::new(name, "available", "The session launcher controls the original session command.") };
+    };
+    if record.compositor_invocation.iter().all(|byte| *byte == 0) {
+        return Capability::new(name, "unavailable", "No verified compositor invocation is recorded.");
+    }
+    match tokio::time::timeout(Duration::from_secs(2), current_compositor(manager, unit, &record.compositor_invocation)).await {
+        Ok(Ok(true)) => Capability::new(name, "available", "The recorded compositor invocation is active and still owned."),
+        Ok(Ok(false)) => Capability::new(name, "unavailable", "The recorded compositor invocation is missing, inactive or replaced."),
+        Ok(Err(error)) => Capability::new(name, "unknown", &error.to_string()),
+        Err(_) => Capability::new(name, "unknown", "The compositor lifecycle query timed out."),
+    }
+}
+
+async fn current_compositor(manager: &UserManager, unit: &str, invocation: &[u8]) -> Result<bool, SessionError> {
+    let query = async {
+        if manager.invocation_id(unit).await? != invocation || !manager.active(unit).await? { return Ok(false); }
+        Ok(manager.invocation_id(unit).await? == invocation)
+    }.await;
+    match query {
+        Err(SessionError::Bus(error)) if crate::bus::missing_unit(&error) => Ok(false),
+        result => result,
+    }
 }
 
 async fn native_logout(manager: &UserManager, record: &SessionRecord) -> Capability {
