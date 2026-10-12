@@ -62,6 +62,11 @@ impl SessionStatusDetails {
 
 pub(super) fn preparation(app: &AppRecord) -> Option<PreparationStatus> {
     let prepared = app.preparation.as_ref()?;
+    let escalated = prepared.confirmed_escalation();
+    let outcome = match prepared.outcome {
+        Outcome::Clean | Outcome::Forced if !escalated && prepared.uncertain_escalation() => Outcome::Unknown,
+        outcome => outcome,
+    };
     let dispatch = app.dispatch.as_ref().filter(|dispatch| dispatch.invocation_id == app.invocation_id);
     Some(PreparationStatus {
         unit: app.unit.clone(), invocation_id: app.invocation_id.clone(),
@@ -70,8 +75,8 @@ pub(super) fn preparation(app: &AppRecord) -> Option<PreparationStatus> {
         dispatch_state: dispatch.map_or("unknown", |dispatch| match dispatch.state {
             State::Intent => "intent", State::Sent => "sent", State::NotSent => "not_sent", State::Cancelled => "cancelled",
         }).into(),
-        result: match prepared.outcome { Outcome::Clean => "clean", Outcome::Forced => "forced", Outcome::Cancelled => "cancelled", Outcome::Unknown => "unknown" }.into(),
-        escalated: prepared.escalated,
+        result: match outcome { Outcome::Clean => "clean", Outcome::Forced => "forced", Outcome::Cancelled => "cancelled", Outcome::Unknown => "unknown" }.into(),
+        escalated,
     })
 }
 

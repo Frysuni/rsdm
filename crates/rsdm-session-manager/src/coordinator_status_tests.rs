@@ -17,7 +17,7 @@ impl PendingBus {
 
 fn prepared(outcome: Outcome, method: Method) -> crate::runtime::AppRecord {
     let mut app = crate::helper_start_fixture::app();
-    app.preparation = Some(Preparation { transaction_id: Some("transaction".into()), outcome, escalated: false });
+    app.preparation = Some(Preparation { transaction_id: Some("transaction".into()), outcome, escalated: false, escalation_pending: Some(0) });
     app.dispatch = Some(Dispatch { transaction_id: Some("transaction".into()), invocation_id: app.invocation_id.clone(), method, state: State::Sent });
     app
 }

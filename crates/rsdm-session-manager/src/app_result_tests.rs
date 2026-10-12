@@ -5,6 +5,9 @@ use super::*;
 #[path = "app_retirement_tests.rs"]
 mod retirement;
 
+#[path = "app_escalation_results_tests.rs"]
+mod escalation;
+
 struct Fixture { directory: PathBuf, runtime: Runtime, app: AppRecord }
 
 impl Fixture {
@@ -57,7 +60,7 @@ async fn a_saved_escalation_intent_prevents_a_later_recovery_from_claiming_a_cle
     escalating(&fixture.runtime, &fixture.app, Some("first"), &deadline).await.unwrap();
     assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().preparation.unwrap().outcome, Outcome::Unknown);
     begin(&fixture.runtime, &fixture.app, Some("retry"), &deadline).await.unwrap();
-    assert_eq!(finish(&fixture.runtime, &fixture.app, Some("retry"), Outcome::Clean, &deadline).await.unwrap(), Outcome::Forced);
+    assert_eq!(finish(&fixture.runtime, &fixture.app, Some("retry"), Outcome::Clean, &deadline).await.unwrap(), Outcome::Unknown);
 }
 
 #[tokio::test]

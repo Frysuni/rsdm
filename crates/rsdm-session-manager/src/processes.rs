@@ -2,6 +2,8 @@
 
 pub(super) use rsdm_system::{clock::monotonic_usec, process_handle::ProcessHandle};
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use super::{SessionError, app_stop::ShutdownControl, bus::{UserManager, missing_unit}, runtime::AppRecord};
 
 const SERVICE: &str = "org.freedesktop.systemd1.Service";
@@ -56,8 +58,15 @@ pub(super) async fn generation_invocation(
 }
 
 pub(super) async fn signal_app(manager: &UserManager, app: &AppRecord, signal: i32, control: &ShutdownControl) -> Result<bool, SessionError> {
+    let sent = AtomicBool::new(false);
+    signal_app_tracked(manager, app, signal, control, &sent).await?;
+    Ok(sent.load(Ordering::Relaxed))
+}
+
+// Keep accepted signals observable when a later ownership check fails.
+pub(super) async fn signal_app_tracked(manager: &UserManager, app: &AppRecord, signal: i32, control: &ShutdownControl, sent: &AtomicBool) -> Result<(), SessionError> {
     let processes = app_processes(manager, app).await?;
-    if processes.is_empty() || control.cancelled() { return Ok(false); }
+    if processes.is_empty() || control.cancelled() { return Ok(()); }
     let group: String = manager.unit_property(&app.unit, SERVICE, "ControlGroup").await?;
     if !group.starts_with('/') || group == "/" {
         return Err(SessionError::State(format!("{} has no dedicated cgroup", app.unit)));
@@ -65,21 +74,20 @@ pub(super) async fn signal_app(manager: &UserManager, app: &AppRecord, signal: i
 
     // Bound live descriptors even for large browser cgroups. Prepare the
     // owned pidfds before the final invocation and cancellation checks.
-    let mut sent = false;
     for batch in processes.chunks(32) {
         let batch = batch.to_vec();
         let group = group.clone();
         let owned = super::runtime::blocking(move || owned_process_handles(&batch, &group)).await?;
-        if control.cancelled() { return Ok(sent); }
-        if !verify_invocation(manager, app).await? { return Ok(sent); }
+        if control.cancelled() { return Ok(()); }
+        if !verify_invocation(manager, app).await? { return Ok(()); }
         for handle in owned {
             manager.actions.check_generation_async().await?;
-            if control.cancelled() { return Ok(sent); }
+            if control.cancelled() { return Ok(()); }
             manager.actions.check()?;
-            sent |= handle.signal(signal)?;
+            if handle.signal(signal)? { sent.store(true, Ordering::Relaxed); }
         }
     }
-    Ok(sent)
+    Ok(())
 }
 
 fn owned_process_handles(processes: &[u32], group: &str) -> Result<Vec<ProcessHandle>, SessionError> {

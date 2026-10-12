@@ -1,12 +1,12 @@
 //! Graceful waiting and escalation leave time for infrastructure teardown.
 
 use rsdm_core::domain::TimeoutAction;
-use std::{sync::atomic::Ordering, time::Duration};
+use std::{sync::atomic::{AtomicBool, Ordering}, time::Duration};
 
 use super::{AppOutcome, ShutdownControl};
 use crate::{
     SessionError, bus::UserManager, deadline::Deadline,
-    processes::{app_processes, monotonic_usec, signal_app}, runtime::{AppRecord, Runtime},
+    processes::{app_processes, monotonic_usec, signal_app_tracked}, runtime::{AppRecord, Runtime},
 };
 
 pub(super) async fn await_exit(
@@ -29,20 +29,33 @@ pub(super) async fn force_exit(
     force_manager.deadline = control.hard_deadline.reserving(Duration::from_secs(1))?;
     if app_processes(&force_manager, app).await?.is_empty() { return Ok(AppOutcome::Clean); }
 
-    crate::app_result::escalating(runtime, app, control.transaction_id.as_deref(), &force_manager.deadline).await?;
-    signal_app(&force_manager, app, libc::SIGTERM, control).await?;
+    let mut escalated = escalate(&force_manager, runtime, app, control, libc::SIGTERM).await?;
     let mut grace_manager = force_manager.clone();
     grace_manager.deadline = grace.clone();
     if let Some(outcome) = wait_until(&grace_manager, app, monotonic_usec()?.saturating_add(5_000_000), control).await? {
-        return Ok(if outcome == AppOutcome::Clean { AppOutcome::Forced } else { outcome });
+        return Ok(if outcome == AppOutcome::Clean && escalated { AppOutcome::Forced } else { outcome });
     }
     if control.cancelled() { return Ok(AppOutcome::Cancelled); }
-    signal_app(&force_manager, app, libc::SIGKILL, control).await?;
+    escalated |= escalate(&force_manager, runtime, app, control, libc::SIGKILL).await?;
     match wait_until(&force_manager, app, monotonic_usec()?.saturating_add(5_000_000), control).await? {
-        Some(AppOutcome::Clean) => Ok(AppOutcome::Forced),
+        Some(AppOutcome::Clean) if escalated => Ok(AppOutcome::Forced),
         Some(outcome) => Ok(outcome),
         None => Err(SessionError::State(format!("{} still has processes after SIGKILL", app.unit))),
     }
+}
+
+async fn escalate(manager: &UserManager, runtime: &Runtime, app: &AppRecord, control: &ShutdownControl, signal: i32) -> Result<bool, SessionError> {
+    if control.cancelled() { return Ok(false); }
+    let transaction = control.transaction_id.as_deref();
+    crate::app_result::escalating(runtime, app, transaction, &manager.deadline).await?;
+
+    let confirmed = AtomicBool::new(false);
+    let dispatched = signal_app_tracked(manager, app, signal, control, &confirmed).await;
+    let sent = confirmed.load(Ordering::Relaxed);
+
+    crate::app_result::escalation_finished(runtime, app, transaction, sent, &manager.deadline).await?;
+    dispatched?;
+    Ok(sent)
 }
 
 async fn wait_until(

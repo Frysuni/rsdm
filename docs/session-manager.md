@@ -86,6 +86,10 @@ Preparation results include the application InvocationID, transaction, selected
 method, dispatch state, `clean`/`forced`/`cancelled`/`unknown` result and escalation
 flag. Retired app records remain visible for the current generation. `clean`
 means no escalation was recorded; it does not certify that an app saved its data.
+Escalation records distinguish a saved signal intent from a signal accepted by
+the kernel. `escalated` confirms at least one accepted escalation signal; an
+unconfirmed intent remains `unknown` after recovery. Older escalation flags
+without that confirmation are also treated as uncertain.
 The original Status and Stop wire formats remain unchanged. When an older
 coordinator lacks StatusDetails, the CLI reads and displays its legacy Status
 using the same existing unique bus owner. Authorization and other failures are

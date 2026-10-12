@@ -1,30 +1,54 @@
 //! Cancellation during process discovery must prevent the claimed TERM.
 
 use std::{fs, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, path::PathBuf,
-    process::{Child, Command}, sync::{Arc, atomic::AtomicU32}};
+    process::{Child, Command}, sync::{Arc, atomic::{AtomicU32, AtomicUsize}}};
 
 use zbus::{Connection, zvariant::OwnedObjectPath};
 
 use super::*;
 
-struct Manager { pid: u32, control: Arc<ShutdownControl> }
+#[path = "app_stop_escalation_tests.rs"]
+mod escalation;
+
+#[derive(Clone, Copy)]
+enum Snapshot { Cancel, CancelDuringSignal, EmptyDuringSignal, FailDuringSignal, FailAfterFirstBatch }
+
+struct Manager {
+    pid: u32, process: crate::processes::ProcessHandle, control: Arc<ShutdownControl>,
+    snapshot: Snapshot, reads: AtomicUsize,
+}
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Manager")]
 impl Manager {
     fn get_unit(&self, _unit: &str) -> OwnedObjectPath { OwnedObjectPath::try_from("/app").unwrap() }
 
-    fn get_unit_processes(&self, _unit: &str) -> Vec<(String, u32, String)> {
-        self.control.cancelled.store(true, Ordering::SeqCst);
-        vec![("/test".into(), self.pid, "application".into())]
+    fn get_unit_processes(&self, _unit: &str) -> zbus::fdo::Result<Vec<(String, u32, String)>> {
+        let read = self.reads.fetch_add(1, Ordering::SeqCst);
+        if !self.process.alive().unwrap() { return Ok(Vec::new()); }
+        match self.snapshot {
+            Snapshot::Cancel => self.control.cancelled.store(true, Ordering::SeqCst),
+            Snapshot::CancelDuringSignal if read > 0 => self.control.cancelled.store(true, Ordering::SeqCst),
+            Snapshot::EmptyDuringSignal if read > 0 => return Ok(Vec::new()),
+            Snapshot::FailDuringSignal if read > 0 => return Err(zbus::fdo::Error::Failed("process inspection failed".into())),
+            _ => {},
+        }
+        let process = ("/test".into(), self.pid, "application".into());
+        if matches!(self.snapshot, Snapshot::FailAfterFirstBatch) { Ok(vec![process; 33]) } else { Ok(vec![process]) }
     }
 }
 
-struct Unit;
+struct Unit { snapshot: Snapshot, reads: AtomicUsize }
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Unit")]
 impl Unit {
     #[zbus(property, name = "InvocationID")]
-    fn invocation_id(&self) -> Vec<u8> { vec![1; 16] }
+    fn invocation_id(&self) -> zbus::fdo::Result<Vec<u8>> {
+        let read = self.reads.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.snapshot, Snapshot::FailAfterFirstBatch) && read >= 3 {
+            return Err(zbus::fdo::Error::Failed("second batch inspection failed".into()));
+        }
+        Ok(vec![1; 16])
+    }
 }
 
 struct Service { main: Arc<AtomicU32>, group: String }
@@ -51,9 +75,10 @@ struct Fixture {
 }
 
 impl Fixture {
-    async fn new(control: Arc<ShutdownControl>) -> Self {
+    async fn new(control: Arc<ShutdownControl>, snapshot: Snapshot) -> Self {
         let child = Command::new("sleep").arg("60").spawn().unwrap();
         let pid = child.id();
+        let process = crate::processes::ProcessHandle::open(pid).unwrap().unwrap();
         let main = Arc::new(AtomicU32::new(pid));
         let membership = fs::read_to_string(format!("/proc/{pid}/cgroup")).unwrap();
         let group = membership.lines().find_map(|line| line.strip_prefix("0::")).unwrap().to_string();
@@ -65,8 +90,9 @@ impl Fixture {
         let service = Service { main: main.clone(), group };
         let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
-                .serve_at("/org/freedesktop/systemd1", Manager { pid, control }).unwrap()
-                .serve_at("/app", Unit).unwrap().serve_at("/app", service).unwrap().build().await.unwrap()
+                .serve_at("/org/freedesktop/systemd1", Manager { pid, process, control, snapshot, reads: AtomicUsize::new(0) }).unwrap()
+                .serve_at("/app", Unit { snapshot, reads: AtomicUsize::new(0) }).unwrap()
+                .serve_at("/app", service).unwrap().build().await.unwrap()
         });
         let client = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
         Self { directory, runtime, manager: UserManager::with_connection(client), _server: server.await.unwrap(), child, main }
@@ -96,7 +122,7 @@ impl Drop for Fixture {
 #[tokio::test]
 async fn cancellation_during_main_pid_verification_leaves_term_unsent() {
     let control = Arc::new(ShutdownControl::default());
-    let mut fixture = Fixture::new(control.clone()).await;
+    let mut fixture = Fixture::new(control.clone(), Snapshot::Cancel).await;
     let app = fixture.save_app();
     request_quit(&fixture.manager, &fixture.runtime, &app, &control).await.unwrap();
     assert!(control.cancelled());
@@ -107,7 +133,7 @@ async fn cancellation_during_main_pid_verification_leaves_term_unsent() {
 #[tokio::test]
 async fn cancellation_during_cgroup_snapshot_leaves_term_fallback_unsent() {
     let control = Arc::new(ShutdownControl::default());
-    let mut fixture = Fixture::new(control.clone()).await;
+    let mut fixture = Fixture::new(control.clone(), Snapshot::Cancel).await;
     fixture.main.store(0, Ordering::SeqCst);
     let app = fixture.save_app();
     request_quit(&fixture.manager, &fixture.runtime, &app, &control).await.unwrap();
@@ -120,7 +146,7 @@ async fn cancellation_during_cgroup_snapshot_leaves_term_fallback_unsent() {
 async fn force_can_signal_after_cancellation_during_pid_verification() {
     let control = Arc::new(ShutdownControl::default());
     control.noncancelable.store(true, Ordering::SeqCst);
-    let mut fixture = Fixture::new(control.clone()).await;
+    let mut fixture = Fixture::new(control.clone(), Snapshot::Cancel).await;
     let app = fixture.save_app();
     request_quit(&fixture.manager, &fixture.runtime, &app, &control).await.unwrap();
     assert!(control.cancelled.load(Ordering::SeqCst));
