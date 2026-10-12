@@ -359,6 +359,12 @@ Official builds enable `xsmp`. Managed WM and native niri sessions publish
 `SESSION_MANAGER` and `ICEAUTHORITY` before app launch. Local Unix ICE connections
 use private cookie authentication. Clients must belong to a registered app's
 verified unit invocation; claimed `SmProcessID` is not ownership evidence.
+The server pins the connecting process through `SO_PEERPIDFD`. Before each
+shutdown save, phase 2, interaction grant and `Die`, it acquires an IPC request
+slot and rechecks the live process, current unit invocation, cgroup membership
+excluding `ControlPID`, generation record, transaction and deadlines. Force
+does not bypass these checks. Revoked ownership releases an outstanding save
+with `ShutdownCancelled` and prevents further shutdown messages on that peer.
 The dedicated Tokio thread awaits socket readiness. Stop interrupts ICE I/O
 during admission and awaits completion inside the session deadline without join.
 

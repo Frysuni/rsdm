@@ -22,6 +22,8 @@ mod readiness;
 mod server;
 #[cfg(feature = "xsmp")]
 mod transaction;
+#[cfg(feature = "xsmp")]
+mod shutdown_dispatch;
 
 #[cfg(feature = "xsmp")]
 mod handle;

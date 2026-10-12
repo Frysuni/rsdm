@@ -1,6 +1,6 @@
 //! Real shutdown messages are checked with isolated libSM client and server processes.
 
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, process::Stdio, sync::atomic::{AtomicU32, AtomicUsize, Ordering}};
+use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, process::Stdio, sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering}};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use zbus::zvariant::OwnedObjectPath;
@@ -10,11 +10,17 @@ use crate::{app_stop::ShutdownControl, app_dispatch::State as DispatchState};
 
 #[path = "transaction_client.rs"]
 mod client;
+#[path = "transaction_followup_tests.rs"]
+mod followup;
 
 const TEST: &str = "xsmp::handle::transaction_tests::cancellation_reaches_worker_before_shutdown_messages";
 const ROLE: &str = "RSDM_XSMP_TRANSACTION_TEST";
 
-struct State { control: Arc<ShutdownControl>, pid: AtomicU32, checks: AtomicUsize, cancel_at: AtomicUsize }
+struct State {
+    control: Arc<ShutdownControl>, pid: AtomicU32, checks: AtomicUsize, cancel_at: AtomicUsize,
+    invocation: AtomicU8, process_present: AtomicBool, control_pid: AtomicU32,
+    deadline: Deadline, expire_final: AtomicBool, cancel_final: AtomicBool,
+}
 struct Manager(Arc<State>);
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Manager")]
@@ -30,26 +36,33 @@ impl Manager {
     fn get_unit_processes(&self, _unit: &str) -> Vec<(String, u32, String)> {
         let check = self.0.checks.fetch_add(1, Ordering::SeqCst) + 1;
         if check == self.0.cancel_at.load(Ordering::SeqCst) { self.0.control.cancelled.store(true, Ordering::SeqCst); }
+        if !self.0.process_present.load(Ordering::SeqCst) { return Vec::new(); }
         vec![("/app".into(), self.0.pid.load(Ordering::SeqCst), "xsmp-client".into())]
     }
 }
 
-struct Unit;
+struct Unit(Arc<State>);
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Unit")]
 impl Unit {
     #[zbus(property)]
     fn id(&self) -> String { crate::helper_start_fixture::app().unit }
     #[zbus(property, name = "InvocationID")]
-    fn invocation_id(&self) -> Vec<u8> { vec![1; 16] }
+    fn invocation_id(&self) -> Vec<u8> {
+        if self.0.checks.load(Ordering::SeqCst) >= 4 {
+            if self.0.expire_final.load(Ordering::SeqCst) { self.0.deadline.set(1); }
+            if self.0.cancel_final.load(Ordering::SeqCst) { self.0.control.cancelled.store(true, Ordering::SeqCst); }
+        }
+        vec![self.0.invocation.load(Ordering::SeqCst); 16]
+    }
 }
 
-struct Service;
+struct Service(Arc<State>);
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Service")]
 impl Service {
     #[zbus(property, name = "ControlPID")]
-    fn control_pid(&self) -> u32 { 0 }
+    fn control_pid(&self) -> u32 { self.0.control_pid.load(Ordering::SeqCst) }
 }
 
 struct Fixture { directory: PathBuf, runtime: Runtime, manager: UserManager, state: Arc<State>, _server: zbus::Connection }
@@ -69,16 +82,20 @@ impl Fixture {
         app.policy.method = rsdm_core::domain::ShutdownMethod::Xsmp;
         runtime.save_app(&app).unwrap();
         let state = Arc::new(State { control: Arc::default(), pid: AtomicU32::new(0),
-            checks: AtomicUsize::new(0), cancel_at: AtomicUsize::new(usize::MAX) });
+            checks: AtomicUsize::new(0), cancel_at: AtomicUsize::new(usize::MAX),
+            invocation: AtomicU8::new(1), process_present: AtomicBool::new(true), control_pid: AtomicU32::new(0),
+            deadline: Deadline::default(), expire_final: AtomicBool::new(false), cancel_final: AtomicBool::new(false) });
         let shared = state.clone();
         let (server, connection) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
-                .serve_at("/org/freedesktop/systemd1", Manager(shared)).unwrap()
-                .serve_at("/app", Unit).unwrap().serve_at("/app", Service).unwrap().build().await.unwrap()
+                .serve_at("/org/freedesktop/systemd1", Manager(shared.clone())).unwrap()
+                .serve_at("/app", Unit(shared.clone())).unwrap().serve_at("/app", Service(shared)).unwrap().build().await.unwrap()
         });
         let connection = zbus::connection::Builder::unix_stream(connection).p2p().build().await.unwrap();
-        Self { directory, runtime, manager: UserManager::with_connection(connection), state, _server: server.await.unwrap() }
+        let mut manager = UserManager::with_connection(connection);
+        manager.deadline = state.deadline.clone();
+        Self { directory, runtime, manager, state, _server: server.await.unwrap() }
     }
 }
 
@@ -93,9 +110,18 @@ async fn cancellation_reaches_worker_before_shutdown_messages() {
         client::run(&std::env::var("RSDM_XSMP_CLIENT_MODE").unwrap());
         return;
     }
+    if mode.starts_with("followup-") { followup::worker(&mode).await; return; }
     if !mode.is_empty() { worker(&mode).await; return; }
     let mut failed = Vec::new();
-    for mode in ["already-cancelled", "ownership-check", "forced", "after-send", "phase2", "interact"] {
+    let mut cases: Vec<String> = ["already-cancelled", "ownership-check", "forced", "after-send", "phase2", "interact"].map(str::to_string).into();
+    for request in ["phase2", "die", "interact"] {
+        for change in ["owned", "invocation", "record", "cgroup", "control", "transaction", "disabled", "deadline", "cancel", "slots"] {
+            cases.push(format!("followup-{request}-{change}"));
+        }
+    }
+    cases.push("followup-phase2-invocation-forced".into());
+    cases.push("followup-die-cgroup-forced".into());
+    for mode in &cases {
         let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", TEST, "--nocapture"]).env(ROLE, mode).kill_on_drop(true).spawn().unwrap();
         if !tokio::time::timeout(Duration::from_secs(10), child.wait()).await.unwrap().unwrap().success() { failed.push(mode); }
@@ -129,7 +155,7 @@ async fn worker(mode: &str) {
     let dispatch = fixture.runtime.app(&unit).unwrap().dispatch;
     if mode == "already-cancelled" { assert!(dispatch.is_none()); }
     else {
-        assert_eq!(fixture.state.checks.load(Ordering::SeqCst), 3);
+        assert_eq!(fixture.state.checks.load(Ordering::SeqCst), if mode == "forced" { 4 } else { 3 });
         assert!(fixture.state.control.cancelled.load(Ordering::SeqCst));
         assert_eq!(dispatch.unwrap().state, if mode == "ownership-check" { DispatchState::NotSent } else { DispatchState::Sent });
     }

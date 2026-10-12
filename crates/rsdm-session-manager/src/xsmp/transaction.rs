@@ -4,7 +4,7 @@ use std::{sync::{Arc, atomic::Ordering}};
 
 use rsdm_core::domain::{ShutdownMethod, TimeoutAction};
 
-use super::{Notice, ffi, peer::Peer, protocol::{self, Phase}, server::Server};
+use super::{Notice, ffi, peer::Peer, protocol::{self, Phase}, server::Server, shutdown_dispatch::{self, Request}};
 use crate::{SessionError, app_stop::ShutdownControl, apps, bus::UserManager,
     processes::{app_processes, monotonic_usec}, runtime::Runtime};
 
@@ -67,25 +67,7 @@ impl Server {
     }
 
     pub fn cancel(&mut self) {
-        for peer in &mut self.peers {
-            if peer.selected && !peer.sms.is_null() {
-                match peer.phase {
-                    Phase::Saving | Phase::Phase2Waiting | Phase::Phase2Saving | Phase::TimedOut => {
-                        unsafe { ffi::SmsShutdownCancelled(peer.sms); }
-                        peer.phase = Phase::Cancelling;
-                    }
-                    Phase::Saved | Phase::Failed => {
-                        unsafe { ffi::SmsShutdownCancelled(peer.sms); ffi::SmsSaveComplete(peer.sms); }
-                        peer.phase = Phase::Idle;
-                    }
-                    _ => {},
-                }
-            }
-            peer.selected = false;
-            peer.interaction_requested = false;
-            peer.interacting = false;
-            peer.cancellation_requested = false;
-        }
+        for peer in &mut self.peers { shutdown_dispatch::cancel(peer); }
         self.cancellable = true;
         self.control = None;
     }
@@ -106,24 +88,17 @@ impl Server {
             }
         }
         if self.expire_saves().await? { return Ok(()); }
-        self.grant_interaction();
+        self.grant_interaction().await?;
         let phases: Vec<_> = self.peers.iter().filter(|peer| peer.selected).map(|peer| peer.phase).collect();
-        if protocol::phase2_ready(&phases) {
-            for peer in &mut self.peers {
-                if peer.selected && peer.phase == Phase::Phase2Waiting {
-                    if self.control.as_ref().is_some_and(|control| control.cancelled()) { break; }
-                    self.manager.actions.check()?;
-                    peer.phase = Phase::Phase2Saving;
-                    unsafe { ffi::SmsSaveYourselfPhase2(peer.sms); }
-                }
-            }
+        let followup = if protocol::phase2_ready(&phases) {
+            Some((Phase::Phase2Waiting, Request::Phase2))
         } else if protocol::die_ready(&phases) {
+            Some((Phase::Saved, Request::Die))
+        } else { None };
+        if let Some((phase, request)) = followup {
             for peer in &mut self.peers {
-                if peer.selected && peer.phase == Phase::Saved {
-                    if self.control.as_ref().is_some_and(|control| control.cancelled()) { break; }
-                    self.manager.actions.check()?;
-                    peer.phase = Phase::Dying;
-                    unsafe { ffi::SmsDie(peer.sms); }
+                if peer.selected && peer.phase == phase {
+                    shutdown_dispatch::send(&self.manager, &self.runtime, peer, self.transaction_id.as_deref(), self.control.as_deref(), request).await?;
                 }
             }
         }
@@ -185,34 +160,27 @@ impl Server {
         Ok(false)
     }
 
-    fn grant_interaction(&mut self) {
-        if self.cancelled() || self.manager.actions.check().is_err() { return; }
-        if self.peers.iter().any(|peer| peer.interacting) { return; }
+    async fn grant_interaction(&mut self) -> Result<(), SessionError> {
+        if self.cancelled() || self.peers.iter().any(|peer| peer.interacting) { return Ok(()); }
         if let Some(peer) = self.peers.iter_mut().find(|peer| peer.selected && peer.interaction_requested && peer.phase.saving()) {
-            peer.interaction_requested = false;
-            peer.interacting = true;
-            unsafe { ffi::SmsInteract(peer.sms); }
+            shutdown_dispatch::send(&self.manager, &self.runtime, peer, self.transaction_id.as_deref(), self.control.as_deref(), Request::Interact).await?;
         }
+        Ok(())
     }
 }
 
 async fn start_save(manager: &UserManager, runtime: &Runtime, peer: &mut Peer,
     transaction_id: Option<&str>, control: Option<&ShutdownControl>) -> Result<(), SessionError> {
-    if !peer.verified(manager, runtime).await? { peer.selected = false; return Ok(()); }
     let records = runtime.clone();
     let unit = peer.unit.clone();
     let app = crate::runtime::blocking(move || records.app(&unit)).await?;
     if app.invocation_id != peer.invocation { peer.selected = false; return Ok(()); }
 
-    manager.actions.check_generation_async().await?;
-    manager.actions.check()?;
-    let state = if control.is_some_and(ShutdownControl::cancelled) {
+    let state = if shutdown_dispatch::send(manager, runtime, peer, transaction_id, control, Request::Save).await? {
+        crate::app_dispatch::State::Sent
+    } else {
         peer.selected = false;
         crate::app_dispatch::State::NotSent
-    } else {
-        peer.phase = Phase::Saving;
-        unsafe { ffi::SmsSaveYourself(peer.sms, 2, 1, 2, 0); }
-        crate::app_dispatch::State::Sent
     };
     crate::app_dispatch::finish(runtime, &app, transaction_id, crate::app_dispatch::Method::Xsmp, state, &manager.deadline).await
 }

@@ -53,11 +53,13 @@ pub(super) fn run(mode: &str) {
         if unsafe { ffi::IceProcessMessages(ice, ptr::null_mut(), ptr::null_mut()) } != 0 { break; }
     }
     unsafe { SmcCloseConnection(connection, 0, ptr::null_mut()); }
-    assert_eq!(state.saves, usize::from(matches!(mode, "forced" | "after-send" | "phase2" | "interact")), "unexpected shutdown SaveYourself on the wire");
-    assert_eq!(state.dies, usize::from(mode == "forced"), "unexpected Die on the wire");
-    assert_eq!(state.cancels, usize::from(matches!(mode, "after-send" | "phase2" | "interact")), "unexpected ShutdownCancelled on the wire");
-    assert_eq!(state.phase2, 0, "phase 2 started after cancellation");
-    assert_eq!(state.interactions, 0, "interaction was granted after cancellation");
+    let followup = mode.starts_with("followup-");
+    let owned = followup && mode.ends_with("-owned");
+    assert_eq!(state.saves, usize::from(followup || matches!(mode, "forced" | "after-send" | "phase2" | "interact")), "unexpected shutdown SaveYourself on the wire");
+    assert_eq!(state.dies, usize::from(owned || mode == "forced"), "unexpected Die on the wire");
+    assert_eq!(state.cancels, usize::from((followup && !owned) || matches!(mode, "after-send" | "phase2" | "interact")), "unexpected ShutdownCancelled on the wire");
+    assert_eq!(state.phase2, usize::from(owned && mode.contains("-phase2-")), "unexpected phase 2 on the wire");
+    assert_eq!(state.interactions, usize::from(owned && mode.contains("-interact-")), "unexpected interaction on the wire");
     assert!(!state.request_failed, "libSM did not send the client's phase 2 or interaction request");
 }
 
@@ -66,18 +68,29 @@ unsafe extern "C" fn save(connection: SmcConn, data: Data, _kind: c_int, shutdow
     let state = unsafe { &mut *data.cast::<State>() };
     if shutdown != 0 {
         state.saves += 1;
-        if matches!(state.mode.as_str(), "after-send" | "phase2" | "interact") {
+        if state.mode.starts_with("followup-") || matches!(state.mode.as_str(), "after-send" | "phase2" | "interact") {
             println!("xsmp-client-saving");
             let _ = std::io::stdout().flush();
             let _ = std::io::stdin().read_exact(&mut [0_u8]);
         }
-        match state.mode.as_str() {
-            "phase2" => { state.request_failed = unsafe { SmcRequestSaveYourselfPhase2(connection, phase2, data) } == 0; return; }
-            "interact" => { state.request_failed = unsafe { SmcInteractRequest(connection, 1, interact, data) } == 0; return; }
-            _ => {},
+        if state.mode == "phase2" || state.mode.starts_with("followup-phase2-") {
+            state.request_failed = unsafe { SmcRequestSaveYourselfPhase2(connection, phase2, data) } == 0;
+            println!("xsmp-client-followup-requested");
+            let _ = std::io::stdout().flush();
+            return;
+        }
+        if state.mode == "interact" || state.mode.starts_with("followup-interact-") {
+            state.request_failed = unsafe { SmcInteractRequest(connection, 1, interact, data) } == 0;
+            println!("xsmp-client-followup-requested");
+            let _ = std::io::stdout().flush();
+            return;
         }
     }
     unsafe { SmcSaveYourselfDone(connection, 1); }
+    if shutdown != 0 {
+        println!("xsmp-client-followup-requested");
+        let _ = std::io::stdout().flush();
+    }
 }
 
 unsafe extern "C" fn die(_connection: SmcConn, data: Data) {
@@ -96,7 +109,7 @@ unsafe extern "C" fn complete(_connection: SmcConn, data: Data) {
 unsafe extern "C" fn cancel(connection: SmcConn, data: Data) {
     let state = unsafe { &mut *data.cast::<State>() };
     state.cancels += 1;
-    if matches!(state.mode.as_str(), "phase2" | "interact") { unsafe { SmcSaveYourselfDone(connection, 1); } }
+    if state.mode.contains("phase2") || state.mode.contains("interact") { unsafe { SmcSaveYourselfDone(connection, 1); } }
     println!("xsmp-client-cancelled");
     let _ = std::io::stdout().flush();
 }

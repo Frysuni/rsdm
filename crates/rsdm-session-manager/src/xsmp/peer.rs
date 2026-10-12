@@ -68,7 +68,7 @@ impl Peer {
             return Err(SessionError::State("ICE peer belongs to another user".into()));
         }
         let pid = credentials.pid as u32;
-        let process = ProcessHandle::open(pid)?.ok_or_else(|| SessionError::State("ICE peer process exited".into()))?;
+        let process = ProcessHandle::socket_peer(interrupt.as_ref())?;
         let unit = manager.unit_for_pid(pid).await?;
         let records = runtime.clone();
         let app_unit = unit.clone();
@@ -92,11 +92,15 @@ impl Peer {
     }
 
     pub async fn verified(&self, manager: &UserManager, runtime: &Runtime) -> Result<bool, SessionError> {
-        if self.phase == Phase::Closed || self.sms.is_null() || !self.process.alive()? { return Ok(false); }
+        if !self.alive()? { return Ok(false); }
         let records = runtime.clone();
         let unit = self.unit.clone();
         let app = crate::runtime::blocking(move || records.app(&unit)).await?;
         Ok(app.invocation_id == self.invocation && app_processes(manager, &app).await?.contains(&self.pid))
+    }
+
+    pub(super) fn alive(&self) -> Result<bool, SessionError> {
+        Ok(self.phase != Phase::Closed && !self.sms.is_null() && self.process.alive()?)
     }
 
     pub fn fd(&self) -> i32 {

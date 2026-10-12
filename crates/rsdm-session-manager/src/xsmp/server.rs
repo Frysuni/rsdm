@@ -62,7 +62,7 @@ pub(super) async fn run(
     };
     // Cancellation releases clients already saving or interacting. It must
     // precede connection teardown even when the gate rejects new shutdown work.
-    if actions.check().is_err() { server.cancel(); }
+    server.cancel();
     server.peers.clear();
     if let Err(error) = server._authority.remove().await {
         let _ = notices.send(Notice::Failed(error.to_string()));
