@@ -83,7 +83,7 @@ fn logging_filter(logging: &LoggingConfig) -> EnvFilter {
 fn default_filter(level: LoggingLevel) -> String {
     let level = level.as_str();
     format!(
-        "warn,rsdm={level},rsdm_core={level},rsdm_idle={level},rsdm_infra={level},rsdm_lock={level},rsdm_tui={level}"
+        "warn,rsdm={level},rsdm_core={level},rsdm_system={level},rsdm_session_manager={level},rsdm_idle={level},rsdm_infra={level},rsdm_lock={level},rsdm_tui={level}"
     )
 }
 
@@ -118,7 +118,7 @@ mod tests {
     fn default_filter_keeps_dependency_noise_down() {
         assert_eq!(
             default_filter(LoggingLevel::Debug),
-            "warn,rsdm=debug,rsdm_core=debug,rsdm_idle=debug,rsdm_infra=debug,rsdm_lock=debug,rsdm_tui=debug"
+            "warn,rsdm=debug,rsdm_core=debug,rsdm_system=debug,rsdm_session_manager=debug,rsdm_idle=debug,rsdm_infra=debug,rsdm_lock=debug,rsdm_tui=debug"
         );
     }
 }
