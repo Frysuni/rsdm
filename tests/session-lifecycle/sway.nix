@@ -3,6 +3,7 @@
 let
   controller = import ./controller.nix { inherit pkgs; };
   application = import ./window-app.nix { inherit pkgs; };
+  editor = import ./qt-editor.nix { inherit pkgs; };
 in pkgs.testers.runNixOSTest {
   name = "rsdm-sway-windows";
   globalTimeout = 120;
@@ -12,7 +13,8 @@ in pkgs.testers.runNixOSTest {
     users.users.alice = { isNormalUser = true; uid = 1000; group = "alice"; };
     users.groups.alice = {};
     services.getty.autologinUser = "alice";
-    environment.systemPackages = [ rsdm pkgs.sway ];
+    environment.systemPackages = [ rsdm pkgs.sway pkgs.wtype pkgs.kdePackages.kate ];
+    fonts.packages = [ pkgs.dejavu_fonts ];
     environment.etc."rsdm.toml".text = "";
     environment.etc."rsdm-sway.conf".text = ''
       xwayland disable
@@ -88,6 +90,8 @@ in pkgs.testers.runNixOSTest {
         machine.succeed("touch /run/user/1000/owned-finish /run/user/1000/foreign-finish")
         machine.wait_until_fails("test -e " + directory + "/apps/" + application_record["unit"] + ".toml")
         machine.wait_until_fails(user + "systemctl --user is-active --quiet rsdm-foreign-window")
+
+    ${editor}
 
     with subtest("an individual stop records clean exit after one Sway close"):
         machine.succeed(session + "rsdm app --shutdown-timeout 5 --on-timeout cancel -- ${application} clean")
