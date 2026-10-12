@@ -205,6 +205,10 @@ impl Coordinator {
 async fn finish(
     manager: &UserManager, runtime: &Runtime, record: &SessionRecord, provider: &Provider, process: &mut SessionProcess, directory: PathBuf,
 ) -> Result<(), SessionError> {
+    if let Some(unit) = &record.compositor_unit {
+        super::processes::verify_unit_invocation(manager, unit, &record.compositor_invocation).await?;
+    }
+
     let mut failure = None;
     let mut cleanup_manager = manager.clone();
     cleanup_manager.deadline = manager.deadline.reserving(Duration::from_secs(1))?;

@@ -169,12 +169,17 @@ pub(super) fn belongs_to_cgroup(membership: &str, group: &str) -> bool {
 }
 
 pub(super) async fn stop_invocation(manager: &UserManager, unit: &str, expected: &[u8]) -> Result<(), SessionError> {
+    if !verify_unit_invocation(manager, unit, expected).await? { return Ok(()); }
+    manager.stop(unit, std::time::Duration::from_secs(15)).await
+}
+
+pub(super) async fn verify_unit_invocation(manager: &UserManager, unit: &str, expected: &[u8]) -> Result<bool, SessionError> {
     match manager.invocation_id(unit).await {
-        Ok(id) if !expected.is_empty() && id == expected => manager.stop(unit, std::time::Duration::from_secs(15)).await,
+        Ok(id) if expected.iter().any(|byte| *byte != 0) && id == expected => Ok(true),
         Ok(id) if id.iter().all(|byte| *byte == 0) && !manager.active(unit).await?
-            && manager.processes(unit).await?.is_empty() => Ok(()),
+            && manager.processes(unit).await?.is_empty() => Ok(false),
         Ok(_) => Err(SessionError::State(format!("{unit} invocation changed or was never verified"))),
-        Err(SessionError::Bus(error)) if missing_unit(&error) => Ok(()),
+        Err(SessionError::Bus(error)) if missing_unit(&error) => Ok(false),
         Err(error) => Err(error),
     }
 }

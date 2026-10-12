@@ -19,6 +19,9 @@ mod transaction;
 #[path = "coordinator_status_tests.rs"]
 mod status;
 
+#[path = "coordinator_ownership_tests.rs"]
+mod ownership;
+
 #[path = "coordinator_attached_tests.rs"]
 mod attached;
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);

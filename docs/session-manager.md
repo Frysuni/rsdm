@@ -104,6 +104,9 @@ For a recorded compositor unit, status verifies that the captured InvocationID
 is still active and remains unchanged through the query. A missing, stopped or
 reused invocation also reports `partial`; a failed or timed-out query reports
 unknown lifecycle capability with its reason. These probes only read state.
+When a compositor unit is recorded, logout and recovery verify its invocation
+before stopping shared graphical targets or the session anchor. An unverified
+or replaced invocation leaves that infrastructure untouched.
 
 Preparation results include the application InvocationID, transaction, selected
 method, dispatch state, `clean`/`forced`/`cancelled`/`unknown` result and escalation

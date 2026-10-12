@@ -99,6 +99,11 @@ async fn recover_infrastructure(
     record: &mut SessionRecord, failure: &mut Option<SessionError>,
 ) {
     if record.provider == "partial" { return; }
+    if let Err(error) = verify_compositor(manager, runtime, record).await {
+        failure.get_or_insert(error);
+        return;
+    }
+
     let owns_environment = match cleanup_manager.environment().await {
         Ok(environment) => environment.contains(&format!("{GENERATION_ENV}={}", runtime.generation)),
         Err(error) => { failure.get_or_insert(error); false }
@@ -111,7 +116,7 @@ async fn recover_infrastructure(
     if let Err(error) = cleanup_manager.stop(&record.anchor_unit, Duration::from_secs(15)).await { failure.get_or_insert(error); }
     let _ = cleanup_manager.unref(&record.anchor_unit).await;
     if let Some(unit) = record.compositor_unit.clone() {
-        if let Err(error) = stop_compositor(manager, &runtime.generation, record, &unit).await { failure.get_or_insert(error); }
+        if let Err(error) = super::processes::stop_invocation(manager, &unit, &record.compositor_invocation).await { failure.get_or_insert(error); }
         if record.provider == "managed" { let _ = manager.unref(&unit).await; }
     }
     if owns_environment {
@@ -119,12 +124,14 @@ async fn recover_infrastructure(
     }
 }
 
-async fn stop_compositor(manager: &UserManager, generation: &str, record: &mut SessionRecord, unit: &str) -> Result<(), SessionError> {
+async fn verify_compositor(manager: &UserManager, runtime: &Runtime, record: &mut SessionRecord) -> Result<(), SessionError> {
+    let Some(unit) = &record.compositor_unit else { return Ok(()); };
     if record.compositor_invocation.is_empty() && record.provider == "managed" {
-        let Some(id) = super::processes::generation_invocation(manager, unit, generation).await? else { return Ok(()); };
+        let Some(id) = super::processes::generation_invocation(manager, unit, &runtime.generation).await? else { return Ok(()); };
         record.compositor_invocation = id;
     }
-    super::processes::stop_invocation(manager, unit, &record.compositor_invocation).await
+    super::processes::verify_unit_invocation(manager, unit, &record.compositor_invocation).await?;
+    Ok(())
 }
 
 pub(super) fn recovery_deadline(saved: Option<u64>, current: u64) -> Result<u64, SessionError> {
