@@ -44,6 +44,7 @@ mod window_close;
 mod window_capability;
 mod wayfire;
 mod wayland_registry;
+mod kwin;
 mod plain_launch;
 mod partial;
 mod processes;

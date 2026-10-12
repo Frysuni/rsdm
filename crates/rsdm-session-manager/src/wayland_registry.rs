@@ -13,9 +13,9 @@ const INTERFACES: &[&str] = &[
 ];
 
 pub(super) struct Connection {
-    stream: UnixStream,
+    pub(super) stream: UnixStream,
     pub(super) pid: u32,
-    peer: ProcessHandle,
+    pub(super) peer: ProcessHandle,
 }
 
 impl Connection {
@@ -25,11 +25,19 @@ impl Connection {
     }
 
     pub(super) async fn discover(&mut self) -> Result<Vec<String>, SessionError> {
+        let globals = self.globals().await?;
+        Ok(INTERFACES.iter().filter_map(|interface| {
+            let version = globals.values().filter(|(name, _)| name == interface).map(|(_, version)| *version).max()?;
+            Some(format!("{interface} v{version}"))
+        }).collect())
+    }
+
+    pub(super) async fn globals(&mut self) -> Result<BTreeMap<u32, (String, u32)>, SessionError> {
         tokio::time::timeout(Duration::from_secs(2), self.registry()).await
             .map_err(|_| SessionError::State("Wayland registry discovery timed out".into()))?
     }
 
-    async fn registry(&mut self) -> Result<Vec<String>, SessionError> {
+    async fn registry(&mut self) -> Result<BTreeMap<u32, (String, u32)>, SessionError> {
         if !self.peer.alive()? { return Err(invalid("socket owner has exited")); }
         // wl_display.get_registry(new_id=2), then wl_display.sync(new_id=3).
         for words in [[1_u32, (12 << 16) | 1, 2], [1, 12 << 16, 3]] {
@@ -42,13 +50,21 @@ impl Connection {
             if apply_event(&mut globals, object, opcode, &body)? { break; }
         }
         if !self.peer.alive()? { return Err(invalid("socket owner exited during discovery")); }
-        Ok(INTERFACES.iter().filter_map(|interface| {
-            let version = globals.values().filter(|(name, _)| name == interface).map(|(_, version)| *version).max()?;
-            Some(format!("{interface} v{version}"))
-        }).collect())
+        Ok(globals)
     }
 
-    async fn event(&mut self, received: &mut u64) -> Result<(u32, u16, Vec<u8>), SessionError> {
+    pub(super) async fn request(&mut self, object: u32, opcode: u16, body: &[u8]) -> Result<(), SessionError> {
+        if !self.peer.alive()? { return Err(invalid("socket owner has exited")); }
+        let size = body.len() + 8;
+        if size > u16::MAX as usize || size % 4 != 0 { return Err(invalid("invalid request size")); }
+        let mut frame = object.to_ne_bytes().to_vec();
+        frame.extend_from_slice(&(((size as u32) << 16) | u32::from(opcode)).to_ne_bytes());
+        frame.extend_from_slice(body);
+        self.stream.write_all(&frame).await?;
+        Ok(())
+    }
+
+    pub(super) async fn event(&mut self, received: &mut u64) -> Result<(u32, u16, Vec<u8>), SessionError> {
         let mut header = [0_u8; 8];
         self.stream.read_exact(&mut header).await?;
         let object = u32::from_ne_bytes(header[..4].try_into().expect("four-byte word"));

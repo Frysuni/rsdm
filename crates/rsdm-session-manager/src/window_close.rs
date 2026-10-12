@@ -47,13 +47,20 @@ async fn prepare(manager: &UserManager, record: &SessionRecord, app: &AppRecord)
             Err(error) => { tracing::debug!(%error, endpoint = name, unit = app.unit, "window close is unavailable"); }
         }
     }
+    if let Some(path) = super::wayland_registry::socket_path(&record.exported_environment) {
+        match prepare_endpoint(manager, record, app, "WAYLAND_DISPLAY", &path).await {
+            Ok(Some(prepared)) => return Some(prepared),
+            Ok(None) => {},
+            Err(error) => { tracing::debug!(%error, unit = app.unit, "KWin window close is unavailable"); }
+        }
+    }
     None
 }
 
 async fn prepare_endpoint(manager: &UserManager, record: &SessionRecord, app: &AppRecord, name: &str, path: &Path) -> Result<Option<PreparedClose>, SessionError> {
     let Some((connection, events, mut windows)) = connect_endpoint(manager, record, name, path).await? else { return Ok(None); };
     let pids = processes::app_processes(manager, app).await?;
-    windows.sort_by_key(|window| window.id);
+    connection.order_windows(&mut windows);
     for window in windows {
         let Some(pid) = window.pid.and_then(|pid| u32::try_from(pid).ok()).filter(|pid| pids.contains(pid)) else { continue; };
         // Pin one candidate, rather than every browser cgroup process. The
@@ -69,6 +76,12 @@ async fn prepare_endpoint(manager: &UserManager, record: &SessionRecord, app: &A
 pub(super) async fn connect_endpoint(manager: &UserManager, record: &SessionRecord, name: &str, path: &Path) -> Result<Option<(Connection, Events, Vec<Window>)>, SessionError> {
     let mut connection = manager.request(async { Ok(Connection::connect(name, path, record.identity.uid).await) }).await??;
     if !owns_compositor(manager, record, connection.pid()).await? { return Ok(None); }
+    if let Connection::KWin(kwin) = &mut connection {
+        kwin.authenticate(manager).await?;
+        let windows = manager.request(async { Ok(connection.windows().await) }).await??;
+        if !owns_compositor(manager, record, connection.pid()).await? { return Ok(None); }
+        return Ok(Some((connection, Events::KWin, windows)));
+    }
     let subscriber = manager.request(async { Ok(Connection::connect(name, path, record.identity.uid).await) }).await??;
     if subscriber.pid() != connection.pid() || !owns_compositor(manager, record, subscriber.pid()).await? { return Ok(None); }
     let (events, windows) = manager.request(async { Ok(connection.subscribe(subscriber).await) }).await??;
@@ -84,7 +97,7 @@ async fn dispatch(manager: &UserManager, record: &SessionRecord, app: &AppRecord
     manager.request(async {
         manager.actions.check_generation_async().await.map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
         if control.cancelled() || !handle.alive()? { return Ok(Ok(false)); }
-        match events.unchanged(window) {
+        match events.unchanged(connection, window) {
             Ok(true) => {}
             Ok(false) => return Ok(Ok(false)),
             Err(error) => { tracing::debug!(%error, "window events cannot authorize close"); return Ok(Ok(false)); }

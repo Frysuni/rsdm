@@ -7,6 +7,13 @@ use super::{SessionError, bus::UserManager, control_caller::Caller, provider::{P
 pub(super) struct Peer { service: &'static str, pub(super) owner: OwnedUniqueName, process: Caller, broker_pinned: bool }
 
 impl Peer {
+    pub(super) async fn verify_process(&self, connection: &Connection, pid: u32) -> zbus::Result<()> {
+        if !self.broker_pinned || self.process.pid != pid {
+            return Err(zbus::fdo::Error::AccessDenied("bus owner is not the pinned compositor process".into()).into());
+        }
+        self.verify(connection).await
+    }
+
     pub(super) async fn verify_login(&self, connection: &Connection, logind: &Connection,
         identity: &super::identity::SessionIdentity) -> zbus::Result<()> {
         if !self.broker_pinned {

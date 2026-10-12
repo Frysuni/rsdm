@@ -1,4 +1,4 @@
-{ pkgs }:
+{ pkgs, backend ? "wayland" }:
 
 let
   python = pkgs.python3.withPackages (packages: [ packages.pygobject3 ]);
@@ -27,6 +27,7 @@ let
         dialog = Gtk.Window(application=app, title=prefix + " save", transient_for=window)
         dialog.set_default_size(160, 100)
         dialog.present()
+        (directory / (prefix + "-windows")).write_text(str(len(app.get_windows())))
         return True
 
     def activate(application):
@@ -36,6 +37,7 @@ let
             window.connect("close-request", close)
             window.present()
         (directory / (prefix + "-ready")).touch()
+        (directory / (prefix + "-windows")).write_text(str(len(app.get_windows())))
 
     def finished():
         if (directory / (prefix + "-finish")).exists():
@@ -53,6 +55,6 @@ let
   '';
 in pkgs.writeShellScript "wayland-window-app" ''
   export GI_TYPELIB_PATH=${pkgs.lib.makeSearchPathOutput "out" "lib/girepository-1.0" [ pkgs.gtk4 pkgs.pango pkgs.graphene pkgs.gdk-pixbuf pkgs.gobject-introspection pkgs.glib pkgs.harfbuzz ]}
-  export GDK_BACKEND=wayland
+  export GDK_BACKEND=${backend}
   exec ${python}/bin/python3 ${application} "$@"
 ''

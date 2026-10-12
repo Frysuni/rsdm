@@ -353,8 +353,8 @@ Status reports advertised `ext_foreign_toplevel_list_v1`,
 `zwlr_foreign_toplevel_manager_v1` and `org_kde_plasma_window_management`
 versions. Removed globals are excluded. Registry presence alone does not
 establish window PID/cgroup ownership or an authenticated close handle;
-window-close remains unavailable and TERM follows the registered app policy.
-No foreign-toplevel, Plasma or River window-manager interface is bound.
+generic window-close remains unavailable and TERM follows the registered app policy.
+The registry query binds no foreign-toplevel, Plasma or River window-manager interface.
 Titles and app IDs are not used to infer ownership. Unowned attached sessions
 do not connect to the compositor for this probe.
 
@@ -362,8 +362,45 @@ The isolated check covers Labwc 0.20.0 and River 0.4.5 with software rendering.
 Labwc additionally runs registered and foreign GTK Wayland windows to verify
 policy TERM fallback without close requests or configuration changes. River
 is checked for registry discovery only, without binding its exclusive window
-manager API. These checks do not establish KWin standalone close support,
-hardware rendering, XWayland or the full application compatibility matrix.
+manager API. These discovery checks do not establish hardware rendering,
+XWayland or the full application compatibility matrix.
+
+## KWin standalone
+
+The owned KWin backend binds `org_kde_plasma_window_management` v17 and obtains
+each window by UUID. It keeps the resulting resource on the same connection,
+never reuses object IDs, reads PID and parent after `initial_state`, and prefers
+a window without a known parent. Close targets that live resource, without
+activating windows or changing focus, desktops, shortcuts or compositor settings.
+Queued unmap, PID changes, missing state and incomplete frames revoke authorization.
+The existing invocation, cgroup, process handle and durable dispatch checks apply;
+cancellation or a lost reply does not authorize another close for the invocation.
+
+The D-Bus owner of `org.kde.KWin` must have a broker-provided ProcessFD matching
+the Wayland socket peer. A read of `supportInformation` to that unique owner,
+without service activation, establishes KWin 6.x starting with 6.4. Earlier versions use
+claimed X11 PIDs and cannot authorize this backend. Current KWin obtains native
+Wayland PIDs from client credentials and XWayland PIDs through XRes; a forged
+`_NET_WM_PID` does not grant ownership.
+See the PID implementations in [KWin 6.3](https://github.com/KDE/kwin/blob/v6.3.0/src/x11window.cpp)
+and [KWin 6.4](https://github.com/KDE/kwin/blob/v6.4.0/src/x11window.cpp), and the
+[Plasma window protocol](https://github.com/KDE/plasma-wayland-protocols/blob/master/src/protocols/plasma-window-management.xml).
+
+KWin's normal interface authorization needs the installed
+`packaging/applications/org.rsdm.SessionManager.desktop`, with an `Exec` path
+matching the installed executable. The Nix source package installs it using its
+store path; Arch packaging uses `/usr/bin/rsdm`. Other installations should copy
+it into the application directory and adjust `Exec` to the binary's absolute path.
+KService must also have a working standard XDG application catalog. A missing
+protocol, permission, version proof or compositor invocation reports a limitation
+and leaves fallback to app policy. GNOME/Plasma native providers retain desktop
+delegation instead of using this backend.
+
+The isolated KWin check uses virtual software rendering, registered and foreign
+GTK windows on Wayland and XWayland, cancellation and repeat logout, save dialogs,
+and clean individual exit. It also forges a foreign X11 window's claimed PID.
+These checks do not establish hardware rendering, other KWin versions or the full
+application compatibility matrix.
 
 ## XSMP
 

@@ -40,6 +40,10 @@ package() {
   cd "$srcdir/$pkgname-$pkgver"
 
   install -Dm755 target/release/rsdm "$pkgdir/usr/bin/rsdm"
+  if [[ -f packaging/applications/org.rsdm.SessionManager.desktop ]]; then
+    install -Dm644 packaging/applications/org.rsdm.SessionManager.desktop \
+      "$pkgdir/usr/share/applications/org.rsdm.SessionManager.desktop"
+  fi
   install -Dm644 packaging/systemd/rsdm.service \
     "$pkgdir/usr/lib/systemd/system/rsdm.service"
   install -Dm644 packaging/systemd/rsdm@.service \

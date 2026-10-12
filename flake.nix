@@ -49,6 +49,11 @@
         craneLib.buildPackage (commonArgs // {
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
           allowSubstitutes = false;
+          postInstall = ''
+            install -Dm644 ${./packaging/applications/org.rsdm.SessionManager.desktop} "$out/share/applications/org.rsdm.SessionManager.desktop"
+            substituteInPlace "$out/share/applications/org.rsdm.SessionManager.desktop" \
+              --replace-fail 'Exec=/usr/bin/rsdm' "Exec=$out/bin/rsdm"
+          '';
         });
 
       # Installs the matching binary from the latest stable GitHub release.
@@ -127,6 +132,7 @@
           native-niri = import ./tests/session-lifecycle/niri.nix { inherit pkgs rsdm; };
           sway-windows = import ./tests/session-lifecycle/sway.nix { inherit pkgs rsdm; };
           hyprland-windows = import ./tests/session-lifecycle/hyprland.nix { inherit pkgs rsdm; };
+          kwin-windows = import ./tests/session-lifecycle/kwin.nix { inherit pkgs rsdm; };
           wayfire-discovery = import ./tests/session-lifecycle/wayfire.nix { inherit pkgs rsdm; };
           wayland-discovery = import ./tests/session-lifecycle/wayland-discovery.nix { inherit pkgs rsdm; };
           native-de-handoff = import ./tests/session-lifecycle/native.nix { inherit pkgs rsdm; };

@@ -33,7 +33,7 @@ impl Broker {
 #[zbus_macros::interface(name = "org.freedesktop.DBus")]
 impl Broker {
     fn get_name_owner(&self, name: &str) -> zbus::fdo::Result<String> {
-        assert!(matches!(name, "org.gnome.SessionManager" | "org.kde.LogoutPrompt" | "org.kde.ksmserver"));
+        assert!(matches!(name, "org.gnome.SessionManager" | "org.kde.LogoutPrompt" | "org.kde.ksmserver" | "org.kde.KWin"));
         if self.gnome_missing && name == "org.gnome.SessionManager" { return Err(zbus::fdo::Error::NameHasNoOwner("GNOME is absent".into())); }
         let activated = self.activation.as_ref().is_some_and(|state| state.calls.load(std::sync::atomic::Ordering::SeqCst) != 0);
         if self.missing && !(name == "org.kde.ksmserver" && self.activation.is_some()) && !activated {
@@ -255,3 +255,6 @@ mod capability_tests;
 
 #[path = "native_attached_tests.rs"]
 mod attached_tests;
+
+#[path = "kwin_auth_tests.rs"]
+mod kwin_tests;

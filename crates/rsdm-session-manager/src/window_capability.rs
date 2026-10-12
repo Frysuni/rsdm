@@ -47,6 +47,14 @@ async fn probe(manager: &UserManager, record: &SessionRecord) -> Capability {
     if record.exported_environment.iter().any(|(name, _)| name == "WAYLAND_DISPLAY") {
         let discovery = match discover_wayland(manager, record).await {
             Ok(interfaces) if interfaces.is_empty() => "WAYLAND_DISPLAY: no foreign-toplevel or Plasma window-management protocol is advertised.".into(),
+            Ok(interfaces) if interfaces.iter().any(|interface| interface.starts_with("org_kde_plasma_window_management ")) => {
+                let path = super::wayland_registry::socket_path(&record.exported_environment).expect("discovered Wayland endpoint");
+                match window_close::connect_endpoint(manager, record, "WAYLAND_DISPLAY", &path).await {
+                    Ok(Some(_)) => return Capability::new("window-close", "available", "WAYLAND_DISPLAY: authenticated KWin version and live Plasma window handles; every app still requires PID/cgroup checks."),
+                    Ok(None) => "WAYLAND_DISPLAY: KWin peer does not match the compositor invocation.".into(),
+                    Err(error) => format!("WAYLAND_DISPLAY: {error}"),
+                }
+            }
             Ok(interfaces) => format!("WAYLAND_DISPLAY: advertised {}; registry discovery alone provides no verified window PID/cgroup or close handle. TERM fallback remains subject to app policy.", interfaces.join(", ")),
             Err(error) => format!("WAYLAND_DISPLAY: {error}"),
         };
