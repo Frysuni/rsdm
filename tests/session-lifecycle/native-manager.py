@@ -17,15 +17,19 @@ PLASMA = "org.kde.LogoutPrompt"
 
 
 class Manager(dbus.service.Object):
-    def __init__(self, bus, desktop, loop):
+    def __init__(self, bus, desktop, loop, role):
         self.loop = loop
-        self.names = [dbus.service.BusName("org.rsdm.TestNative", bus)]
+        self.names = []
+        if role != "prompt-only":
+            self.names.append(dbus.service.BusName("org.rsdm.TestNative", bus))
         if desktop == "GNOME":
             self.names.append(dbus.service.BusName(GNOME, bus))
             path = "/org/gnome/SessionManager"
         else:
-            self.names.append(dbus.service.BusName("org.kde.ksmserver", bus))
-            self.names.append(dbus.service.BusName(PLASMA, bus))
+            if role != "prompt-only":
+                self.names.append(dbus.service.BusName("org.kde.ksmserver", bus))
+            if role != "on-demand":
+                self.names.append(dbus.service.BusName(PLASMA, bus))
             path = "/LogoutPrompt"
         super().__init__(bus, path)
 
@@ -91,9 +95,13 @@ class Manager(dbus.service.Object):
 DBusGMainLoop(set_as_default=True)
 bus = dbus.SessionBus()
 loop = GLib.MainLoop()
-manager = Manager(bus, sys.argv[1], loop)
-(RUNTIME / "display-alive").touch()
-if len(sys.argv) < 3 or sys.argv[2] != "defer":
-    manager.Activate()
-(RUNTIME / "native-manager-ready").touch()
+role = sys.argv[2] if len(sys.argv) > 2 else "desktop"
+manager = Manager(bus, sys.argv[1], loop, role)
+if role == "prompt-only":
+    (RUNTIME / "native-prompt-started").touch()
+else:
+    (RUNTIME / "display-alive").touch()
+    if role != "defer":
+        manager.Activate()
+    (RUNTIME / "native-manager-ready").touch()
 loop.run()

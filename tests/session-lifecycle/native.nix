@@ -23,6 +23,11 @@ let
   detached = pkgs.writeShellScript "test-detached-session" ''
     systemctl --user start test-external.service
   '';
+  promptActivation = pkgs.writeTextDir "share/dbus-1/services/org.kde.LogoutPrompt.service" ''
+    [D-BUS Service]
+    Name=org.kde.LogoutPrompt
+    Exec=${native} KDE prompt-only
+  '';
 in
 pkgs.testers.runNixOSTest {
   name = "rsdm-native-de-handoff";
@@ -32,6 +37,7 @@ pkgs.testers.runNixOSTest {
     users.users.alice = { isNormalUser = true; uid = 1000; group = "alice"; };
     users.groups.alice = {};
     security.polkit.enable = true;
+    services.dbus.packages = [ promptActivation ];
     security.pam.services.login.startSession = true;
     systemd.user.targets.test-native = {
       wants = [ "graphical-session.target" ];
@@ -111,6 +117,8 @@ pkgs.testers.runNixOSTest {
             machine.wait_until_fails("systemctl is-active --quiet rsdm-test-session")
             machine.succeed("grep -q saved " + runtime + "/app-ordinary")
             machine.fail("test -e " + runtime + "/display-alive")
+
+    ${import ./native-activation.nix { inherit native; }}
 
     with subtest("an external detached launcher is observed through its native graphical lifecycle"):
         machine.wait_until_succeeds("test \"$(systemctl show --property=LoadState --value rsdm-test-session.service)\" = not-found")

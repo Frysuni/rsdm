@@ -4,6 +4,66 @@ use std::{sync::{Arc, Mutex}, time::Duration};
 
 use super::*;
 
+struct Broker {
+    uid: Option<u32>,
+    pid: Option<u32>,
+    replaced: bool,
+    missing: bool,
+    owner_queries: std::sync::atomic::AtomicUsize,
+    descriptor: Option<std::os::fd::OwnedFd>,
+    activation: Option<Arc<Activation>>,
+    disable: Option<crate::action_gate::ActionGate>,
+}
+
+struct Activation { calls: std::sync::atomic::AtomicUsize, lost: bool, replace_desktop: bool }
+
+impl Broker {
+    fn current() -> Self {
+        // SAFETY: geteuid has no preconditions.
+        Self { uid: Some(unsafe { libc::geteuid() }), pid: Some(std::process::id()), replaced: false,
+            missing: false, owner_queries: Default::default(), descriptor: None, activation: None, disable: None }
+    }
+}
+
+#[zbus_macros::interface(name = "org.freedesktop.DBus")]
+impl Broker {
+    fn get_name_owner(&self, name: &str) -> zbus::fdo::Result<String> {
+        assert!(matches!(name, "org.gnome.SessionManager" | "org.kde.LogoutPrompt" | "org.kde.ksmserver"));
+        let activated = self.activation.as_ref().is_some_and(|state| state.calls.load(std::sync::atomic::Ordering::SeqCst) != 0);
+        if self.missing && !(name == "org.kde.ksmserver" && self.activation.is_some()) && !activated {
+            return Err(zbus::fdo::Error::NameHasNoOwner("desktop is absent".into()));
+        }
+        if name == "org.kde.ksmserver" {
+            let replaced = activated && self.activation.as_ref().is_some_and(|state| state.replace_desktop);
+            return Ok(if replaced { ":1.10" } else { ":1.9" }.into());
+        }
+        let query = self.owner_queries.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if query != 0 && let Some(actions) = &self.disable { actions.close(); }
+        Ok(if self.replaced && query != 0 { ":1.2" } else { ":1.1" }.into())
+    }
+
+    fn get_connection_credentials(&self, name: &str) -> zbus::fdo::ConnectionCredentials {
+        use std::os::fd::AsFd;
+        assert!(matches!(name, ":1.1" | ":1.9"));
+        let mut credentials = zbus::fdo::ConnectionCredentials::default();
+        if let Some(uid) = self.uid { credentials = credentials.set_unix_user_id(uid); }
+        if let Some(pid) = self.pid { credentials = credentials.set_process_id(pid); }
+        if let Some(descriptor) = &self.descriptor {
+            credentials = credentials.set_process_fd(descriptor.as_fd().try_clone_to_owned().unwrap().into());
+        }
+        credentials
+    }
+
+    fn start_service_by_name(&self, name: &str, flags: u32) -> zbus::fdo::Result<u32> {
+        assert_eq!(name, "org.kde.LogoutPrompt");
+        assert_eq!(flags, 0);
+        let activation = self.activation.as_ref().expect("unexpected native service activation");
+        activation.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if activation.lost { return Err(zbus::fdo::Error::NoReply("activation reply lost".into())); }
+        Ok(1)
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Reply { Success, Lost, Pending }
 
@@ -14,7 +74,9 @@ struct State {
 }
 
 impl State {
-    async fn request(&self, method: &str) -> zbus::fdo::Result<()> {
+    async fn request(&self, method: &str, header: zbus::message::Header<'_>) -> zbus::fdo::Result<()> {
+        assert_eq!(header.destination().unwrap().as_str(), ":1.1");
+        assert!(header.primary().flags().contains(zbus::message::Flags::NoAutoStart));
         self.calls.lock().unwrap().push(method.to_string());
         self.accepted.notify_one();
         match self.reply {
@@ -29,14 +91,14 @@ struct Gnome(Arc<State>);
 
 #[zbus_macros::interface(name = "org.gnome.SessionManager")]
 impl Gnome {
-    async fn logout(&self, mode: u32) -> zbus::fdo::Result<()> {
+    async fn logout(&self, mode: u32, #[zbus(header)] header: zbus::message::Header<'_>) -> zbus::fdo::Result<()> {
         assert_eq!(mode, 0);
-        self.0.request("Logout").await
+        self.0.request("Logout", header).await
     }
 
-    async fn reboot(&self) -> zbus::fdo::Result<()> { self.0.request("Reboot").await }
+    async fn reboot(&self, #[zbus(header)] header: zbus::message::Header<'_>) -> zbus::fdo::Result<()> { self.0.request("Reboot", header).await }
 
-    async fn shutdown(&self) -> zbus::fdo::Result<()> { self.0.request("Shutdown").await }
+    async fn shutdown(&self, #[zbus(header)] header: zbus::message::Header<'_>) -> zbus::fdo::Result<()> { self.0.request("Shutdown", header).await }
 }
 
 struct Plasma(Arc<State>);
@@ -44,16 +106,16 @@ struct Plasma(Arc<State>);
 #[zbus_macros::interface(name = "org.kde.LogoutPrompt")]
 impl Plasma {
     #[zbus(name = "promptLogout")]
-    async fn prompt_logout(&self) -> zbus::fdo::Result<()> { self.0.request("promptLogout").await }
+    async fn prompt_logout(&self, #[zbus(header)] header: zbus::message::Header<'_>) -> zbus::fdo::Result<()> { self.0.request("promptLogout", header).await }
 
     #[zbus(name = "promptReboot")]
-    async fn prompt_reboot(&self) -> zbus::fdo::Result<()> { self.0.request("promptReboot").await }
+    async fn prompt_reboot(&self, #[zbus(header)] header: zbus::message::Header<'_>) -> zbus::fdo::Result<()> { self.0.request("promptReboot", header).await }
 
     #[zbus(name = "promptShutDown")]
-    async fn prompt_shut_down(&self) -> zbus::fdo::Result<()> { self.0.request("promptShutDown").await }
+    async fn prompt_shut_down(&self, #[zbus(header)] header: zbus::message::Header<'_>) -> zbus::fdo::Result<()> { self.0.request("promptShutDown", header).await }
 }
 
-async fn fixture(reply: Reply) -> (UserManager, zbus::Connection, Arc<State>) {
+async fn fixture(reply: Reply, broker: Broker) -> (UserManager, zbus::Connection, Arc<State>) {
     let state = Arc::new(State { calls: Mutex::new(Vec::new()), accepted: tokio::sync::Notify::new(), reply });
     let gnome = Gnome(state.clone());
     let plasma = Plasma(state.clone());
@@ -61,6 +123,7 @@ async fn fixture(reply: Reply) -> (UserManager, zbus::Connection, Arc<State>) {
     let server = tokio::spawn(async move {
         zbus::connection::Builder::unix_stream(server_socket).p2p()
             .server(zbus::Guid::generate()).unwrap()
+            .serve_at("/org/freedesktop/DBus", broker).unwrap()
             .serve_at("/org/gnome/SessionManager", gnome).unwrap()
             .serve_at("/LogoutPrompt", plasma).unwrap().build().await.unwrap()
     });
@@ -71,7 +134,7 @@ async fn fixture(reply: Reply) -> (UserManager, zbus::Connection, Arc<State>) {
 #[tokio::test]
 async fn native_methods_are_dispatched_once_with_and_without_a_reply() {
     for reply in [Reply::Success, Reply::Lost] {
-        let (manager, _server, state) = fixture(reply).await;
+        let (manager, _server, state) = fixture(reply, Broker::current()).await;
         for kind in [ProviderKind::Gnome, ProviderKind::Plasma] {
             let provider = Provider { kind, native_unit: None, logout_command: Vec::new() };
             for action in ["logout", "reboot", "poweroff"] {
@@ -89,7 +152,7 @@ async fn native_methods_are_dispatched_once_with_and_without_a_reply() {
 
 #[tokio::test]
 async fn an_expired_shared_deadline_prevents_native_dispatch() {
-    let (manager, _server, state) = fixture(Reply::Success).await;
+    let (manager, _server, state) = fixture(Reply::Success, Broker::current()).await;
     manager.deadline.set(1);
     let provider = Provider { kind: ProviderKind::Gnome, native_unit: None, logout_command: Vec::new() };
     assert!(provider.delegate(&manager, "logout").await.is_err());
@@ -98,7 +161,7 @@ async fn an_expired_shared_deadline_prevents_native_dispatch() {
 
 #[tokio::test]
 async fn revising_the_deadline_interrupts_a_pending_native_reply() {
-    let (manager, _server, state) = fixture(Reply::Pending).await;
+    let (manager, _server, state) = fixture(Reply::Pending, Broker::current()).await;
     let deadline = manager.deadline.clone();
     let provider = Provider { kind: ProviderKind::Gnome, native_unit: None, logout_command: Vec::new() };
     let worker = tokio::spawn(async move { provider.delegate(&manager, "logout").await });
@@ -111,10 +174,65 @@ async fn revising_the_deadline_interrupts_a_pending_native_reply() {
 
 #[tokio::test]
 async fn unsupported_actions_and_providers_do_not_dispatch() {
-    let (manager, _server, state) = fixture(Reply::Success).await;
+    let (manager, _server, state) = fixture(Reply::Success, Broker::current()).await;
     let provider = Provider { kind: ProviderKind::Gnome, native_unit: None, logout_command: Vec::new() };
     assert!(provider.delegate(&manager, "suspend").await.is_err());
     let provider = Provider { kind: ProviderKind::Managed, native_unit: None, logout_command: Vec::new() };
     assert!(provider.delegate(&manager, "logout").await.is_err());
     assert!(state.calls.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn missing_changed_foreign_or_unidentified_owners_cannot_receive_native_shutdown() {
+    for kind in [ProviderKind::Gnome, ProviderKind::Plasma] {
+        for invalid in ["missing", "changed", "foreign", "no-uid", "no-pid", "zero-pid"] {
+            let mut broker = Broker::current();
+            match invalid {
+                "missing" => broker.missing = true,
+                "changed" => broker.replaced = true,
+                "foreign" => broker.uid = broker.uid.map(|uid| uid ^ 1),
+                "no-uid" => broker.uid = None,
+                "no-pid" => broker.pid = None,
+                "zero-pid" => broker.pid = Some(0),
+                _ => unreachable!(),
+            }
+            let (manager, _server, state) = fixture(Reply::Success, broker).await;
+            let provider = Provider { kind, native_unit: None, logout_command: Vec::new() };
+            assert!(provider.delegate(&manager, "logout").await.is_err(), "{invalid}");
+            assert!(state.calls.lock().unwrap().is_empty(), "{invalid}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_exited_broker_pidfd_cannot_be_replaced_by_a_live_numeric_pid() {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    let mut child = tokio::process::Command::new("sleep").arg("30").kill_on_drop(true).spawn().unwrap();
+    // SAFETY: pidfd_open creates an owned descriptor for this unreaped child.
+    let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, child.id().unwrap(), 0) };
+    assert!(raw >= 0);
+    let descriptor = unsafe { OwnedFd::from_raw_fd(raw as i32) };
+    child.kill().await.unwrap();
+    child.wait().await.unwrap();
+    let mut broker = Broker::current();
+    broker.descriptor = Some(descriptor);
+    let (manager, _server, state) = fixture(Reply::Success, broker).await;
+    let provider = Provider { kind: ProviderKind::Gnome, native_unit: None, logout_command: Vec::new() };
+    assert!(provider.delegate(&manager, "logout").await.is_err());
+    assert!(state.calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn disabling_during_the_final_owner_query_prevents_native_dispatch() {
+    let actions = crate::action_gate::ActionGate::default();
+    let mut broker = Broker::current();
+    broker.disable = Some(actions.clone());
+    let (mut manager, _server, state) = fixture(Reply::Success, broker).await;
+    manager.actions = actions;
+    let provider = Provider { kind: ProviderKind::Gnome, native_unit: None, logout_command: Vec::new() };
+    assert!(provider.delegate(&manager, "logout").await.is_err());
+    assert!(state.calls.lock().unwrap().is_empty());
+}
+
+#[path = "provider_activation_tests.rs"]
+mod activation_tests;

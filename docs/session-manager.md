@@ -210,6 +210,15 @@ completed: it may still show a dialog, cancel or wait for an application. RSDM
 keeps observing the lifecycle. Native API rejection leaves the compositor alive
 and returns an error; normal native logout has no forced generic fallback.
 
+Before delegation, RSDM resolves the current unique bus owner and authenticates
+its UID and pinned process. It rechecks that owner immediately before dispatch
+on the same bus connection, and addresses the unique owner with `NoAutoStart`.
+A changed or exited owner cannot redirect the request to a replacement desktop
+service. When Plasma's on-demand `LogoutPrompt` helper has no owner, RSDM first
+authenticates the live `ksmserver`, explicitly activates the helper, then pins
+its owner and rechecks both processes before submitting shutdown. A lost
+activation or shutdown reply is not retried.
+
 Explicit startup overrides:
 
 ```sh

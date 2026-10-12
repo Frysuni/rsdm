@@ -32,6 +32,7 @@ mod env;
 mod identity;
 mod lifecycle;
 mod native_compositor;
+mod native_delegate;
 mod niri;
 mod compositor_socket;
 mod sway;

@@ -75,35 +75,6 @@ impl Provider {
             _ => manager.active(super::units::SESSION_TARGET).await,
         }
     }
-
-    pub async fn delegate(&self, manager: &UserManager, action: &str) -> Result<(), SessionError> {
-        manager.deadline.bound(async {
-            let connection = manager.connection();
-            match self.kind {
-                ProviderKind::Gnome => {
-                    let proxy = manager.request(zbus::Proxy::new(&connection, "org.gnome.SessionManager", "/org/gnome/SessionManager", "org.gnome.SessionManager")).await?;
-                    match action {
-                        "logout" => manager.request(proxy.call::<_, _, ()>("Logout", &(0_u32,))).await?,
-                        "reboot" => manager.request(proxy.call::<_, _, ()>("Reboot", &())).await?,
-                        "poweroff" => manager.request(proxy.call::<_, _, ()>("Shutdown", &())).await?,
-                        _ => return Err(SessionError::State("unsupported native session action".into())),
-                    }
-                }
-                ProviderKind::Plasma => {
-                    let method = match action {
-                        "logout" => "promptLogout",
-                        "reboot" => "promptReboot",
-                        "poweroff" => "promptShutDown",
-                        _ => return Err(SessionError::State("unsupported native session action".into())),
-                    };
-                    let proxy = manager.request(zbus::Proxy::new(&connection, "org.kde.LogoutPrompt", "/LogoutPrompt", "org.kde.LogoutPrompt")).await?;
-                    manager.request(proxy.call::<_, _, ()>(method, &())).await?;
-                }
-                _ => return Err(SessionError::State("this provider does not delegate desktop shutdown".into())),
-            }
-            Ok(())
-        }).await
-    }
 }
 
 fn detect_provider(argv: &[String], desktop: &str) -> ProviderKind {
