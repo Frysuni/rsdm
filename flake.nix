@@ -133,6 +133,7 @@
           sway-windows = import ./tests/session-lifecycle/sway.nix { inherit pkgs rsdm; };
           browser-windows = import ./tests/session-lifecycle/browser-windows.nix { inherit pkgs rsdm; };
           flatpak-windows = import ./tests/session-lifecycle/flatpak-windows.nix { inherit pkgs rsdm; };
+          media-windows = import ./tests/session-lifecycle/media-windows.nix { inherit pkgs rsdm; };
           scope-lifetime = import ./tests/session-lifecycle/scope-lifetime.nix { inherit pkgs rsdm; };
           hyprland-windows = import ./tests/session-lifecycle/hyprland.nix { inherit pkgs rsdm; };
           kwin-windows = import ./tests/session-lifecycle/kwin.nix { inherit pkgs rsdm; };

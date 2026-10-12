@@ -343,6 +343,14 @@ their unsaved text and save dialogs across repeated logout, and leaves foreign
 editor instances and the compositor unchanged. Hardware rendering, XWayland and attached-compositor close
 are outside that verification.
 
+The separate media VM check runs actual OBS, Mumble and Waybar clients on
+headless Sway with software graphics. An idle OBS window closes cleanly;
+Mumble retains its Audio Tuning Wizard across cancelled and repeated logout;
+Waybar's layer surface has no toplevel window and uses the owned TERM fallback.
+Each case keeps a foreign instance and the compositor unchanged. The check
+does not cover OBS recording or streaming, Mumble voice connections, or other
+application settings.
+
 ## Hyprland window close
 
 Finalize captures `HYPRLAND_INSTANCE_SIGNATURE` for the generation. IPC paths
