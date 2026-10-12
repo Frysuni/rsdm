@@ -155,7 +155,9 @@ async fn cancellation_reaches_worker_before_shutdown_messages() {
     cases.push("followup-die-cgroup-forced".into());
     cases.push("followup-die-lease".into());
     for request in ["phase2", "die", "interact"] {
-        for change in ["owned", "reused"] { cases.push(format!("followup-{request}-scope-{change}")); }
+        for change in ["owned", "reused", "lineage-owned", "lineage-reused", "lineage-revoked"] {
+            cases.push(format!("followup-{request}-scope-{change}"));
+        }
     }
     cases.push("group".into());
     cases.extend(["quota-startup", "quota-local", "quota-cancel", "quota-disabled", "quota-shutdown", "quota-deadline"].map(str::to_string));

@@ -14,6 +14,8 @@ pub(super) struct MigratedScope {
     pub invocation_id: Vec<u8>,
     #[serde(default)]
     pub lifetime_group: Option<super::app_lifetime_group::GroupIdentity>,
+    #[serde(default)]
+    pub lineage: Option<Vec<super::app_origin::OriginalProcess>>,
 }
 
 pub(super) fn registered_scope(app: &AppRecord) -> Result<Option<&MigratedScope>, SessionError> {
@@ -22,6 +24,11 @@ pub(super) fn registered_scope(app: &AppRecord) -> Result<Option<&MigratedScope>
         || !scope.unit.ends_with(".scope") || scope.invocation_id.is_empty() || scope.invocation_id.iter().all(|byte| *byte == 0)
     {
         return Err(SessionError::State("application scope has no authenticated origin".into()));
+    }
+    if let Some(lineage) = &scope.lineage {
+        if lineage.iter().any(|process| process.pid == 0 || process.pidfd_id == 0)
+            || !lineage.contains(app.original_process.as_ref().expect("verified original process"))
+        { return Err(SessionError::State("application scope lineage has no authenticated origin".into())); }
     }
     Ok(Some(scope))
 }
@@ -79,8 +86,8 @@ async fn discover(manager: &UserManager, app: &AppRecord) -> Result<Option<Migra
     if initial != current || manager.unit_for_pid(main).await? != unit || manager.invocation_id(&unit).await? != invocation_id
         || !processes::verify_invocation(manager, app).await? || !handle.alive()?
     { return Ok(None); }
-    for handle in owned { if !handle.alive()? { return Ok(None); } }
-    Ok(Some(MigratedScope { unit, invocation_id, lifetime_group: Some(lifetime_group) }))
+    for handle in owned.handles { if !handle.alive()? { return Ok(None); } }
+    Ok(Some(MigratedScope { unit, invocation_id, lifetime_group: Some(lifetime_group), lineage: owned.lineage }))
 }
 
 pub(super) async fn processes(manager: &UserManager, scope: &MigratedScope) -> Result<Vec<u32>, SessionError> {
@@ -90,9 +97,27 @@ pub(super) async fn processes(manager: &UserManager, scope: &MigratedScope) -> R
         Err(SessionError::Bus(error)) if missing_unit(&error) => return Ok(Vec::new()),
         Err(error) => return Err(error),
     };
-    let pids = records.into_iter().map(|(_, pid, _)| pid).collect();
+    let pids = records.into_iter().map(|(_, pid, _)| pid).collect::<Vec<_>>();
     if !current(manager, scope).await? { return Ok(Vec::new()); }
-    Ok(pids)
+    let Some(lineage) = scope.lineage.clone() else { return Ok(pids); };
+    runtime::blocking(move || {
+        let mut owned = Vec::new();
+        for pid in pids {
+            let Some(handle) = ProcessHandle::open(pid)? else { continue; };
+            if super::app_scope_lineage::owned(pid, &handle, &lineage)? { owned.push(pid); }
+        }
+        Ok(owned)
+    }).await
+}
+
+pub(super) async fn owns_process(scope: &MigratedScope, pid: u32, handle: &ProcessHandle) -> Result<bool, SessionError> {
+    let Some(lineage) = scope.lineage.clone() else { return Ok(handle.alive()?); };
+    let identity = handle.id()?;
+    let owned = runtime::blocking(move || {
+        let Some(current) = ProcessHandle::open(pid)? else { return Ok(false); };
+        Ok(current.id()? == identity && super::app_scope_lineage::owned(pid, &current, &lineage)?)
+    }).await?;
+    Ok(owned && handle.alive()?)
 }
 
 pub(super) async fn group(manager: &UserManager, scope: &MigratedScope) -> Result<Option<String>, SessionError> {

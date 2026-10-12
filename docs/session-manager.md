@@ -173,14 +173,27 @@ command to run; kernels with anonymous pidfds and legacy records provide no
 original-process ID. This metadata does not itself authorize another cgroup.
 
 If that original process moves into a transient systemd scope, RSDM can capture
-the scope while the service invocation and original pidfd ID still match. Every
-scope member must be the original process or a live descendant, with verified
-kernel cgroup membership. The scope's InvocationID is retained in the private
-app record and rechecked for window close, XSMP and signals. RSDM observes both
-groups, including scope children after the service becomes inactive. A changed
-scope invocation is an ownership error. Legacy records and unsupported pidfd
+the scope while the service invocation and original pidfd ID still match. Scope
+members require verified kernel cgroup membership. When every member is the
+original process or a live descendant, the whole scope is owned. A mixed scope
+also records the pidfd IDs of its verified lineage; only those processes and
+their live descendants can receive close requests or signals. Unrelated or
+reparented peers do not gain ownership by sharing that scope. Exit observation
+still waits for the whole scope to empty. The scope's InvocationID is retained
+in the private app record and rechecked for window close, XSMP and signals.
+RSDM observes both groups, including scope children after the service becomes
+inactive. A changed scope invocation is an ownership error. Legacy records and unsupported pidfd
 identities cannot adopt a scope; an uncaptured live original process prevents
 reporting a clean exit after its service stops.
+
+The isolated Flatpak check installs a local GTK fixture and runtime, using
+Flatpak's actual sandbox, process scopes and D-Bus proxies. It verifies clean
+Wayland close, preservation of a save dialog across repeated logout, and an
+unchanged foreign instance with the same app ID. The runtime mounts the Nix
+store read-only for its test dependencies. Other Flatpak applications and
+runtimes remain outside that verification. A process whose ancestry vanished
+before capture remains unowned; its continued scope membership prevents a
+clean exit and does not authorize a forced signal.
 
 With unified cgroups and stable pidfs IDs, a private lifetime observer remains
 in the launch service. It keeps that service active if the original process exits

@@ -32,6 +32,7 @@ async fn current_process(manager: &Proxy<'_>, app: &AppRecord, pid: u32, handle:
     let scope_service = unit_proxy(manager, &scope.unit, "Scope").await?;
     let group: String = scope_service.get_property("ControlGroup").await?;
     Ok(group_contains(group, pid, handle).await?
+        && super::app_scope::owns_process(scope, pid, handle).await.map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?
         && unit.get_property::<Vec<u8>>("InvocationID").await? == scope.invocation_id)
 }
 

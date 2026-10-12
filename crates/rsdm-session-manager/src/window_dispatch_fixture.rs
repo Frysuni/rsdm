@@ -18,6 +18,7 @@ pub(super) struct State {
     pub scope_present: AtomicBool,
     pub scope_pid: AtomicU32,
     pub scope_foreign_pid: AtomicU32,
+    pub scope_extra_pid: AtomicU32,
     pub scope_group: Mutex<String>,
     pub scope_transient: AtomicBool,
     pub scope_reads: AtomicUsize,
@@ -56,6 +57,8 @@ impl Manager {
         let mut pids = if present.load(Ordering::SeqCst) { vec![("app".into(), pid, "app".into())] } else { Vec::new() };
         let foreign = self.0.scope_foreign_pid.load(Ordering::SeqCst);
         if scope && foreign != 0 { pids.push(("foreign".into(), foreign, "foreign".into())); }
+        let extra = self.0.scope_extra_pid.load(Ordering::SeqCst);
+        if scope && extra != 0 { pids.push(("extra".into(), extra, "extra".into())); }
         Ok(pids)
     }
 
@@ -130,6 +133,7 @@ impl Fixture {
             main_pid: AtomicU32::new(std::process::id()), control_pid: AtomicU32::new(0), present: AtomicBool::new(true),
             group: Mutex::new(group.clone()), reads: AtomicUsize::new(0), scope_invocation: AtomicU8::new(1),
             scope_present: AtomicBool::new(false), scope_foreign_pid: AtomicU32::new(0), scope_group: Mutex::new(group),
+            scope_extra_pid: AtomicU32::new(0),
             scope_pid: AtomicU32::new(std::process::id()),
             scope_transient: AtomicBool::new(true), scope_reads: AtomicUsize::new(0), scope_missing_at: AtomicUsize::new(usize::MAX) });
         let shared = state.clone();

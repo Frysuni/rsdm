@@ -108,12 +108,17 @@ async fn current_dedicated_cgroup_authorizes_one_close_without_nested_request_sl
 
 #[tokio::test]
 async fn migrated_scope_ownership_is_rechecked_after_waiting_for_the_dispatch_slot() {
-    for revoked in ["none", "escaped-main", "service-ended", "scope", "app", "lifetime"] {
+    for revoked in ["none", "escaped-main", "service-ended", "scope", "app", "lifetime", "lineage", "lineage-stale"] {
         let mut fixture = Fixture::new().await;
         let handle = ProcessHandle::open(std::process::id()).unwrap().unwrap();
         let Some(identity) = handle.id().unwrap() else { return; };
         fixture.app.original_process = Some(crate::app_origin::OriginalProcess { pid: std::process::id(), pidfd_id: identity });
-        fixture.app.migrated_scope = Some(crate::app_scope::MigratedScope { unit: "app-test.scope".into(), invocation_id: vec![1; 16], lifetime_group: None });
+        fixture.app.migrated_scope = Some(crate::app_scope::MigratedScope { unit: "app-test.scope".into(), invocation_id: vec![1; 16], lifetime_group: None, lineage: None });
+        if revoked.starts_with("lineage") {
+            let origin = fixture.app.original_process.as_mut().unwrap();
+            if revoked == "lineage-stale" { origin.pidfd_id ^= 1; }
+            fixture.app.migrated_scope.as_mut().unwrap().lineage = Some(vec![origin.clone()]);
+        }
         if revoked == "lifetime" {
             fixture.app.lifetime_process = Some(crate::app_lifetime::LifetimeProcess { pid: std::process::id(), pidfd_id: identity });
         }
@@ -123,7 +128,7 @@ async fn migrated_scope_ownership_is_rechecked_after_waiting_for_the_dispatch_sl
             fixture.state.present.store(true, Ordering::SeqCst);
             *fixture.state.group.lock().unwrap() = "/old-service".into();
         }
-        let expected = matches!(revoked, "none" | "escaped-main" | "service-ended") && *fixture.state.scope_group.lock().unwrap() != "/";
+        let expected = matches!(revoked, "none" | "escaped-main" | "service-ended" | "lineage") && *fixture.state.scope_group.lock().unwrap() != "/";
         let (mut prepared, mut peer, _events, _socket) = prepared().await;
         let server = tokio::spawn(async move {
             let mut command = String::new();

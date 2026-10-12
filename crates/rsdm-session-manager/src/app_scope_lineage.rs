@@ -2,16 +2,25 @@
 
 use crate::{SessionError, app_origin::OriginalProcess, processes::{self, ProcessHandle}};
 
-pub(super) fn pin_owned(pids: &[u32], group: &str, origin: &OriginalProcess) -> Result<Option<Vec<ProcessHandle>>, SessionError> {
+pub(super) struct PinnedScope {
+    pub handles: Vec<ProcessHandle>,
+    pub lineage: Option<Vec<OriginalProcess>>,
+}
+
+pub(super) fn pin_owned(pids: &[u32], group: &str, origin: &OriginalProcess) -> Result<Option<PinnedScope>, SessionError> {
     if !group.starts_with('/') || group == "/" || !pids.contains(&origin.pid) || origin.pidfd_id == 0 {
         return Ok(None);
     }
     let Some(original) = ProcessHandle::open(origin.pid)? else { return Ok(None); };
     if original.id()? != Some(origin.pidfd_id) || !original.alive()? { return Ok(None); }
     let mut handles = Vec::new();
+    let mut lineage = Vec::new();
     for &pid in pids {
         let Some(handle) = ProcessHandle::open(pid)? else { return Ok(None); };
-        if !descendant(pid, &handle, origin)? { return Ok(None); }
+        if descendant(pid, &handle, origin)? {
+            let Some(pidfd_id) = handle.id()? else { return Ok(None); };
+            lineage.push(OriginalProcess { pid, pidfd_id });
+        }
         let membership = match std::fs::read_to_string(format!("/proc/{pid}/cgroup")) {
             Ok(membership) => membership,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -21,7 +30,15 @@ pub(super) fn pin_owned(pids: &[u32], group: &str, origin: &OriginalProcess) -> 
         handles.push(handle);
     }
     if !original.alive()? { return Ok(None); }
-    Ok(Some(handles))
+    let lineage = if lineage.len() == pids.len() { None } else { Some(lineage) };
+    Ok(Some(PinnedScope { handles, lineage }))
+}
+
+pub(super) fn owned(pid: u32, handle: &ProcessHandle, lineage: &[OriginalProcess]) -> Result<bool, SessionError> {
+    for origin in lineage {
+        if descendant(pid, handle, origin)? { return Ok(true); }
+    }
+    Ok(false)
 }
 
 fn descendant(pid: u32, pinned: &ProcessHandle, origin: &OriginalProcess) -> Result<bool, SessionError> {

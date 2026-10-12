@@ -91,13 +91,15 @@ pub(super) async fn signal_app_tracked(manager: &UserManager, app: &AppRecord, s
     if processes.is_empty() || control.cancelled() { return Ok(()); }
     let groups = if app.migrated_scope.is_some() { process_groups(manager, app).await? }
         else { vec![service_group(manager, &app.unit).await?] };
+    let lineage = scope_lineage(manager, app).await?;
 
     // Bound live descriptors even for large browser cgroups. Prepare the
     // owned pidfds before the final invocation and cancellation checks.
     for batch in processes.chunks(32) {
         let batch = batch.to_vec();
         let groups = groups.clone();
-        let owned = super::runtime::blocking(move || owned_process_handles(&batch, &groups)).await?;
+        let lineage = lineage.clone();
+        let owned = super::runtime::blocking(move || owned_process_handles(&batch, &groups, lineage.as_ref())).await?;
         if control.cancelled() { return Ok(()); }
         let service = verify_invocation(manager, app).await?;
         let scope = if let Some(scope) = &app.migrated_scope { super::app_scope::current(manager, scope).await? } else { false };
@@ -112,7 +114,7 @@ pub(super) async fn signal_app_tracked(manager: &UserManager, app: &AppRecord, s
     Ok(())
 }
 
-fn owned_process_handles(processes: &[u32], groups: &[String]) -> Result<Vec<ProcessHandle>, SessionError> {
+fn owned_process_handles(processes: &[u32], groups: &[String], lineage: Option<&(String, Vec<super::app_origin::OriginalProcess>)>) -> Result<Vec<ProcessHandle>, SessionError> {
     let mut owned = Vec::new();
     for &pid in processes {
         let Some(handle) = ProcessHandle::open(pid)? else { continue; };
@@ -121,9 +123,19 @@ fn owned_process_handles(processes: &[u32], groups: &[String]) -> Result<Vec<Pro
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => return Err(error.into()),
         };
-        if groups.iter().any(|group| belongs_to_cgroup(&membership, group)) { owned.push(handle); }
+        if !groups.iter().any(|group| belongs_to_cgroup(&membership, group)) { continue; }
+        if let Some((group, origins)) = lineage {
+            if belongs_to_cgroup(&membership, group) && !super::app_scope_lineage::owned(pid, &handle, origins)? { continue; }
+        }
+        owned.push(handle);
     }
     Ok(owned)
+}
+
+async fn scope_lineage(manager: &UserManager, app: &AppRecord) -> Result<Option<(String, Vec<super::app_origin::OriginalProcess>)>, SessionError> {
+    let Some(scope) = &app.migrated_scope else { return Ok(None); };
+    let Some(lineage) = &scope.lineage else { return Ok(None); };
+    Ok(super::app_scope::group(manager, scope).await?.map(|group| (group, lineage.clone())))
 }
 
 pub(super) async fn process_groups(manager: &UserManager, app: &AppRecord) -> Result<Vec<String>, SessionError> {
@@ -180,7 +192,8 @@ pub(super) async fn terminate_main(manager: &UserManager, app: &AppRecord, contr
         return signal_app(manager, app, libc::SIGTERM, control).await;
     };
     let groups = process_groups(manager, app).await?;
-    let owned = super::runtime::blocking(move || owned_process_handles(&[main], &groups)).await?;
+    let lineage = scope_lineage(manager, app).await?;
+    let owned = super::runtime::blocking(move || owned_process_handles(&[main], &groups, lineage.as_ref())).await?;
     if owned.is_empty() || !handle.alive()? { return Ok(false); }
     if let Some(origin) = original {
         if handle.id()? != Some(origin.pidfd_id) { return Ok(false); }

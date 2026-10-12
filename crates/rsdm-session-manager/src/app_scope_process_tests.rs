@@ -55,3 +55,47 @@ async fn scope_children_are_observed_and_signalled_after_the_original_process_ex
     assert!(closed(&fixture.manager, &app).await.unwrap());
     assert!(processes::app_processes(&fixture.manager, &app).await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn mixed_scopes_keep_owned_children_pinned_and_exclude_unrelated_processes() {
+    let (fixture, mut app, supported) = migrated().await;
+    if !supported { return; }
+    let (mut parent, child_pid, child) = process_tree().await;
+    let parent_pid = parent.id().unwrap();
+    let original = ProcessHandle::open(parent_pid).unwrap().unwrap();
+    app.original_process = Some(crate::app_origin::OriginalProcess { pid: parent_pid, pidfd_id: original.id().unwrap().unwrap() });
+    fixture.state.main_pid.store(parent_pid, Ordering::SeqCst);
+    fixture.state.scope_pid.store(parent_pid, Ordering::SeqCst);
+    fixture.state.scope_foreign_pid.store(child_pid, Ordering::SeqCst);
+    fixture.state.scope_extra_pid.store(std::process::id(), Ordering::SeqCst);
+    app.migrated_scope = discover(&fixture.manager, &app).await.unwrap();
+    let lineage = app.migrated_scope.as_ref().unwrap().lineage.as_ref().unwrap();
+    assert!(lineage.iter().any(|origin| origin.pid == parent_pid));
+    assert!(lineage.iter().any(|origin| origin.pid == child_pid));
+    assert!(!lineage.iter().any(|origin| origin.pid == std::process::id()));
+    parent.kill().await.unwrap();
+    fixture.state.app_invocation.store(0, Ordering::SeqCst);
+    fixture.state.scope_pid.store(child_pid, Ordering::SeqCst);
+    fixture.state.scope_foreign_pid.store(0, Ordering::SeqCst);
+    let observed = processes::app_processes(&fixture.manager, &app).await;
+    let foreign = ProcessHandle::open(std::process::id()).unwrap().unwrap();
+    let scope = app.migrated_scope.as_ref().unwrap();
+    assert!(!owns_process(scope, std::process::id(), &foreign).await.unwrap());
+    assert!(owns_process(scope, child_pid, &child).await.unwrap());
+    let mut reused = scope.clone();
+    reused.lineage.as_mut().unwrap().iter_mut().for_each(|origin| origin.pidfd_id ^= 1);
+    assert!(!owns_process(&reused, child_pid, &child).await.unwrap());
+    let signalled = processes::signal_app(&fixture.manager, &app, libc::SIGTERM, &crate::app_stop::ShutdownControl::default()).await;
+    let exited = tokio::time::timeout(Duration::from_secs(2), async {
+        while child.alive().unwrap() { tokio::time::sleep(Duration::from_millis(10)).await; }
+    }).await;
+    child.signal(libc::SIGKILL).unwrap();
+    assert_eq!(observed.unwrap(), [child_pid]);
+    assert!(signalled.unwrap());
+    assert!(exited.is_ok());
+    assert!(foreign.alive().unwrap());
+    fixture.state.scope_pid.store(std::process::id(), Ordering::SeqCst);
+    fixture.state.scope_extra_pid.store(0, Ordering::SeqCst);
+    assert!(processes::app_processes(&fixture.manager, &app).await.unwrap().is_empty());
+    assert!(!closed(&fixture.manager, &app).await.unwrap());
+}
