@@ -38,6 +38,22 @@ async fn stop_hooks_preserve_the_coordinators_config_path_as_one_argument() {
     assert_eq!(flags, &["no-env-expand"]);
 }
 
+#[tokio::test]
+async fn the_original_command_runs_after_origin_capture_with_literal_arguments() {
+    let mut fixture = Fixture::new(Mode::Accepted).await;
+    fixture.request.argv.extend(["$HOME".into(), "".into(), "two words".into()]);
+    let path = Path::new("/run/custom config/rsdm.toml");
+    let properties = launch_properties(&fixture.runtime, "anchor.service", &fixture.request, &fixture.app, Some(path)).await.unwrap();
+    let value = properties.into_iter().find(|(name, _)| *name == "ExecStartEx").unwrap().1;
+    let commands: Vec<(String, Vec<String>, Vec<String>)> = zbus::zvariant::OwnedValue::try_from(value).unwrap().try_into().unwrap();
+    let (executable, argv, flags) = &commands[0];
+    let mut expected = vec![executable.clone(), "--config".into(), path.to_str().unwrap().into(), "session".into(), "app-exec".into(),
+        "--generation".into(), fixture.runtime.generation.clone(), "--unit".into(), fixture.app.unit.clone(), "--".into()];
+    expected.extend(fixture.request.argv.clone());
+    assert_eq!(argv, &expected);
+    assert_eq!(flags, &["no-env-expand"]);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_missing_executable_rolls_back_registration_without_contacting_systemd() {
     let mut fixture = Fixture::new(Mode::Accepted).await;
@@ -69,6 +85,22 @@ async fn accepted_and_reconciled_lost_reply_launches_pin_the_owned_invocation() 
         assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().invocation_id, vec![1; 16]);
         assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
         assert_eq!(fixture.state.invocation_reads.load(Ordering::SeqCst), 2);
+    }
+}
+
+#[tokio::test]
+async fn launch_reconciliation_preserves_the_executor_identity_only_for_its_invocation() {
+    for invocation in [1, 2] {
+        let fixture = Fixture::new(Mode::Accepted).await;
+        let mut app = fixture.runtime.app(&fixture.app.unit).unwrap();
+        let origin = crate::app_origin::OriginalProcess { pid: std::process::id(), pidfd_id: 42 };
+        app.invocation_id = vec![invocation; 16];
+        app.original_process = Some(origin.clone());
+        fixture.runtime.save_app(&app).unwrap();
+        assert_eq!(fixture.launch().await.is_ok(), invocation == 1);
+        let saved = fixture.runtime.app(&fixture.app.unit).unwrap();
+        assert_eq!(saved.invocation_id, vec![invocation; 16]);
+        assert_eq!(saved.original_process, Some(origin));
     }
 }
 

@@ -36,6 +36,9 @@ in {
         machine.succeed(user + "systemctl --user is-active --quiet niri.service rsdm-foreign-window")
         directory = "/run/user/1000/rsdm/sessions/" + values["RSDM_SESSION_GENERATION"]
         record = tomllib.loads(machine.succeed("cat " + directory + "/apps/*.toml"))
+        assert record["original_process"]["pidfd_id"] > 0
+        assert record["original_process"]["pidfd_id"] == int(machine.succeed("cat /run/user/1000/owned-pidfd-id"))
+        assert record["original_process"]["pid"] == int(machine.succeed(user + "systemctl --user show " + record["unit"] + " -p MainPID --value"))
         assert record["window_close_sent"]
         assert record["dispatch"]["method"] == "window_close"
         assert record["dispatch"]["state"] == "sent"

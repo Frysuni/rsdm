@@ -31,7 +31,7 @@ fn app() -> AppRecord {
         deadline_usec: None,
         quit_started: false,
         dispatch: None,
-        window_close_sent: false, preparation: None,
+        window_close_sent: false, original_process: None, preparation: None,
     }
 }
 

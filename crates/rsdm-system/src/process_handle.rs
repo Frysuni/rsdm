@@ -4,6 +4,8 @@ use std::{io, os::fd::{AsRawFd, FromRawFd, OwnedFd}};
 
 pub struct ProcessHandle(OwnedFd);
 
+const PID_FS_MAGIC: libc::c_long = 0x50494446;
+
 impl ProcessHandle {
     /// Pin a Unix socket's authenticated peer without reopening a numeric PID.
     pub fn socket_peer(socket: &impl AsRawFd) -> io::Result<Self> {
@@ -31,6 +33,25 @@ impl ProcessHandle {
         }
         // SAFETY: the successful syscall returned a new descriptor we own.
         Ok(Some(Self(unsafe { OwnedFd::from_raw_fd(fd as i32) })))
+    }
+
+    /// Stable process identity on kernels with pidfs; anonymous pidfds have none.
+    pub fn id(&self) -> io::Result<Option<u64>> {
+        let mut filesystem = std::mem::MaybeUninit::<libc::statfs>::uninit();
+        // SAFETY: filesystem points to writable storage for the owned FD.
+        if unsafe { libc::fstatfs(self.0.as_raw_fd(), filesystem.as_mut_ptr()) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: fstatfs initialized the output on success.
+        if unsafe { filesystem.assume_init() }.f_type != PID_FS_MAGIC { return Ok(None); }
+        let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: metadata points to writable storage for the owned FD.
+        if unsafe { libc::fstat(self.0.as_raw_fd(), metadata.as_mut_ptr()) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: fstat initialized the output on success. Pidfs assigns one
+        // inode per process, shared by separate pidfd_open calls and exec.
+        Ok(Some(unsafe { metadata.assume_init() }.st_ino))
     }
 
     pub fn alive(&self) -> io::Result<bool> {
@@ -65,6 +86,23 @@ mod tests {
         let handle = ProcessHandle::socket_peer(&socket).unwrap();
         assert!(handle.alive().unwrap());
         assert!(handle.signal(0).unwrap());
+    }
+
+    #[test]
+    fn pidfs_ids_match_separate_handles_to_one_process_and_distinguish_children() {
+        let first = ProcessHandle::open(std::process::id()).unwrap().unwrap();
+        let second = ProcessHandle::open(std::process::id()).unwrap().unwrap();
+        assert_eq!(first.id().unwrap(), second.id().unwrap());
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let handle = ProcessHandle::open(child.id()).unwrap().unwrap();
+        if let Some(identity) = first.id().unwrap() {
+            assert_ne!(identity, 0);
+            assert_ne!(Some(identity), handle.id().unwrap());
+        } else {
+            assert_eq!(handle.id().unwrap(), None);
+        }
+        child.kill().unwrap();
+        child.wait().unwrap();
     }
 
     #[test]

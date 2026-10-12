@@ -45,6 +45,22 @@ async fn disabled_apps_ignore_shutdown_policy_and_preserve_arguments_environment
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_disabled_app_executor_preserves_the_process_id_and_never_contacts_the_manager() {
+    let tools = SessionTools::new(false).await;
+    disable(&tools);
+    let mut command = tools.command(&["session", "app-exec", "--generation", "../invalid", "--unit", "../invalid",
+        "--", "/bin/sh", "-c", "kill -PIPE \"$$\"; printf '%s\\n' \"$$\"; exit 7"]);
+    command.stdout(Stdio::piped());
+    let child = command.spawn().unwrap();
+    let pid = child.id();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(7), "{output:?}");
+    assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), pid.to_string());
+    assert!(tools.calls.lock().unwrap().is_empty());
+    assert!(!tools.root.join("rsdm").exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn disabled_start_ignores_provider_options_and_returns_the_original_exit_status() {
     let tools = SessionTools::new(false).await;
     disable(&tools);

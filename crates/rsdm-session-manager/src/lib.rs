@@ -42,6 +42,7 @@ mod hyprland;
 mod window_backend;
 mod window_close;
 mod window_ownership;
+mod app_origin;
 mod window_capability;
 mod wayfire;
 mod wayland_registry;
@@ -162,6 +163,31 @@ pub async fn run_app_with_policy(argv: &[String], policy: &ShutdownPolicy, cfg: 
 pub async fn finalize(cfg: &SessionManagerConfig, names: &[String]) -> Result<(), SessionError> {
     if !cfg.enabled { return Ok(()); }
     client::finalize(cfg, names).await
+}
+
+pub async fn exec_app_with_config_updates(generation: &str, unit: &str, argv: &[String], updates: tokio::sync::watch::Receiver<SessionManagerUpdate>) -> Result<(), SessionError> {
+    if argv.is_empty() { return Err(SessionError::EmptyCommand); }
+    if updates.borrow().config.enabled {
+        let actions = action_gate::ActionGate::new(Some(updates));
+        if let Err(error) = app_origin::capture(generation, unit, actions).await {
+            tracing::warn!(%error, unit, "application process identity could not be captured");
+        }
+    }
+    use std::os::unix::process::CommandExt;
+    let mut command = std::process::Command::new(&argv[0]);
+    command.args(&argv[1..]);
+    // Systemd app services ignore SIGPIPE. Command::exec resets it, so retain
+    // the service's behavior when clients write to a disconnected socket.
+    // SAFETY: this closure only changes a signal disposition and reads errno.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::signal(libc::SIGPIPE, libc::SIG_IGN) == libc::SIG_ERR {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    Err(command.exec().into())
 }
 
 pub async fn stop_hook(generation: &str, unit: &str, cfg: &SessionManagerConfig) -> Result<(), SessionError> {

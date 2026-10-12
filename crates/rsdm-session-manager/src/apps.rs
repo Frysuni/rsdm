@@ -44,7 +44,7 @@ pub(super) async fn register(
     }
     let app = AppRecord {
         unit: app_unit_name(program, &runtime.generation), invocation_id: Vec::new(),
-        policy, deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, preparation: None,
+        policy, deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, preparation: None,
     };
     let runtime = runtime.clone();
     blocking(move || {
@@ -75,6 +75,9 @@ pub(super) async fn launch(
             app = blocking(move || {
                 let _lease = runtime.app_lease_until(&unit, &deadline)?;
                 let mut app = runtime.app(&unit)?;
+                if !app.invocation_id.is_empty() && app.invocation_id != id {
+                    return Err(SessionError::State("application invocation changed before launch reconciliation".into()));
+                }
                 app.invocation_id = id;
                 runtime.save_app(&app)?;
                 Ok(app)
@@ -118,6 +121,11 @@ async fn launch_properties(
         let path = path.to_str().ok_or_else(|| SessionError::State("hook configuration path is not valid UTF-8".into()))?;
         stop_argv.extend(["--config".into(), path.into()]);
     }
+    let mut start_argv = stop_argv.clone();
+    start_argv.extend(["session".into(), "app-exec".into(), "--generation".into(), runtime.generation.clone(), "--unit".into(), app.unit.clone(), "--".into()]);
+    start_argv.extend(request.argv.clone());
+    properties.retain(|(name, _)| *name != "ExecStartEx");
+    properties.push(("ExecStartEx", Value::new(vec![(executable.clone(), start_argv, vec!["no-env-expand".to_string()])])));
     stop_argv.extend(["session".into(), "app-stop".into(), "--generation".into(), runtime.generation.clone(), "--unit".into(), app.unit.clone()]);
     let stop_command = vec![(executable, stop_argv, vec!["no-env-expand".to_string()])];
     properties.extend([

@@ -163,8 +163,16 @@ rsdm app --shutdown-method xsmp -- example
 | `--shutdown-method auto\|term\|xsmp` | `auto` | Select the available quit method, use SIGTERM, or require an admitted XSMP connection at shutdown |
 | `--quit-command '<command>'` | Unset | Run the app's quit command; requires `--shutdown-method auto` |
 
+Registered services capture their original process before executing the app.
+The internal executor verifies generation, invocation, MainPID and process
+membership, then records PID and the kernel's stable pidfs inode ID. Exec keeps
+that process identity and passes the original arguments unchanged. Disabled
+executors run the command directly. Failed identity capture still allows the
+command to run; kernels with anonymous pidfds and legacy records provide no
+original-process ID. This metadata does not itself authorize another cgroup.
+
 In a managed WM or native niri session, auto chooses an explicit quit command,
-a connected XSMP client, then SIGTERM to the main process. Remaining children
+a connected XSMP client, a verified window close, then SIGTERM to the main process. Remaining children
 are tracked through the service cgroup. Force timeout gives them up to five
 seconds of SIGTERM grace, then SIGKILL. That grace is additional to the app
 timeout. Apps prepare in parallel, so logout does not wait one full timeout per

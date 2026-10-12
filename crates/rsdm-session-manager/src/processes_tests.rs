@@ -85,7 +85,7 @@ async fn recovery_does_not_stop_a_replacement_native_invocation() {
 async fn process_signaling_does_not_repeat_full_cgroup_snapshots() {
     let (manager, _server, queries) = manager(vec![1; 16], "active", vec![std::process::id(); 128]).await;
     let app = AppRecord { unit: "native.service".into(), invocation_id: vec![1; 16],
-        policy: rsdm_core::domain::ShutdownPolicy::default(), deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, preparation: None };
+        policy: rsdm_core::domain::ShutdownPolicy::default(), deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, preparation: None };
     signal_app(&manager, &app, 0, &ShutdownControl::default()).await.unwrap();
     assert_eq!(queries.load(Ordering::SeqCst), 1);
 }
@@ -94,7 +94,7 @@ async fn process_signaling_does_not_repeat_full_cgroup_snapshots() {
 async fn process_signaling_rejects_a_replacement_before_taking_a_snapshot() {
     let (manager, _server, queries) = manager(vec![2; 16], "active", vec![std::process::id()]).await;
     let app = AppRecord { unit: "native.service".into(), invocation_id: vec![1; 16],
-        policy: rsdm_core::domain::ShutdownPolicy::default(), deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, preparation: None };
+        policy: rsdm_core::domain::ShutdownPolicy::default(), deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, preparation: None };
     assert!(signal_app(&manager, &app, 0, &ShutdownControl::default()).await.is_err());
     assert_eq!(queries.load(Ordering::SeqCst), 0);
 }

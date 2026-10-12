@@ -64,6 +64,8 @@ impl SessionRecord {
 pub(super) struct AppRecord {
     pub unit: String,
     pub invocation_id: Vec<u8>,
+    #[serde(default)]
+    pub original_process: Option<super::app_origin::OriginalProcess>,
     pub policy: ShutdownPolicy,
     pub deadline_usec: Option<u64>,
     pub quit_started: bool,

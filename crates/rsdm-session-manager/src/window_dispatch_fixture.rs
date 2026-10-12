@@ -45,6 +45,8 @@ struct Service(Arc<State>);
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Service")]
 impl Service {
+    #[zbus(property)]
+    fn environment(&self) -> Vec<String> { vec![format!("RSDM_SESSION_GENERATION={}", crate::helper_start_fixture::GENERATION)] }
     #[zbus(property, name = "MainPID")]
     fn main_pid(&self) -> u32 { self.0.main_pid.load(Ordering::SeqCst) }
     #[zbus(property, name = "ControlPID")]

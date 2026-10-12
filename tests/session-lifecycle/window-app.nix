@@ -37,6 +37,9 @@ let
             window.connect("close-request", close)
             window.present()
         (directory / (prefix + "-ready")).touch()
+        descriptor = os.pidfd_open(os.getpid())
+        (directory / (prefix + "-pidfd-id")).write_text(str(os.fstat(descriptor).st_ino))
+        os.close(descriptor)
         (directory / (prefix + "-windows")).write_text(str(len(app.get_windows())))
 
     def finished():
