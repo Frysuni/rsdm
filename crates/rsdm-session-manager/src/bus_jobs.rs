@@ -11,7 +11,7 @@ enum Operation {
 
 pub(super) async fn start(
     manager: &UserManager, unit: &str, properties: &UnitProperties, timeout: Duration,
-    submitted: &AtomicBool, control: Option<&crate::app_stop::ShutdownControl>,
+    submitted: &AtomicBool, quit: Option<(&crate::app_stop::ShutdownControl, &crate::runtime::AppRecord)>,
 ) -> Result<(), SessionError> {
     let deadline = Instant::now().checked_add(timeout)
         .ok_or_else(|| SessionError::State("systemd job deadline overflow".into()))?;
@@ -29,10 +29,13 @@ pub(super) async fn start(
         let auxiliary: Vec<(&str, UnitProperties)> = Vec::new();
         let mut reference = None;
         let reply = manager.request(async {
+            if let Some((control, app)) = quit { verify_quit_app(&proxy, app, control).await?; }
             if Instant::now() >= deadline { return Err(job_timeout(unit)); }
-            if control.is_some_and(crate::app_stop::ShutdownControl::cancelled) {
+            manager.deadline.remaining(Duration::MAX)?;
+            if quit.is_some_and(|(control, _)| control.cancelled()) {
                 return Err(zbus::fdo::Error::Failed("application shutdown cancelled before service start".into()).into());
             }
+            manager.actions.check().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
             reference = if new_unit && properties.iter().any(|(name, value)| *name == "AddRef" && matches!(value, Value::Bool(true))) {
                 generation.as_ref().map(|generation| manager.transport.stage_reference(unit, generation.clone()))
             } else { None };
@@ -41,6 +44,9 @@ pub(super) async fn start(
             proxy.call("StartTransientUnit", &(unit, "fail", properties, auxiliary)).await
         }).await;
         if let Err(error) = &reply
+            && !submitted.load(Ordering::Relaxed)
+        { return Err(error.clone().into()); }
+        if let Err(error) = &reply
             && rejected_start(manager, unit, error).await
         {
             let reference_retained = reference.take().is_some_and(|reference| !reference.reject());
@@ -48,6 +54,20 @@ pub(super) async fn start(
         }
         complete(manager, unit, &mut signals, reply, Operation::Start { new_unit, generation }, deadline).await
     }).await
+}
+
+async fn verify_quit_app(manager: &Proxy<'_>, app: &crate::runtime::AppRecord, control: &crate::app_stop::ShutdownControl) -> zbus::Result<()> {
+    if control.cancelled() {
+        return Err(zbus::fdo::Error::Failed("application shutdown cancelled before service start".into()).into());
+    }
+    let path: OwnedObjectPath = manager.call("GetUnit", &(&app.unit,)).await?;
+    let unit = zbus::proxy::Builder::<Proxy<'_>>::new(manager.connection()).destination(DESTINATION)?.path(path)?
+        .interface("org.freedesktop.systemd1.Unit")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+    let invocation: Vec<u8> = unit.get_property("InvocationID").await?;
+    if app.invocation_id.is_empty() || app.invocation_id.iter().all(|byte| *byte == 0) || invocation != app.invocation_id {
+        return Err(zbus::fdo::Error::AccessDenied("application invocation changed before quit command dispatch".into()).into());
+    }
+    Ok(())
 }
 
 async fn rejected_start(manager: &UserManager, unit: &str, error: &zbus::Error) -> bool {

@@ -169,6 +169,13 @@ to pass those characters literally.
 its documented quit command. The quit helper runs with that app's recorded
 environment and working directory.
 
+The registered InvocationID is checked before and after those property reads,
+then again in the final IPC slot before `StartTransientUnit`. Force does not
+bypass these ownership checks. A rejected pre-dispatch check records the
+command as `not_sent` without stopping or unreferencing a helper unit. Once
+start may have been accepted, an unconfirmed reply retains dispatch intent
+and prevents another quit-command start.
+
 Each launch creates a transient service in `app-graphical.slice`, named
 `app-rsdm-<application>@<generation-and-instance>.service`. Stable application
 identity supports portal permissions. Registration precedes unit creation, so

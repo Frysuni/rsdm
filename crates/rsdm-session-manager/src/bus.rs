@@ -95,8 +95,8 @@ impl UserManager {
         self.start_service_tracked(unit, properties, &submitted, None).await
     }
 
-    pub(super) async fn start_service_tracked(&self, unit: &str, properties: &UnitProperties, submitted: &AtomicBool, control: Option<&super::app_stop::ShutdownControl>) -> Result<(), SessionError> {
-        let result = self.deadline.bound(jobs::start(self, unit, properties, Duration::from_secs(10), submitted, control)).await;
+    pub(super) async fn start_service_tracked(&self, unit: &str, properties: &UnitProperties, submitted: &AtomicBool, quit: Option<(&super::app_stop::ShutdownControl, &super::runtime::AppRecord)>) -> Result<(), SessionError> {
+        let result = self.deadline.bound(jobs::start(self, unit, properties, Duration::from_secs(10), submitted, quit)).await;
         match result {
             Err(error) if !submitted.load(Ordering::Relaxed) => Err(SessionError::StartRejected { error: Box::new(error), reference_retained: false }),
             other => other,

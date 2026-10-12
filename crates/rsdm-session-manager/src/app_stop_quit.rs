@@ -106,7 +106,7 @@ pub(super) async fn launch_quit(manager: &UserManager, app: &AppRecord, anchor: 
     let submitted = AtomicBool::new(false);
     let result = async {
         let properties = quit_properties(manager, app, anchor).await?;
-        manager.start_service_tracked(&unit, &properties, &submitted, Some(control)).await
+        manager.start_service_tracked(&unit, &properties, &submitted, Some((control, app))).await
     }.await;
     if let Err(error) = result {
         if !submitted.load(Ordering::Relaxed) && !matches!(error, SessionError::StartRejected { .. }) {
@@ -121,11 +121,17 @@ pub(super) async fn launch_quit(manager: &UserManager, app: &AppRecord, anchor: 
 }
 
 async fn quit_properties(manager: &UserManager, app: &AppRecord, anchor: &str) -> Result<crate::bus::UnitProperties, SessionError> {
+    if !crate::processes::verify_invocation(manager, app).await? {
+        return Err(SessionError::State("application exited before quit command preparation".into()));
+    }
     let environment: Vec<String> = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Service", "Environment").await?;
     let environment: Vec<_> = environment.iter().filter_map(|entry| entry.split_once('=')
         .map(|(name, value)| (name.to_string(), value.to_string()))).collect();
     let directory: String = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Service", "WorkingDirectory").await?;
     let mut properties = command_properties(&app.policy.quit_command, &environment, Path::new(&directory)).await?;
+    if !crate::processes::verify_invocation(manager, app).await? {
+        return Err(SessionError::State("application exited during quit command preparation".into()));
+    }
     properties.extend([
         ("Slice", Value::from(crate::units::APP_SLICE)),
         ("TimeoutStopUSec", Value::from(1_000_000_u64)),

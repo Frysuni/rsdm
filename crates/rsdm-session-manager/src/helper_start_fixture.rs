@@ -96,6 +96,14 @@ impl Unit {
 
 struct Service;
 
+struct ApplicationUnit;
+
+#[zbus_macros::interface(name = "org.freedesktop.systemd1.Unit")]
+impl ApplicationUnit {
+    #[zbus(property, name = "InvocationID")]
+    fn invocation_id(&self) -> Vec<u8> { vec![1; 16] }
+}
+
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Service")]
 impl Service {
     #[zbus(property)]
@@ -120,7 +128,8 @@ impl Fixture {
         let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
                 .serve_at("/org/freedesktop/systemd1", Manager(Arc::clone(&shared))).unwrap()
-                .serve_at("/app", Service).unwrap().serve_at("/helper", Unit(shared)).unwrap()
+                .serve_at("/app", Service).unwrap().serve_at("/app", ApplicationUnit).unwrap()
+                .serve_at("/helper", Unit(shared)).unwrap()
                 .build().await.unwrap()
         });
         let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
