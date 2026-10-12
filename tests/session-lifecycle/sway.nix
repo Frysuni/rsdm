@@ -3,7 +3,7 @@
 let
   controller = import ./controller.nix { inherit pkgs; };
   application = import ./window-app.nix { inherit pkgs; };
-  editor = import ./qt-editor.nix { inherit pkgs; };
+  editors = import ./desktop-editors.nix { inherit pkgs; };
 in pkgs.testers.runNixOSTest {
   name = "rsdm-sway-windows";
   globalTimeout = 120;
@@ -13,7 +13,7 @@ in pkgs.testers.runNixOSTest {
     users.users.alice = { isNormalUser = true; uid = 1000; group = "alice"; };
     users.groups.alice = {};
     services.getty.autologinUser = "alice";
-    environment.systemPackages = [ rsdm pkgs.sway pkgs.wtype pkgs.kdePackages.kate ];
+    environment.systemPackages = [ rsdm pkgs.sway pkgs.wtype pkgs.kdePackages.kate pkgs.mousepad ];
     fonts.packages = [ pkgs.dejavu_fonts ];
     environment.etc."rsdm.toml".text = "";
     environment.etc."rsdm-sway.conf".text = ''
@@ -91,7 +91,7 @@ in pkgs.testers.runNixOSTest {
         machine.wait_until_fails("test -e " + directory + "/apps/" + application_record["unit"] + ".toml")
         machine.wait_until_fails(user + "systemctl --user is-active --quiet rsdm-foreign-window")
 
-    ${editor}
+    ${editors}
 
     with subtest("an individual stop records clean exit after one Sway close"):
         machine.succeed(session + "rsdm app --shutdown-timeout 5 --on-timeout cancel -- ${application} clean")

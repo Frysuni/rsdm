@@ -338,9 +338,9 @@ follow the same rules as Niri. A single rejected command allows fallback;
 a lost or malformed response remains an unconfirmed dispatch. The isolated
 Sway VM exercises GTK Wayland windows with the headless/pixman compositor,
 save-dialog cancellation, foreign windows with the same app ID and an
-individual stop. It also edits an actual Kate document, preserves its unsaved
-text and save dialog across repeated logout, and leaves a foreign Kate instance
-and the compositor unchanged. Hardware rendering, XWayland and attached-compositor close
+individual stop. It also edits actual Kate and Mousepad documents, preserves
+their unsaved text and save dialogs across repeated logout, and leaves foreign
+editor instances and the compositor unchanged. Hardware rendering, XWayland and attached-compositor close
 are outside that verification.
 
 ## Hyprland window close
