@@ -80,7 +80,7 @@ impl Coordinator {
             let events = events.clone();
             tokio::spawn(async move {
                 let result = async {
-                    manager.start_service_tracked(&unit, &properties, &submitted).await?;
+                    manager.start_service_tracked(&unit, &properties, &submitted, None).await?;
                     manager.invocation_id(&unit).await
                 }.await;
                 let _ = events.send(Work::Boot(result));

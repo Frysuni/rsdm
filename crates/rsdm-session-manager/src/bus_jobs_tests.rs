@@ -11,7 +11,7 @@ async fn accepted_start_survives_lost_reply_or_job_signal_without_replay() {
     for lost_reply in [true, false] {
         let (manager, _server, state) = fixture(state(lost_reply, true, 0)).await;
         let properties = vec![("Environment", Value::new(vec!["RSDM_SESSION_GENERATION=ours".to_string()]))];
-        start(&manager, "example.service", &properties, Duration::from_millis(20), &AtomicBool::new(false)).await.unwrap();
+        start(&manager, "example.service", &properties, Duration::from_millis(20), &AtomicBool::new(false), None).await.unwrap();
         assert_eq!(state.calls.load(Ordering::SeqCst), 1);
     }
 }
@@ -20,7 +20,7 @@ async fn accepted_start_survives_lost_reply_or_job_signal_without_replay() {
 async fn lost_reply_accepts_only_a_successfully_exited_service() {
     for status in [0, 1] {
         let (manager, _server, state) = fixture(state(true, false, status)).await;
-        let result = start(&manager, "example.service", &Vec::new(), Duration::from_millis(50), &AtomicBool::new(false)).await;
+        let result = start(&manager, "example.service", &Vec::new(), Duration::from_millis(50), &AtomicBool::new(false), None).await;
         assert_eq!(result.is_ok(), status == 0);
         assert_eq!(state.calls.load(Ordering::SeqCst), 1);
     }
@@ -34,7 +34,7 @@ async fn an_existing_or_foreign_unit_cannot_confirm_a_lost_start_reply() {
         if !existing { initial.generation = "foreign"; }
         let (manager, _server, state) = fixture(initial).await;
         let properties = vec![("Environment", Value::new(vec!["RSDM_SESSION_GENERATION=ours".to_string()]))];
-        assert!(start(&manager, "example.service", &properties, Duration::from_millis(50), &AtomicBool::new(false)).await.is_err());
+        assert!(start(&manager, "example.service", &properties, Duration::from_millis(50), &AtomicBool::new(false), None).await.is_err());
         assert_eq!(state.calls.load(Ordering::SeqCst), 1);
     }
 }
@@ -73,7 +73,7 @@ async fn an_accepted_mutation_cannot_wait_past_its_budget_for_the_reply() {
     initial.reply_delay = Duration::from_secs(2);
     let (manager, _server, state) = fixture(initial).await;
     let before = Instant::now();
-    let result = start(&manager, "example.service", &Vec::new(), Duration::from_millis(50), &AtomicBool::new(false)).await;
+    let result = start(&manager, "example.service", &Vec::new(), Duration::from_millis(50), &AtomicBool::new(false), None).await;
     assert!(matches!(&result, Err(SessionError::Bus(error)) if retryable_error(error)));
     assert!(before.elapsed() < Duration::from_secs(1));
     assert_eq!(state.calls.load(Ordering::SeqCst), 1);
@@ -97,7 +97,7 @@ async fn a_missing_job_signal_does_not_get_an_additional_inspection_budget() {
 async fn an_expired_budget_does_not_send_a_mutation() {
     let initial = state(false, false, 0);
     let (manager, _server, state) = fixture(initial).await;
-    assert!(start(&manager, "example.service", &Vec::new(), Duration::ZERO, &AtomicBool::new(false)).await.is_err());
+    assert!(start(&manager, "example.service", &Vec::new(), Duration::ZERO, &AtomicBool::new(false), None).await.is_err());
     assert!(stop(&manager, "example.service", Duration::ZERO).await.is_err());
     assert_eq!(state.calls.load(Ordering::SeqCst), 0);
     assert!(!state.exists.load(Ordering::SeqCst));

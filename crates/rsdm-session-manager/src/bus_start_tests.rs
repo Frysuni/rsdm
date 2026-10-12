@@ -68,7 +68,7 @@ async fn a_lost_accepted_reply_and_a_local_timeout_preserve_reference_intent() {
     initial.reply_delay = Duration::from_secs(2);
     let (manager, _server, state) = fixture(initial).await;
     let submitted = AtomicBool::new(false);
-    assert!(start(&manager, "example.service", &properties(), Duration::from_millis(50), &submitted).await.is_err());
+    assert!(start(&manager, "example.service", &properties(), Duration::from_millis(50), &submitted, None).await.is_err());
     assert!(submitted.load(Ordering::Relaxed));
     assert!(manager.transport.has_reference("example.service"));
     assert_eq!(state.calls.load(Ordering::SeqCst), 1);

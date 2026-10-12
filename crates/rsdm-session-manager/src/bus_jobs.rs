@@ -11,7 +11,7 @@ enum Operation {
 
 pub(super) async fn start(
     manager: &UserManager, unit: &str, properties: &UnitProperties, timeout: Duration,
-    submitted: &AtomicBool,
+    submitted: &AtomicBool, control: Option<&crate::app_stop::ShutdownControl>,
 ) -> Result<(), SessionError> {
     let deadline = Instant::now().checked_add(timeout)
         .ok_or_else(|| SessionError::State("systemd job deadline overflow".into()))?;
@@ -30,6 +30,9 @@ pub(super) async fn start(
         let mut reference = None;
         let reply = manager.request(async {
             if Instant::now() >= deadline { return Err(job_timeout(unit)); }
+            if control.is_some_and(crate::app_stop::ShutdownControl::cancelled) {
+                return Err(zbus::fdo::Error::Failed("application shutdown cancelled before service start".into()).into());
+            }
             reference = if new_unit && properties.iter().any(|(name, value)| *name == "AddRef" && matches!(value, Value::Bool(true))) {
                 generation.as_ref().map(|generation| manager.transport.stage_reference(unit, generation.clone()))
             } else { None };

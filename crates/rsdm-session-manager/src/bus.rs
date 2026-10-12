@@ -92,11 +92,11 @@ impl UserManager {
 
     pub async fn start_service(&self, unit: &str, properties: &UnitProperties) -> Result<(), SessionError> {
         let submitted = AtomicBool::new(false);
-        self.start_service_tracked(unit, properties, &submitted).await
+        self.start_service_tracked(unit, properties, &submitted, None).await
     }
 
-    pub(super) async fn start_service_tracked(&self, unit: &str, properties: &UnitProperties, submitted: &AtomicBool) -> Result<(), SessionError> {
-        let result = self.deadline.bound(jobs::start(self, unit, properties, Duration::from_secs(10), submitted)).await;
+    pub(super) async fn start_service_tracked(&self, unit: &str, properties: &UnitProperties, submitted: &AtomicBool, control: Option<&super::app_stop::ShutdownControl>) -> Result<(), SessionError> {
+        let result = self.deadline.bound(jobs::start(self, unit, properties, Duration::from_secs(10), submitted, control)).await;
         match result {
             Err(error) if !submitted.load(Ordering::Relaxed) => Err(SessionError::StartRejected { error: Box::new(error), reference_retained: false }),
             other => other,
