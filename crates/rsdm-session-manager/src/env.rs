@@ -24,10 +24,11 @@ pub(super) const WAYLAND_VARS: &[&str] = &[
     "NIRI_SOCKET",
     "SWAYSOCK",
     "HYPRLAND_INSTANCE_SIGNATURE",
+    "WAYFIRE_SOCKET",
 ];
 
 /// Display endpoints must not come from a previous login in the user manager.
-pub(super) const DISPLAY_VARS: &[&str] = &["WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "NIRI_SOCKET", "SWAYSOCK", "HYPRLAND_INSTANCE_SIGNATURE"];
+pub(super) const DISPLAY_VARS: &[&str] = &["WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "NIRI_SOCKET", "SWAYSOCK", "HYPRLAND_INSTANCE_SIGNATURE", "WAYFIRE_SOCKET"];
 
 /// Names of every variable we manage, for export/unset.
 pub(super) fn all_var_names(extra_env: &[String], extra_names: &[String]) -> Vec<String> {
@@ -148,6 +149,7 @@ mod tests {
     fn var_names_include_base_wayland_and_extras() {
         let names = all_var_names(&["MY_VAR".to_string()], &["OTHER".to_string()]);
         assert!(names.iter().any(|n| n == "WAYLAND_DISPLAY"));
+        assert!(names.iter().any(|n| n == "WAYFIRE_SOCKET"));
         assert!(names.iter().any(|n| n == "PATH"));
         assert!(names.iter().any(|n| n == "MY_VAR"));
         assert!(names.iter().any(|n| n == "OTHER"));

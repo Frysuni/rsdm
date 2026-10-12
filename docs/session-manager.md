@@ -291,6 +291,27 @@ rendering, GTK save-dialog cancellation, foreign windows with the same app ID
 and individual clean stop. Other versions, hardware rendering, XWayland and
 attached-compositor close are outside that verification.
 
+## Wayfire discovery
+
+Finalize captures `WAYFIRE_SOCKET` for the generation. Read-only discovery uses
+Wayfire's length-prefixed JSON IPC directly, with bounded frames and deadlines.
+The socket peer must belong to the current compositor MainPID and InvocationID.
+`list-methods` checks the availability of `ipc-rules`, including when no windows
+exist; `list-views` and `view-info` check the advertised read APIs.
+
+Window close remains unavailable: reported PIDs may come from XWayland and
+`close-view` accepts only a view ID without an atomic identity or owner guard.
+Status distinguishes verified discovery, missing plugins and an unverified
+compositor. Discovery does not change the session's full/partial scope, close
+windows, enable plugins or edit Wayfire configuration. The existing TERM
+fallback remains subject to each registered application's shutdown policy.
+
+The isolated VM check uses Wayfire 0.10.1 with software rendering and GTK
+Wayland windows. It covers discovery with and without `ipc-rules`, individual
+TERM fallback, preservation of foreign windows and the owned compositor, and
+unchanged configuration. This does not establish window-close support or
+verification of other Wayfire versions, hardware rendering or XWayland.
+
 ## XSMP
 
 Official builds enable `xsmp`. Managed WM and native niri sessions publish

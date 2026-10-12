@@ -30,6 +30,7 @@ enabled = true # optional | bool | default: true | values: true, false
 # NIRI_SOCKET is captured automatically by finalize and native niri readiness.
 # SWAYSOCK is captured by finalize for the direct Sway IPC backend.
 # HYPRLAND_INSTANCE_SIGNATURE selects generation-owned IPC in XDG_RUNTIME_DIR.
+# WAYFIRE_SOCKET is captured by finalize for read-only Wayfire IPC discovery.
 extra_env = [] # optional | array<string> | default: [] | values: environment variable names
 ready_timeout_secs = 10 # optional | integer | default: 10 | values: >= 0, seconds fitting a monotonic deadline on this platform; timeout leaves graphical targets inactive until finalize
 

@@ -1,0 +1,64 @@
+//! Read-only discovery of compositor APIs and their ownership limitations.
+
+use std::path::Path;
+
+use super::{SessionError, bus::UserManager, runtime::SessionRecord, status::Capability, window_close};
+
+pub(super) async fn capability(manager: &UserManager, record: &SessionRecord) -> Capability {
+    if record.disabled {
+        return Capability::new("window-close", "unavailable", "Session Manager is disabled.");
+    }
+    if matches!(record.provider.as_str(), "gnome" | "plasma") {
+        return Capability::new("window-close", "not-applicable", "The native desktop owns application shutdown and its dialogs.");
+    }
+    if record.compositor_unit.is_none() || record.compositor_invocation.is_empty() {
+        return Capability::new("window-close", "unavailable", "No verified compositor invocation is recorded; TERM fallback remains subject to app policy.");
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(2), probe(manager, record)).await {
+        Ok(capability) => capability,
+        Err(_) => Capability::new("window-close", "unavailable", "The compositor capability probe timed out."),
+    }
+}
+
+async fn probe(manager: &UserManager, record: &SessionRecord) -> Capability {
+    let mut reason = "No supported compositor IPC endpoint is recorded.".to_string();
+    for (name, value) in &record.exported_environment {
+        if name == "WAYFIRE_SOCKET" {
+            reason = match discover_wayfire(manager, record, Path::new(value)).await {
+                Ok(()) => "WAYFIRE_SOCKET: discovery available on the verified compositor; view IDs lack an atomic identity guard and reported PIDs do not prove ownership. TERM fallback remains subject to app policy.".into(),
+                Err(error) => format!("WAYFIRE_SOCKET: {error}"),
+            };
+            continue;
+        }
+        if !matches!(name.as_str(), "NIRI_SOCKET" | "SWAYSOCK" | "HYPRLAND_INSTANCE_SIGNATURE") { continue; }
+        let path = if name == "HYPRLAND_INSTANCE_SIGNATURE" {
+            let Some(path) = super::hyprland::socket_directory(&record.exported_environment, value) else {
+                reason = "The recorded Hyprland endpoint is invalid.".into();
+                continue;
+            };
+            path
+        } else { Path::new(value).to_path_buf() };
+        match window_close::connect_endpoint(manager, record, name, &path).await {
+            Ok(Some(_)) => return Capability::new("window-close", "available", &format!("{name}: authenticated command/event transport and window API; every app still requires ownership checks.")),
+            Ok(None) => reason = format!("{name}: IPC peer does not match the recorded compositor invocation."),
+            Err(error) => reason = format!("{name}: {error}"),
+        }
+    }
+    Capability::new("window-close", "unavailable", &reason)
+}
+
+async fn discover_wayfire(manager: &UserManager, record: &SessionRecord, path: &Path) -> Result<(), SessionError> {
+    let mut connection = manager.request(async { Ok(super::wayfire::Connection::connect(path, record.identity.uid).await) }).await??;
+    if !window_close::owns_compositor(manager, record, connection.pid).await? {
+        return Err(SessionError::State("IPC peer does not match the recorded compositor invocation".into()));
+    }
+    manager.request(async { Ok(connection.discover().await) }).await??;
+    if !window_close::owns_compositor(manager, record, connection.pid).await? {
+        return Err(SessionError::State("compositor invocation changed during discovery".into()));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "window_capability_tests.rs"]
+mod tests;

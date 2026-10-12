@@ -38,6 +38,8 @@ mod sway;
 mod hyprland;
 mod window_backend;
 mod window_close;
+mod window_capability;
+mod wayfire;
 mod plain_launch;
 mod partial;
 mod processes;

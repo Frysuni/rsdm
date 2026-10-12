@@ -32,15 +32,15 @@ impl Service {
     fn main_pid(&self) -> u32 { self.0.load(Ordering::SeqCst) }
 }
 
-struct Fixture {
-    manager: UserManager,
-    invocation: Arc<AtomicU8>,
-    pid: Arc<AtomicU32>,
+pub(crate) struct Fixture {
+    pub(crate) manager: UserManager,
+    pub(crate) invocation: Arc<AtomicU8>,
+    pub(crate) pid: Arc<AtomicU32>,
     _server: Connection,
 }
 
 impl Fixture {
-    async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         let invocation = Arc::new(AtomicU8::new(1));
         let pid = Arc::new(AtomicU32::new(std::process::id()));
         let unit = Unit(invocation.clone());

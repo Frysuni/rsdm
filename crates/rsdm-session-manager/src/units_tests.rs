@@ -44,7 +44,7 @@ async fn exec_properties_keep_literal_arguments_and_use_the_callers_path() {
     assert_eq!(commands[0].1, argv);
     assert_eq!(commands[0].2, ["no-env-expand"]);
     let absent: Vec<String> = property(&properties, "UnsetEnvironment").try_into().unwrap();
-    assert_eq!(absent, ["WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "NIRI_SOCKET", "SWAYSOCK", "HYPRLAND_INSTANCE_SIGNATURE"]);
+    assert_eq!(absent, ["WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "NIRI_SOCKET", "SWAYSOCK", "HYPRLAND_INSTANCE_SIGNATURE", "WAYFIRE_SOCKET"]);
 }
 
 #[test]

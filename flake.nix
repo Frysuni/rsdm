@@ -127,6 +127,7 @@
           native-niri = import ./tests/session-lifecycle/niri.nix { inherit pkgs rsdm; };
           sway-windows = import ./tests/session-lifecycle/sway.nix { inherit pkgs rsdm; };
           hyprland-windows = import ./tests/session-lifecycle/hyprland.nix { inherit pkgs rsdm; };
+          wayfire-discovery = import ./tests/session-lifecycle/wayfire.nix { inherit pkgs rsdm; };
           native-de-handoff = import ./tests/session-lifecycle/native.nix { inherit pkgs rsdm; };
           power-lifecycle = import ./tests/session-lifecycle/power.nix { inherit pkgs rsdm; };
           lock-power = import ./tests/session-lifecycle/lock.nix { inherit pkgs rsdm; };

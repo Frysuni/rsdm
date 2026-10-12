@@ -66,48 +66,13 @@ async fn prepare_endpoint(manager: &UserManager, record: &SessionRecord, app: &A
     Ok(None)
 }
 
-async fn connect_endpoint(manager: &UserManager, record: &SessionRecord, name: &str, path: &Path) -> Result<Option<(Connection, Events, Vec<Window>)>, SessionError> {
+pub(super) async fn connect_endpoint(manager: &UserManager, record: &SessionRecord, name: &str, path: &Path) -> Result<Option<(Connection, Events, Vec<Window>)>, SessionError> {
     let mut connection = manager.request(async { Ok(Connection::connect(name, path, record.identity.uid).await) }).await??;
     if !owns_compositor(manager, record, connection.pid()).await? { return Ok(None); }
     let subscriber = manager.request(async { Ok(Connection::connect(name, path, record.identity.uid).await) }).await??;
     if subscriber.pid() != connection.pid() || !owns_compositor(manager, record, subscriber.pid()).await? { return Ok(None); }
     let (events, windows) = manager.request(async { Ok(connection.subscribe(subscriber).await) }).await??;
     Ok(Some((connection, events, windows)))
-}
-
-pub(super) async fn capability(manager: &UserManager, record: &SessionRecord) -> super::status::Capability {
-    use super::status::Capability;
-    if matches!(record.provider.as_str(), "gnome" | "plasma") {
-        return Capability::new("window-close", "not-applicable", "The native desktop owns application shutdown and its dialogs.");
-    }
-    if record.compositor_unit.is_none() || record.compositor_invocation.is_empty() {
-        return Capability::new("window-close", "unavailable", "No verified compositor invocation is recorded; TERM fallback remains subject to app policy.");
-    }
-    match tokio::time::timeout(std::time::Duration::from_secs(2), probe(manager, record)).await {
-        Ok(capability) => capability,
-        Err(_) => Capability::new("window-close", "unavailable", "The compositor capability probe timed out."),
-    }
-}
-
-async fn probe(manager: &UserManager, record: &SessionRecord) -> super::status::Capability {
-    use super::status::Capability;
-    let mut reason = "No supported compositor IPC endpoint is recorded.".to_string();
-    for (name, value) in &record.exported_environment {
-        if !matches!(name.as_str(), "NIRI_SOCKET" | "SWAYSOCK" | "HYPRLAND_INSTANCE_SIGNATURE") { continue; }
-        let path = if name == "HYPRLAND_INSTANCE_SIGNATURE" {
-            let Some(path) = super::hyprland::socket_directory(&record.exported_environment, value) else {
-                reason = "The recorded Hyprland endpoint is invalid.".into();
-                continue;
-            };
-            path
-        } else { Path::new(value).to_path_buf() };
-        match connect_endpoint(manager, record, name, &path).await {
-            Ok(Some(_)) => return Capability::new("window-close", "available", &format!("{name}: authenticated command/event transport and window API; every app still requires ownership checks.")),
-            Ok(None) => reason = format!("{name}: IPC peer does not match the recorded compositor invocation."),
-            Err(error) => reason = format!("{name}: {error}"),
-        }
-    }
-    Capability::new("window-close", "unavailable", &reason)
 }
 
 async fn dispatch(manager: &UserManager, record: &SessionRecord, app: &AppRecord, prepared: &mut PreparedClose, control: &ShutdownControl) -> Result<bool, SessionError> {
@@ -128,7 +93,7 @@ async fn dispatch(manager: &UserManager, record: &SessionRecord, app: &AppRecord
     }).await?
 }
 
-async fn owns_compositor(manager: &UserManager, record: &SessionRecord, pid: u32) -> Result<bool, SessionError> {
+pub(super) async fn owns_compositor(manager: &UserManager, record: &SessionRecord, pid: u32) -> Result<bool, SessionError> {
     let Some(unit) = &record.compositor_unit else { return Ok(false); };
     if record.compositor_invocation.is_empty() || record.compositor_invocation.iter().all(|byte| *byte == 0) { return Ok(false); }
     Ok(manager.invocation_id(unit).await? == record.compositor_invocation
@@ -146,4 +111,4 @@ async fn owns_process(manager: &UserManager, app: &AppRecord, pid: u32, handle: 
 
 #[cfg(test)]
 #[path = "window_close_tests.rs"]
-mod tests;
+pub(crate) mod tests;

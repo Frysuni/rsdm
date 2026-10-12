@@ -65,7 +65,7 @@ async fn snapshot(manager: &UserManager, runtime: Runtime, record: SessionRecord
     let mut details = base_details(status, &record);
     details.preparations = preparations.into_values().collect();
     details.capabilities.push(native_logout(manager, &record).await);
-    details.capabilities.push(crate::window_close::capability(manager, &record).await);
+    details.capabilities.push(crate::window_capability::capability(manager, &record).await);
     if manager.actions.check().is_err() { return Ok(SessionStatusDetails::disabled()); }
     Ok(details)
 }

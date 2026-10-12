@@ -35,6 +35,7 @@ let
             window.set_default_size(200, 120)
             window.connect("close-request", close)
             window.present()
+        (directory / (prefix + "-ready")).touch()
 
     def finished():
         if (directory / (prefix + "-finish")).exists():
