@@ -86,7 +86,10 @@ pkgs.testers.runNixOSTest {
             generation = machine.succeed(user + "systemctl --user show-environment | sed -n 's/^RSDM_SESSION_GENERATION=//p'").strip()
             assert generation in machine.succeed(control + "busctl --user call org.rsdm.Session1 /org/rsdm/Session1 org.rsdm.Session1 Handshake")
             session = control + "RSDM_SESSION_GENERATION=" + generation + " "
-            assert "XSMP: unavailable" in machine.succeed(session + "rsdm session status")
+            status = machine.succeed(session + "rsdm session status")
+            assert "XSMP: unavailable" in status, status
+            assert "capability: native-logout: available" in status, status
+            machine.fail("test -e " + runtime + "/native-requests")
             machine.fail(session + "rsdm app --on-timeout cancel -- ${application} rejected")
             machine.fail(session + "rsdm app --shutdown-method xsmp -- ${application} rejected")
             machine.succeed(session + "rsdm app -- ${application} ordinary")

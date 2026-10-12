@@ -7,11 +7,26 @@ struct PendingBus { entered: Arc<tokio::sync::Notify>, release: Arc<tokio::sync:
 
 #[zbus_macros::interface(name = "org.freedesktop.DBus")]
 impl PendingBus {
-    async fn name_has_owner(&self, name: &str) -> bool {
+    async fn get_name_owner(&self, name: &str) -> zbus::fdo::Result<String> {
         assert_eq!(name, "org.gnome.SessionManager");
         self.entered.notify_one();
         self.release.notified().await;
-        false
+        Err(zbus::fdo::Error::NameHasNoOwner("desktop is absent".into()))
+    }
+}
+
+struct NativeBus { uid: u32, failed: bool }
+
+#[zbus_macros::interface(name = "org.freedesktop.DBus")]
+impl NativeBus {
+    fn get_name_owner(&self, _name: &str) -> zbus::fdo::Result<String> {
+        if self.failed { return Err(zbus::fdo::Error::Failed("broker query failed".into())); }
+        Ok(":1.1".into())
+    }
+
+    fn get_connection_credentials(&self, name: &str) -> zbus::fdo::ConnectionCredentials {
+        assert_eq!(name, ":1.1");
+        zbus::fdo::ConnectionCredentials::default().set_unix_user_id(self.uid).set_process_id(std::process::id())
     }
 }
 
@@ -81,6 +96,23 @@ async fn partial_status_reports_external_lifecycle_limits() {
     assert!(details.limitations[0].contains("PAM"));
     assert!(details.limitations[0].contains("prepared"));
     assert!(details.capabilities.iter().any(|capability| capability.name == "compositor-lifecycle" && capability.state == "unavailable"));
+}
+
+#[tokio::test]
+async fn native_status_distinguishes_rejected_ownership_from_transport_failure() {
+    for kind in [ProviderKind::Gnome, ProviderKind::Plasma] {
+        for failed in [false, true] {
+            let mut fixture = Fixture::new().await;
+            let uid = unsafe { libc::geteuid() };
+            let broker = NativeBus { uid: if failed { uid } else { uid ^ 1 }, failed };
+            fixture._server.object_server().at("/org/freedesktop/DBus", broker).await.unwrap();
+            fixture.coordinator.provider.kind = kind;
+            fixture.coordinator.record.provider = fixture.coordinator.provider.name().into();
+            let details = query(&mut fixture).await;
+            let capability = details.capabilities.iter().find(|capability| capability.name == "native-logout").unwrap();
+            assert_eq!(capability.state, if failed { "unknown" } else { "unavailable" });
+        }
+    }
 }
 
 #[tokio::test]

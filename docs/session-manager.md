@@ -81,6 +81,10 @@ backend does not change a full session into partial. Window-close capability
 probes authenticate the current IPC instance and read its window/event APIs;
 they do not close windows. Probes run outside the coordinator actor with a
 bounded timeout.
+Native logout probes check the service's unique owner, UID and live process.
+For Plasma they also verify KSMServer and recognize an activatable LogoutPrompt
+without starting it. Status queries do not request shutdown or show native dialogs;
+an ownership failure is unavailable and a transport failure is unknown.
 
 Preparation results include the application InvocationID, transaction, selected
 method, dispatch state, `clean`/`forced`/`cancelled`/`unknown` result and escalation

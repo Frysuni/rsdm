@@ -5,6 +5,9 @@
         machine.succeed("rm -f " + runtime + "/app-* " + runtime + "/native-*")
         machine.succeed("systemd-run --unit=rsdm-test-session --collect --uid=alice --property=PAMName=login --property=TTYPath=/dev/tty1 --setenv=XDG_SESSION_TYPE=wayland --setenv=XDG_CURRENT_DESKTOP=KDE --setenv=XDG_RUNTIME_DIR=" + runtime + " --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus -- rsdm session start -- ${native} KDE on-demand")
         machine.wait_until_succeeds(control + "rsdm session status | grep '^plasma: running '", timeout=30)
+        for attempt in range(3):
+            status = machine.succeed(control + "rsdm session status")
+            assert "capability: native-logout: available" in status, status
         machine.succeed(user + "busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus NameHasOwner s org.kde.LogoutPrompt | grep 'b false'")
         machine.fail("test -e " + runtime + "/native-prompt-started")
         for args in ["session stop", "power reboot", "power poweroff"]:

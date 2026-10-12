@@ -17,6 +17,16 @@ impl Peer {
 }
 
 impl Provider {
+    pub(super) async fn logout_available(&self, manager: &UserManager) -> Result<bool, SessionError> {
+        manager.read(|| async {
+            let connection = manager.connection();
+            match probe(&connection, self.kind).await {
+                Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "org.freedesktop.DBus.Error.NameHasNoOwner" => Ok(false),
+                result => result,
+            }
+        }).await
+    }
+
     pub async fn delegate(&self, manager: &UserManager, action: &str) -> Result<(), SessionError> {
         let (name, path, interface) = match self.kind {
             ProviderKind::Gnome => ("org.gnome.SessionManager", "/org/gnome/SessionManager", "org.gnome.SessionManager"),
@@ -75,15 +85,41 @@ async fn recipient(manager: &UserManager, connection: &Connection, kind: Provide
 }
 
 async fn pin(manager: &UserManager, connection: &Connection, name: &'static str) -> Result<Peer, SessionError> {
-    let owner = manager.request(current_owner(connection, name)).await?;
-    let credentials = manager.request(async {
-        let reply = connection.call_method(Some("org.freedesktop.DBus"), "/org/freedesktop/DBus",
-            Some("org.freedesktop.DBus"), "GetConnectionCredentials", &(owner.as_str(),)).await?;
-        reply.body().deserialize::<zbus::fdo::ConnectionCredentials>()
-    }).await?;
+    manager.request(pin_peer(connection, name)).await.map_err(Into::into)
+}
+
+async fn pin_peer(connection: &Connection, name: &'static str) -> zbus::Result<Peer> {
+    let owner = current_owner(connection, name).await?;
+    let reply = connection.call_method(Some("org.freedesktop.DBus"), "/org/freedesktop/DBus",
+        Some("org.freedesktop.DBus"), "GetConnectionCredentials", &(owner.as_str(),)).await?;
+    let credentials = reply.body().deserialize::<zbus::fdo::ConnectionCredentials>()?;
     // SAFETY: geteuid has no preconditions; native shutdown stays within this UID.
-    let process = Caller::from_credentials(&credentials, unsafe { libc::geteuid() })?;
+    let process = Caller::from_credentials(&credentials, unsafe { libc::geteuid() })
+        .map_err(|error| zbus::fdo::Error::AccessDenied(error.to_string()))?;
     Ok(Peer { service: name, owner, process })
+}
+
+async fn probe(connection: &Connection, kind: ProviderKind) -> zbus::Result<bool> {
+    let name = match kind {
+        ProviderKind::Gnome => "org.gnome.SessionManager",
+        ProviderKind::Plasma => "org.kde.LogoutPrompt",
+        _ => return Ok(false),
+    };
+    let desktop = if kind == ProviderKind::Plasma { Some(pin_peer(connection, "org.kde.ksmserver").await?) } else { None };
+    let (available, peer) = match pin_peer(connection, name).await {
+        Ok(peer) => (true, Some(peer)),
+        Err(zbus::Error::MethodError(error, _, _))
+            if kind == ProviderKind::Plasma && error.as_str() == "org.freedesktop.DBus.Error.NameHasNoOwner" => {
+            let reply = connection.call_method(Some("org.freedesktop.DBus"), "/org/freedesktop/DBus",
+                Some("org.freedesktop.DBus"), "ListActivatableNames", &()).await?;
+            let names: Vec<String> = reply.body().deserialize()?;
+            (names.iter().any(|name| name == "org.kde.LogoutPrompt"), None)
+        }
+        Err(error) => return Err(error),
+    };
+    if let Some(desktop) = desktop { desktop.verify(connection).await?; }
+    if let Some(peer) = peer { peer.verify(connection).await?; }
+    Ok(available)
 }
 
 async fn current_owner(connection: &Connection, name: &str) -> zbus::Result<OwnedUniqueName> {

@@ -96,19 +96,21 @@ fn base_details(status: SessionStatus, record: &SessionRecord) -> SessionStatusD
 }
 
 async fn native_logout(manager: &UserManager, record: &SessionRecord) -> Capability {
-    let name = match record.provider.as_str() {
-        "gnome" => "org.gnome.SessionManager", "plasma" => "org.kde.LogoutPrompt",
+    let kind = match record.provider.as_str() {
+        "gnome" => crate::provider::ProviderKind::Gnome, "plasma" => crate::provider::ProviderKind::Plasma,
         "partial" => return Capability::new("native-logout", "unavailable", "This attached provider currently prepares apps without native desktop delegation."),
         _ => return Capability::new("native-logout", "not-applicable", "This provider uses its own session lifecycle."),
     };
-    let query = manager.read(|| async {
-        let reply = manager.connection().call_method(Some("org.freedesktop.DBus"), "/org/freedesktop/DBus", Some("org.freedesktop.DBus"), "NameHasOwner", &(name,)).await?;
-        reply.body().deserialize::<bool>()
-    });
+    let provider = crate::provider::Provider { kind, native_unit: None, logout_command: Vec::new() };
+    let query = provider.logout_available(manager);
     match tokio::time::timeout(Duration::from_secs(2), query).await {
-        Ok(Ok(true)) => Capability::new("native-logout", "available", "The native desktop logout service is present; it owns confirmation dialogs."),
-        Ok(Ok(false)) => Capability::new("native-logout", "unavailable", "The native desktop logout service has no current bus owner."),
+        Ok(Ok(true)) => Capability::new("native-logout", "available", "A verified native desktop has an owned or activatable logout service; it owns confirmation dialogs."),
+        Ok(Ok(false)) => Capability::new("native-logout", "unavailable", "No live native desktop with an owned or activatable logout service was found."),
+        Ok(Err(SessionError::Bus(zbus::Error::MethodError(name, reason, _)))) if name.as_str() == "org.freedesktop.DBus.Error.AccessDenied" =>
+            Capability::new("native-logout", "unavailable", reason.as_deref().unwrap_or("Native desktop ownership could not be verified.")),
+        Ok(Err(SessionError::Bus(zbus::Error::FDO(error)))) if matches!(error.as_ref(), zbus::fdo::Error::AccessDenied(_)) =>
+            Capability::new("native-logout", "unavailable", &error.to_string()),
         Ok(Err(error)) => Capability::new("native-logout", "unknown", &error.to_string()),
-        Err(_) => Capability::new("native-logout", "unknown", "The native desktop presence query timed out."),
+        Err(_) => Capability::new("native-logout", "unknown", "The native desktop ownership query timed out."),
     }
 }

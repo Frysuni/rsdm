@@ -13,6 +13,9 @@ struct Broker {
     descriptor: Option<std::os::fd::OwnedFd>,
     activation: Option<Arc<Activation>>,
     disable: Option<crate::action_gate::ActionGate>,
+    activatable: bool,
+    replaced_desktop: bool,
+    desktop_queries: std::sync::atomic::AtomicUsize,
 }
 
 struct Activation { calls: std::sync::atomic::AtomicUsize, lost: bool, replace_desktop: bool }
@@ -21,7 +24,8 @@ impl Broker {
     fn current() -> Self {
         // SAFETY: geteuid has no preconditions.
         Self { uid: Some(unsafe { libc::geteuid() }), pid: Some(std::process::id()), replaced: false,
-            missing: false, owner_queries: Default::default(), descriptor: None, activation: None, disable: None }
+            missing: false, owner_queries: Default::default(), descriptor: None, activation: None, disable: None,
+            activatable: false, replaced_desktop: false, desktop_queries: Default::default() }
     }
 }
 
@@ -34,7 +38,9 @@ impl Broker {
             return Err(zbus::fdo::Error::NameHasNoOwner("desktop is absent".into()));
         }
         if name == "org.kde.ksmserver" {
-            let replaced = activated && self.activation.as_ref().is_some_and(|state| state.replace_desktop);
+            let query = self.desktop_queries.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let replaced = (activated && self.activation.as_ref().is_some_and(|state| state.replace_desktop))
+                || (self.replaced_desktop && query != 0);
             return Ok(if replaced { ":1.10" } else { ":1.9" }.into());
         }
         let query = self.owner_queries.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -61,6 +67,10 @@ impl Broker {
         activation.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if activation.lost { return Err(zbus::fdo::Error::NoReply("activation reply lost".into())); }
         Ok(1)
+    }
+
+    fn list_activatable_names(&self) -> Vec<String> {
+        if self.activatable { vec!["org.kde.LogoutPrompt".into()] } else { Vec::new() }
     }
 }
 
@@ -218,6 +228,7 @@ async fn an_exited_broker_pidfd_cannot_be_replaced_by_a_live_numeric_pid() {
     broker.descriptor = Some(descriptor);
     let (manager, _server, state) = fixture(Reply::Success, broker).await;
     let provider = Provider { kind: ProviderKind::Gnome, native_unit: None, logout_command: Vec::new() };
+    assert!(provider.logout_available(&manager).await.is_err());
     assert!(provider.delegate(&manager, "logout").await.is_err());
     assert!(state.calls.lock().unwrap().is_empty());
 }
@@ -236,3 +247,6 @@ async fn disabling_during_the_final_owner_query_prevents_native_dispatch() {
 
 #[path = "provider_activation_tests.rs"]
 mod activation_tests;
+
+#[path = "provider_capability_tests.rs"]
+mod capability_tests;
