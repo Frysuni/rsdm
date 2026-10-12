@@ -89,7 +89,8 @@ backend does not change a full session into partial. Window-close capability
 probes authenticate the current IPC instance and read its window/event APIs;
 they do not close windows. Probes run outside the coordinator actor with a
 bounded timeout.
-Native logout probes check the service's unique owner, UID and live process.
+Native logout probes check the service's unique owner, UID, broker-provided
+ProcessFD and membership in this generation's logind session.
 For Plasma they also verify KSMServer and recognize an activatable LogoutPrompt
 without starting it. Status queries do not request shutdown or show native dialogs;
 an ownership failure is unavailable and a transport failure is unknown.
@@ -256,12 +257,16 @@ keeps observing the lifecycle. Native API rejection leaves the compositor alive
 and returns an error; normal native logout has no forced generic fallback.
 
 Before delegation, RSDM resolves the current unique bus owner and authenticates
-its UID and pinned process. It rechecks that owner immediately before dispatch
+its UID, broker-provided ProcessFD and logind session. It rechecks that owner and
+login membership immediately before dispatch
 on the same bus connection, and addresses the unique owner with `NoAutoStart`.
 A changed or exited owner cannot redirect the request to a replacement desktop
 service. When Plasma's on-demand `LogoutPrompt` helper has no owner, RSDM first
-authenticates the live `ksmserver`, explicitly activates the helper, then pins
-its owner and rechecks both processes before submitting shutdown. A lost
+authenticates the live `ksmserver` in this login, explicitly activates the helper,
+then pins its owner and rechecks both processes before submitting shutdown.
+In full mode, a prompt user service without a logind session can act behind
+that verified desktop; a prompt in another login is rejected. GNOME and
+KSMServer without a verified login remain unavailable. A lost
 activation or shutdown reply is not retried.
 
 Explicit startup overrides:

@@ -4,6 +4,10 @@ use std::{sync::{Arc, Mutex}, time::Duration};
 
 use super::*;
 
+#[path = "provider_login_fixture.rs"]
+mod login_fixture;
+use login_fixture::{delegate, available};
+
 struct Broker {
     uid: Option<u32>,
     pid: Option<u32>,
@@ -28,6 +32,18 @@ impl Broker {
             missing: false, owner_queries: Default::default(), descriptor: None, activation: None, disable: None,
             activatable: false, replaced_desktop: false, desktop_queries: Default::default(), gnome_missing: false }
     }
+
+    fn pinned() -> Self {
+        use std::os::fd::FromRawFd;
+        let mut broker = Self::current();
+        // SAFETY: pidfd_open pins the still-running test process.
+        let descriptor = unsafe { libc::syscall(libc::SYS_pidfd_open, std::process::id(), 0) };
+        assert!(descriptor >= 0);
+        // SAFETY: the successful syscall returned an owned descriptor.
+        broker.descriptor = Some(unsafe { std::os::fd::OwnedFd::from_raw_fd(descriptor as i32) });
+        broker
+    }
+
 }
 
 #[zbus_macros::interface(name = "org.freedesktop.DBus")]
@@ -146,11 +162,11 @@ async fn fixture(reply: Reply, broker: Broker) -> (UserManager, zbus::Connection
 #[tokio::test]
 async fn native_methods_are_dispatched_once_with_and_without_a_reply() {
     for reply in [Reply::Success, Reply::Lost] {
-        let (manager, _server, state) = fixture(reply, Broker::current()).await;
+        let (manager, _server, state) = fixture(reply, Broker::pinned()).await;
         for kind in [ProviderKind::Gnome, ProviderKind::Plasma] {
             let provider = Provider { kind, native_unit: None, logout_command: Vec::new() };
             for action in ["logout", "reboot", "poweroff"] {
-                let result = provider.delegate(&manager, action).await;
+                let result = delegate(&provider, &manager, action).await;
                 match reply {
                     Reply::Success => result.unwrap(),
                     Reply::Lost => assert!(matches!(result, Err(SessionError::Bus(error)) if crate::bus::retryable_error(&error))),
@@ -164,19 +180,19 @@ async fn native_methods_are_dispatched_once_with_and_without_a_reply() {
 
 #[tokio::test]
 async fn an_expired_shared_deadline_prevents_native_dispatch() {
-    let (manager, _server, state) = fixture(Reply::Success, Broker::current()).await;
+    let (manager, _server, state) = fixture(Reply::Success, Broker::pinned()).await;
     manager.deadline.set(1);
     let provider = Provider { kind: ProviderKind::Gnome, native_unit: None, logout_command: Vec::new() };
-    assert!(provider.delegate(&manager, "logout").await.is_err());
+    assert!(delegate(&provider, &manager, "logout").await.is_err());
     assert!(state.calls.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn revising_the_deadline_interrupts_a_pending_native_reply() {
-    let (manager, _server, state) = fixture(Reply::Pending, Broker::current()).await;
+    let (manager, _server, state) = fixture(Reply::Pending, Broker::pinned()).await;
     let deadline = manager.deadline.clone();
     let provider = Provider { kind: ProviderKind::Gnome, native_unit: None, logout_command: Vec::new() };
-    let worker = tokio::spawn(async move { provider.delegate(&manager, "logout").await });
+    let worker = tokio::spawn(async move { delegate(&provider, &manager, "logout").await });
     tokio::time::timeout(Duration::from_secs(2), state.accepted.notified()).await.unwrap();
     deadline.set(1);
     let result = tokio::time::timeout(Duration::from_secs(1), worker).await.unwrap().unwrap();
@@ -186,11 +202,11 @@ async fn revising_the_deadline_interrupts_a_pending_native_reply() {
 
 #[tokio::test]
 async fn unsupported_actions_and_providers_do_not_dispatch() {
-    let (manager, _server, state) = fixture(Reply::Success, Broker::current()).await;
+    let (manager, _server, state) = fixture(Reply::Success, Broker::pinned()).await;
     let provider = Provider { kind: ProviderKind::Gnome, native_unit: None, logout_command: Vec::new() };
-    assert!(provider.delegate(&manager, "suspend").await.is_err());
+    assert!(delegate(&provider, &manager, "suspend").await.is_err());
     let provider = Provider { kind: ProviderKind::Managed, native_unit: None, logout_command: Vec::new() };
-    assert!(provider.delegate(&manager, "logout").await.is_err());
+    assert!(delegate(&provider, &manager, "logout").await.is_err());
     assert!(state.calls.lock().unwrap().is_empty());
 }
 
@@ -198,7 +214,7 @@ async fn unsupported_actions_and_providers_do_not_dispatch() {
 async fn missing_changed_foreign_or_unidentified_owners_cannot_receive_native_shutdown() {
     for kind in [ProviderKind::Gnome, ProviderKind::Plasma] {
         for invalid in ["missing", "changed", "foreign", "no-uid", "no-pid", "zero-pid"] {
-            let mut broker = Broker::current();
+            let mut broker = Broker::pinned();
             match invalid {
                 "missing" => broker.missing = true,
                 "changed" => broker.replaced = true,
@@ -210,7 +226,7 @@ async fn missing_changed_foreign_or_unidentified_owners_cannot_receive_native_sh
             }
             let (manager, _server, state) = fixture(Reply::Success, broker).await;
             let provider = Provider { kind, native_unit: None, logout_command: Vec::new() };
-            assert!(provider.delegate(&manager, "logout").await.is_err(), "{invalid}");
+            assert!(delegate(&provider, &manager, "logout").await.is_err(), "{invalid}");
             assert!(state.calls.lock().unwrap().is_empty(), "{invalid}");
         }
     }
@@ -226,24 +242,24 @@ async fn an_exited_broker_pidfd_cannot_be_replaced_by_a_live_numeric_pid() {
     let descriptor = unsafe { OwnedFd::from_raw_fd(raw as i32) };
     child.kill().await.unwrap();
     child.wait().await.unwrap();
-    let mut broker = Broker::current();
+    let mut broker = Broker::pinned();
     broker.descriptor = Some(descriptor);
     let (manager, _server, state) = fixture(Reply::Success, broker).await;
     let provider = Provider { kind: ProviderKind::Gnome, native_unit: None, logout_command: Vec::new() };
-    assert!(provider.logout_available(&manager).await.is_err());
-    assert!(provider.delegate(&manager, "logout").await.is_err());
+    assert!(available(&provider, &manager).await.is_err());
+    assert!(delegate(&provider, &manager, "logout").await.is_err());
     assert!(state.calls.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn disabling_during_the_final_owner_query_prevents_native_dispatch() {
     let actions = crate::action_gate::ActionGate::default();
-    let mut broker = Broker::current();
+    let mut broker = Broker::pinned();
     broker.disable = Some(actions.clone());
     let (mut manager, _server, state) = fixture(Reply::Success, broker).await;
     manager.actions = actions;
     let provider = Provider { kind: ProviderKind::Gnome, native_unit: None, logout_command: Vec::new() };
-    assert!(provider.delegate(&manager, "logout").await.is_err());
+    assert!(delegate(&provider, &manager, "logout").await.is_err());
     assert!(state.calls.lock().unwrap().is_empty());
 }
 
@@ -255,6 +271,9 @@ mod capability_tests;
 
 #[path = "native_attached_tests.rs"]
 mod attached_tests;
+
+#[path = "native_full_scope_tests.rs"]
+mod scope_tests;
 
 #[path = "kwin_auth_tests.rs"]
 mod kwin_tests;

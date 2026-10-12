@@ -95,11 +95,12 @@ impl Coordinator {
         if self.provider.native_desktop() && matches!(self.action.as_str(), "logout" | "reboot" | "poweroff") {
             self.lifecycle.phase = SessionPhase::StoppingSession;
             let provider = self.provider.clone();
+            let identity = self.record.identity.clone();
             let manager = self.manager.clone();
             let action = self.action.clone();
             let events = self.events.clone();
             self.workers += 1;
-            tokio::spawn(async move { let _ = events.send(Work::Delegated(provider.delegate(&manager, &action).await)); });
+            tokio::spawn(async move { let _ = events.send(Work::Delegated(provider.delegate(&manager, &action, &identity).await)); });
             return Ok(());
         }
         if matches!(self.action.as_str(), "reboot" | "poweroff") {

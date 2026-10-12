@@ -105,7 +105,7 @@ async fn native_logout(manager: &UserManager, record: &SessionRecord) -> Capabil
     let query = async {
         if kind == crate::provider::ProviderKind::Attached {
             crate::native_attached::discover(manager, &record.identity).await.map(|target| target.is_some())
-        } else { provider.logout_available(manager).await }
+        } else { provider.logout_available(manager, &record.identity).await }
     };
     match tokio::time::timeout(Duration::from_secs(2), query).await {
         Ok(Ok(true)) if kind == crate::provider::ProviderKind::Attached =>
