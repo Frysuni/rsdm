@@ -1,5 +1,51 @@
 use super::*;
 
+#[cfg(feature = "xsmp")]
+#[tokio::test]
+async fn cancelling_an_active_transaction_does_not_enqueue_a_late_xsmp_prepare() {
+    let mut fixture = Fixture::new().await;
+    let (sender, mut messages) = tokio::sync::mpsc::unbounded_channel();
+    fixture.coordinator.xsmp = xsmp::Handle::with_sender_for_test(sender);
+    fixture.coordinator.begin_stop("logout", None).await.unwrap();
+    let transaction_id = fixture.coordinator.record.pending_transaction_id().unwrap().to_string();
+    let (reply, mut cancelled) = tokio::sync::mpsc::channel(1);
+    fixture.coordinator.request(crate::control::Request::Cancel {
+        generation: GENERATION.into(), reply: crate::control::Reply::for_test(reply),
+    }).await.unwrap();
+    cancelled.recv().await.unwrap().unwrap();
+    assert!(matches!(messages.try_recv().unwrap(), xsmp::Message::Cancel));
+
+    let (reply, mut received) = tokio::sync::mpsc::channel(1);
+    fixture.coordinator.request(crate::control::Request::XsmpPrepare {
+        generation: GENERATION.into(), transaction_id, units: Vec::new(), cancellable: true,
+        reply: crate::control::Reply::for_test(reply),
+    }).await.unwrap();
+    assert!(matches!(messages.try_recv(), Err(tokio::sync::mpsc::error::TryRecvError::Empty)));
+    assert!(received.recv().await.unwrap().unwrap().is_empty());
+}
+
+#[cfg(feature = "xsmp")]
+#[tokio::test]
+async fn a_forced_xsmp_prepare_uses_the_same_control_despite_a_late_cancellation_flag() {
+    let mut fixture = Fixture::new().await;
+    let (sender, mut messages) = tokio::sync::mpsc::unbounded_channel();
+    fixture.coordinator.xsmp = xsmp::Handle::with_sender_for_test(sender);
+    fixture.coordinator.begin_stop("logout", None).await.unwrap();
+    let control = fixture.coordinator.shutdown.as_ref().unwrap().clone();
+    control.force(0);
+    control.cancelled.store(true, Ordering::SeqCst);
+    let transaction_id = fixture.coordinator.record.pending_transaction_id().unwrap().to_string();
+    let (reply, _received) = tokio::sync::mpsc::channel(1);
+    fixture.coordinator.request(crate::control::Request::XsmpPrepare {
+        generation: GENERATION.into(), transaction_id, units: Vec::new(), cancellable: true,
+        reply: crate::control::Reply::for_test(reply),
+    }).await.unwrap();
+    let xsmp::Message::Prepare { control: Some(shared), cancellable, .. } = messages.try_recv().unwrap() else { panic!("forced prepare was not queued"); };
+    assert!(Arc::ptr_eq(&control, &shared));
+    assert!(!cancellable);
+    assert!(!shared.cancelled());
+}
+
 #[tokio::test]
 async fn an_independent_stop_hook_after_cancellation_does_not_reuse_the_finished_transaction() {
     let mut fixture = Fixture::new().await;

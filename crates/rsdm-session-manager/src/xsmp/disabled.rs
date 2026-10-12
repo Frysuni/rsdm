@@ -1,6 +1,6 @@
 //! Custom builds without libSM/libICE retain the session lifecycle API.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use crate::{SessionError, bus::UserManager, control::Reply, deadline::Deadline,
     provider::Provider, runtime::Runtime};
@@ -19,7 +19,8 @@ impl Handle {
 
     pub async fn shutdown(&mut self, _deadline: &Deadline) -> Result<(), SessionError> { Ok(()) }
 
-    pub fn prepare(&self, _units: Vec<String>, _transaction_id: String, _cancellable: bool, reply: Reply<Vec<String>>) {
+    pub fn prepare(&self, _units: Vec<String>, _transaction_id: String, _cancellable: bool,
+        _control: Option<Arc<crate::app_stop::ShutdownControl>>, reply: Reply<Vec<String>>) {
         let _ = reply.try_send(Ok(Vec::new()));
     }
 

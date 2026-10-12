@@ -16,7 +16,8 @@ pub enum Notice {
 }
 
 pub enum Message {
-    Prepare { units: Vec<String>, transaction_id: String, cancellable: bool, reply: Reply<Vec<String>> },
+    Prepare { units: Vec<String>, transaction_id: String, cancellable: bool,
+        control: Option<Arc<crate::app_stop::ShutdownControl>>, reply: Reply<Vec<String>> },
     Cancel,
 }
 
@@ -30,6 +31,13 @@ pub struct Handle {
 }
 
 impl Handle {
+    #[cfg(test)]
+    pub fn with_sender_for_test(sender: UnboundedSender<Message>) -> Self {
+        let (_events, notices) = mpsc::unbounded_channel();
+        Self { sender: Some(sender), finished: None, notices, interrupt: Arc::default(),
+            connected: HashSet::new(), environment: Vec::new() }
+    }
+
     pub async fn start(manager: &UserManager, runtime: &Runtime, provider: &Provider) -> Result<Self, SessionError> {
         let (sender, messages) = mpsc::unbounded_channel();
         let (events, notices) = mpsc::unbounded_channel();
@@ -106,9 +114,10 @@ impl Handle {
 
     pub fn available(&self) -> bool { self.sender.is_some() }
 
-    pub fn prepare(&self, units: Vec<String>, transaction_id: String, cancellable: bool, reply: Reply<Vec<String>>) {
+    pub fn prepare(&self, units: Vec<String>, transaction_id: String, cancellable: bool,
+        control: Option<Arc<crate::app_stop::ShutdownControl>>, reply: Reply<Vec<String>>) {
         if let Some(sender) = &self.sender {
-            if sender.send(Message::Prepare { units, transaction_id, cancellable, reply: reply.clone() }).is_err() {
+            if sender.send(Message::Prepare { units, transaction_id, cancellable, control, reply: reply.clone() }).is_err() {
                 let _ = reply.try_send(Err("XSMP server stopped".into()));
             }
         } else { let _ = reply.try_send(Ok(Vec::new())); }
@@ -138,3 +147,7 @@ impl Drop for Handle {
 #[cfg(test)]
 #[path = "handle_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "transaction_tests.rs"]
+mod transaction_tests;

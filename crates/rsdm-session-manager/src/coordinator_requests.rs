@@ -42,8 +42,10 @@ impl Coordinator {
                     let current = self.record.pending_transaction_id().unwrap_or("");
                     if current != transaction_id {
                         let _ = reply.try_send(Err("shutdown transaction is stale".into()));
+                    } else if self.shutdown.as_ref().is_some_and(|control| control.cancelled()) {
+                        let _ = reply.try_send(Ok(Vec::new()));
                     } else {
-                        self.xsmp.prepare(units, transaction_id, allowed, reply);
+                        self.xsmp.prepare(units, transaction_id, allowed, self.shutdown.clone(), reply);
                     }
                 }
             }

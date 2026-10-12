@@ -73,13 +73,14 @@ async fn request_term(manager: &UserManager, runtime: &Runtime, app: &AppRecord,
 pub(super) async fn prepare_xsmp(
     manager: &UserManager, runtime: &Runtime, units: &[String], control: &ShutdownControl,
 ) -> Result<Vec<String>, SessionError> {
-    if !cfg!(feature = "xsmp") || units.is_empty() || control.recovery.load(Ordering::SeqCst) {
+    if !cfg!(feature = "xsmp") || units.is_empty() || control.recovery.load(Ordering::SeqCst) || control.cancelled() {
         return Ok(Vec::new());
     }
     manager.actions.guard(manager.deadline.bound(async {
         let connection = manager.connection();
         let proxy = zbus::Proxy::new(&connection, crate::control::BUS_NAME,
             crate::control::OBJECT_PATH, crate::control::BUS_NAME).await?;
+        if control.cancelled() { return Ok(Vec::new()); }
         let selected = proxy.call("XsmpPrepare", &(&runtime.generation, control.transaction_id.as_deref().unwrap_or(""), units, !control.noncancelable.load(Ordering::SeqCst))).await?;
         Ok::<Vec<String>, SessionError>(selected)
     })).await?
