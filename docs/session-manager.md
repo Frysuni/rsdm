@@ -171,9 +171,19 @@ executors run the command directly. Failed identity capture still allows the
 command to run; kernels with anonymous pidfds and legacy records provide no
 original-process ID. This metadata does not itself authorize another cgroup.
 
+If that original process moves into a transient systemd scope, RSDM can capture
+the scope while the service invocation and original pidfd ID still match. Every
+scope member must be the original process or a live descendant, with verified
+kernel cgroup membership. The scope's InvocationID is retained in the private
+app record and rechecked for window close, XSMP and signals. RSDM observes both
+groups, including scope children after the service becomes inactive. A changed
+scope invocation is an ownership error. Legacy records and unsupported pidfd
+identities cannot adopt a scope; an uncaptured live original process prevents
+reporting a clean exit after its service stops.
+
 In a managed WM or native niri session, auto chooses an explicit quit command,
 a connected XSMP client, a verified window close, then SIGTERM to the main process. Remaining children
-are tracked through the service cgroup. Force timeout gives them up to five
+are tracked through the service cgroup and any authenticated migrated scope. Force timeout gives them up to five
 seconds of SIGTERM grace, then SIGKILL. That grace is additional to the app
 timeout. Apps prepare in parallel, so logout does not wait one full timeout per
 app in sequence. Policies apply to that launch; relaunch an app to change them.
@@ -181,7 +191,7 @@ app in sequence. Policies apply to that launch; relaunch an app to change them.
 Quit commands use argv parsing without a shell or variable expansion. Use the
 application's documented quit method where available. Helper success,
 `SaveYourselfDone`, window disappearance and main PID exit do not prove app exit.
-RSDM waits for the app cgroup. Arguments after `--` are passed through unchanged;
+RSDM waits for the app's verified cgroups. Arguments after `--` are passed through unchanged;
 any shell expansion happens before RSDM receives them. Quote `'$HOME'` in a shell
 to pass those characters literally.
 

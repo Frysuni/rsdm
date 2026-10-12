@@ -131,6 +131,7 @@
           session-attach = import ./tests/session-lifecycle/attach.nix { inherit pkgs rsdm; };
           native-niri = import ./tests/session-lifecycle/niri.nix { inherit pkgs rsdm; };
           sway-windows = import ./tests/session-lifecycle/sway.nix { inherit pkgs rsdm; };
+          browser-windows = import ./tests/session-lifecycle/browser-windows.nix { inherit pkgs rsdm; };
           hyprland-windows = import ./tests/session-lifecycle/hyprland.nix { inherit pkgs rsdm; };
           kwin-windows = import ./tests/session-lifecycle/kwin.nix { inherit pkgs rsdm; };
           wayfire-discovery = import ./tests/session-lifecycle/wayfire.nix { inherit pkgs rsdm; };

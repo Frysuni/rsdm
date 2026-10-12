@@ -28,6 +28,25 @@ pub(super) async fn verify_invocation(manager: &UserManager, app: &AppRecord) ->
 }
 
 pub(super) async fn app_processes(manager: &UserManager, app: &AppRecord) -> Result<Vec<u32>, SessionError> {
+    let mut pids = service_processes(manager, app).await?;
+    if let Some(scope) = super::app_scope::registered_scope(app)? {
+        pids.extend(super::app_scope::processes(manager, scope).await?);
+        pids.sort_unstable();
+        pids.dedup();
+    }
+    if let Some(origin) = &app.original_process {
+        if !pids.contains(&origin.pid) {
+            if let Some(handle) = ProcessHandle::open(origin.pid)? {
+                if handle.id()? == Some(origin.pidfd_id) && handle.alive()? {
+                    return Err(SessionError::State("original application process has an unverified cgroup".into()));
+                }
+            }
+        }
+    }
+    Ok(pids)
+}
+
+async fn service_processes(manager: &UserManager, app: &AppRecord) -> Result<Vec<u32>, SessionError> {
     if !verify_invocation(manager, app).await? { return Ok(Vec::new()); }
     let control: u32 = match manager.unit_property(&app.unit, SERVICE, "ControlPID").await {
         Ok(pid) => pid,
@@ -67,19 +86,19 @@ pub(super) async fn signal_app(manager: &UserManager, app: &AppRecord, signal: i
 pub(super) async fn signal_app_tracked(manager: &UserManager, app: &AppRecord, signal: i32, control: &ShutdownControl, sent: &AtomicBool) -> Result<(), SessionError> {
     let processes = app_processes(manager, app).await?;
     if processes.is_empty() || control.cancelled() { return Ok(()); }
-    let group: String = manager.unit_property(&app.unit, SERVICE, "ControlGroup").await?;
-    if !group.starts_with('/') || group == "/" {
-        return Err(SessionError::State(format!("{} has no dedicated cgroup", app.unit)));
-    }
+    let groups = if app.migrated_scope.is_some() { process_groups(manager, app).await? }
+        else { vec![service_group(manager, &app.unit).await?] };
 
     // Bound live descriptors even for large browser cgroups. Prepare the
     // owned pidfds before the final invocation and cancellation checks.
     for batch in processes.chunks(32) {
         let batch = batch.to_vec();
-        let group = group.clone();
-        let owned = super::runtime::blocking(move || owned_process_handles(&batch, &group)).await?;
+        let groups = groups.clone();
+        let owned = super::runtime::blocking(move || owned_process_handles(&batch, &groups)).await?;
         if control.cancelled() { return Ok(()); }
-        if !verify_invocation(manager, app).await? { return Ok(()); }
+        let service = verify_invocation(manager, app).await?;
+        let scope = if let Some(scope) = &app.migrated_scope { super::app_scope::current(manager, scope).await? } else { false };
+        if !service && !scope { return Ok(()); }
         for handle in owned {
             manager.actions.check_generation_async().await?;
             if control.cancelled() { return Ok(()); }
@@ -90,7 +109,7 @@ pub(super) async fn signal_app_tracked(manager: &UserManager, app: &AppRecord, s
     Ok(())
 }
 
-fn owned_process_handles(processes: &[u32], group: &str) -> Result<Vec<ProcessHandle>, SessionError> {
+fn owned_process_handles(processes: &[u32], groups: &[String]) -> Result<Vec<ProcessHandle>, SessionError> {
     let mut owned = Vec::new();
     for &pid in processes {
         let Some(handle) = ProcessHandle::open(pid)? else { continue; };
@@ -99,9 +118,28 @@ fn owned_process_handles(processes: &[u32], group: &str) -> Result<Vec<ProcessHa
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => return Err(error.into()),
         };
-        if belongs_to_cgroup(&membership, group) { owned.push(handle); }
+        if groups.iter().any(|group| belongs_to_cgroup(&membership, group)) { owned.push(handle); }
     }
     Ok(owned)
+}
+
+pub(super) async fn process_groups(manager: &UserManager, app: &AppRecord) -> Result<Vec<String>, SessionError> {
+    let mut groups = Vec::new();
+    if verify_invocation(manager, app).await? {
+        groups.push(service_group(manager, &app.unit).await?);
+    }
+    if let Some(scope) = super::app_scope::registered_scope(app)? {
+        if let Some(group) = super::app_scope::group(manager, scope).await? { groups.push(group); }
+    }
+    Ok(groups)
+}
+
+async fn service_group(manager: &UserManager, unit: &str) -> Result<String, SessionError> {
+    let group: String = manager.unit_property(unit, SERVICE, "ControlGroup").await?;
+    if !group.starts_with('/') || group == "/" {
+        return Err(SessionError::State(format!("{unit} has no dedicated cgroup")));
+    }
+    Ok(group)
 }
 
 pub(super) fn belongs_to_cgroup(membership: &str, group: &str) -> bool {
@@ -127,16 +165,23 @@ pub(super) async fn stop_invocation(manager: &UserManager, unit: &str, expected:
 }
 
 pub(super) async fn terminate_main(manager: &UserManager, app: &AppRecord, control: &ShutdownControl) -> Result<bool, SessionError> {
-    if control.cancelled() || !verify_invocation(manager, app).await? {
-        return Ok(false);
-    }
-    let main: u32 = manager.unit_property(&app.unit, SERVICE, "MainPID").await?;
+    if control.cancelled() { return Ok(false); }
+    let running = verify_invocation(manager, app).await?;
+    let mut main = if running { manager.unit_property::<u32>(&app.unit, SERVICE, "MainPID").await? } else { 0 };
+    let original = if main == 0 && app.migrated_scope.is_some() { app.original_process.as_ref() } else { None };
+    if let Some(origin) = original { main = origin.pid; }
     if main == 0 {
         return signal_app(manager, app, libc::SIGTERM, control).await;
     }
     let Some(handle) = ProcessHandle::open(main)? else {
         return signal_app(manager, app, libc::SIGTERM, control).await;
     };
+    let groups = process_groups(manager, app).await?;
+    let owned = super::runtime::blocking(move || owned_process_handles(&[main], &groups)).await?;
+    if owned.is_empty() || !handle.alive()? { return Ok(false); }
+    if let Some(origin) = original {
+        if handle.id()? != Some(origin.pidfd_id) { return Ok(false); }
+    }
     if app_processes(manager, app).await?.contains(&main) {
         manager.actions.check_generation_async().await?;
         if control.cancelled() { return Ok(false); }

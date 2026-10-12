@@ -59,7 +59,7 @@ impl Fixture {
         let runtime = Runtime { path: directory.clone(), generation: GENERATION.into() };
         runtime.save_app(&super::super::runtime::AppRecord {
             unit: UNIT.into(), invocation_id: vec![1; 16], policy: ShutdownPolicy::default(),
-            deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, preparation: None,
+            deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, preparation: None,
         }).unwrap();
         let (server, client) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {

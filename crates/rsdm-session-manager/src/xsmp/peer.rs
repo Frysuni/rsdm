@@ -12,7 +12,7 @@ pub(super) struct Peer {
     pub unit: String,
     pub invocation: Vec<u8>,
     pub pid: u32,
-    process: ProcessHandle,
+    pub(super) process: ProcessHandle,
     _interrupt: Arc<OwnedFd>,
     pub phase: Phase,
     pub selected: bool,
@@ -75,9 +75,15 @@ impl Peer {
         let pid = credentials.pid as u32;
         let process = ProcessHandle::socket_peer(interrupt.as_ref())?;
         let unit = manager.unit_for_pid(pid).await?;
-        let records = runtime.clone();
-        let app_unit = unit.clone();
-        let mut app = crate::runtime::blocking(move || records.app(&app_unit)).await?;
+        let mut app = if unit.ends_with(".scope") {
+            crate::app_scope::peer_app(manager, runtime, &unit, pid, &process).await?
+        } else {
+            let records = runtime.clone();
+            let app_unit = unit.clone();
+            crate::runtime::blocking(move || records.app(&app_unit)).await?
+        };
+        // Transactions remain attached to the registered service after migration.
+        let unit = app.unit.clone();
         if app.invocation_id.is_empty() {
             apps::pin_pending(manager, runtime, &unit).await?;
             let records = runtime.clone();

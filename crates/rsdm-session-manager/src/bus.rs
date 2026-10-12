@@ -153,7 +153,6 @@ impl UserManager {
         Ok(id)
     }
 
-    #[cfg(feature = "xsmp")]
     pub async fn unit_for_pid(&self, pid: u32) -> Result<String, SessionError> {
         self.read(|| async {
             let connection = self.connection();

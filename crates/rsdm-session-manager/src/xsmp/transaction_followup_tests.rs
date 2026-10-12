@@ -3,6 +3,11 @@
 use super::*;
 
 pub(super) async fn worker(mode: &str) {
+    let scoped = mode.contains("-scope-");
+    if scoped {
+        let handle = crate::processes::ProcessHandle::open(std::process::id()).unwrap().unwrap();
+        if handle.id().unwrap().is_none() || Scope.control_group() == "/" { return; }
+    }
     let fixture = Fixture::new().await;
     if mode.ends_with("-lease") {
         let mut app = fixture.runtime.app(&crate::helper_start_fixture::app().unit).unwrap();
@@ -12,6 +17,7 @@ pub(super) async fn worker(mode: &str) {
     let provider = Provider { kind: ProviderKind::Managed, native_unit: None, logout_command: Vec::new() };
     let mut handle = Handle::start(&fixture.manager, &fixture.runtime, &provider).await.unwrap();
     let (mut child, mut output) = start_client(&fixture, &handle, mode).await;
+    if scoped { migrate_client(&fixture, child.id().unwrap()); }
     fixture.state.checks.store(0, Ordering::SeqCst);
     if mode.ends_with("-forced") { fixture.state.control.force(0); }
 
@@ -40,6 +46,15 @@ pub(super) async fn worker(mode: &str) {
         assert!(!crate::app_dispatch::claim(&fixture.runtime, &app, Some("next"), crate::app_dispatch::Method::Xsmp, &Deadline::default()).await.unwrap());
     }
     if mode.ends_with("-lease") { assert_eq!(dispatch.xsmp_die_state, Some(DispatchState::NotSent)); }
+}
+
+fn migrate_client(fixture: &Fixture, pid: u32) {
+    let process = crate::processes::ProcessHandle::open(pid).unwrap().unwrap();
+    let mut app = fixture.runtime.app(&crate::helper_start_fixture::app().unit).unwrap();
+    app.original_process = Some(crate::app_origin::OriginalProcess { pid, pidfd_id: process.id().unwrap().unwrap() });
+    app.migrated_scope = Some(crate::app_scope::MigratedScope { unit: "app-test.scope".into(), invocation_id: vec![1; 16] });
+    fixture.runtime.save_app(&app).unwrap();
+    fixture.state.scoped.store(true, Ordering::SeqCst);
 }
 
 async fn release_client(fixture: &Fixture, child: &mut tokio::process::Child,
@@ -91,6 +106,9 @@ fn revoke(fixture: &Fixture, mode: &str) {
     let change = mode.split('-').nth(2).unwrap();
     match change {
         "owned" => {},
+        "scope" => {
+            if mode.ends_with("-reused") { fixture.state.scope_invocation.store(2, Ordering::SeqCst); }
+        }
         "invocation" => { fixture.state.invocation.store(2, Ordering::SeqCst); }
         "deadline" => { fixture.state.expire_final.store(true, Ordering::SeqCst); }
         "cancel" => { fixture.state.cancel_final.store(true, Ordering::SeqCst); }

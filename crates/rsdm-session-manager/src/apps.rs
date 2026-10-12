@@ -44,7 +44,7 @@ pub(super) async fn register(
     }
     let app = AppRecord {
         unit: app_unit_name(program, &runtime.generation), invocation_id: Vec::new(),
-        policy, deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, preparation: None,
+        policy, deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, preparation: None,
     };
     let runtime = runtime.clone();
     blocking(move || {
@@ -165,13 +165,14 @@ pub(super) async fn release_closed(manager: &UserManager, runtime: &Runtime) -> 
         if app.invocation_id.is_empty() {
             continue;
         }
+        let app = super::app_scope::refresh(manager, runtime, app).await?;
         let state = manager.unit_property::<String>(&app.unit, "org.freedesktop.systemd1.Unit", "ActiveState").await;
         let stopped = match state {
             Ok(state) => matches!(state.as_str(), "inactive" | "failed"),
             Err(SessionError::Bus(error)) if super::bus::missing_unit(&error) => true,
             Err(error) => return Err(error),
         };
-        if stopped && super::processes::app_processes(manager, &app).await?.is_empty() {
+        if stopped && super::processes::app_processes(manager, &app).await?.is_empty() && super::app_scope::closed(manager, &app).await? {
             let _ = manager.unref(&app.unit).await;
             let records = runtime.clone();
             let deadline = manager.deadline.clone();
@@ -224,7 +225,9 @@ pub async fn stop_hook(generation: &str, unit: &str, actions: super::action_gate
 pub(super) async fn pin_pending(manager: &UserManager, runtime: &Runtime, unit: &str) -> Result<bool, SessionError> {
     let records = runtime.clone();
     let app_unit = unit.to_string();
-    if !blocking(move || records.app(&app_unit)).await?.invocation_id.is_empty() {
+    let app = blocking(move || records.app(&app_unit)).await?;
+    if !app.invocation_id.is_empty() {
+        super::app_scope::refresh(manager, runtime, app).await?;
         return Ok(true);
     }
     let Some(id) = super::processes::generation_invocation(manager, unit, &runtime.generation).await? else {
@@ -259,6 +262,7 @@ pub(super) async fn finish(manager: &UserManager, runtime: &Runtime, app: &AppRe
             manager.unref(&app.unit).await?;
         }
     }
+    super::app_scope::wait_closed(manager, &app).await?;
     let runtime = runtime.clone();
     let deadline = manager.deadline.clone();
     blocking(move || runtime.remove_app_until(&app, &deadline)).await

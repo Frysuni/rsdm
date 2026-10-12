@@ -113,7 +113,7 @@ async fn the_budget_uses_the_largest_registered_app_timeout_and_preserves_it_for
         let app = crate::runtime::AppRecord {
             unit: format!("app-rsdm-budget@{GENERATION}-{index}.service"), invocation_id: vec![1; 16],
             policy: rsdm_core::domain::ShutdownPolicy { timeout_secs, ..Default::default() },
-            deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, preparation: None,
+            deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, preparation: None,
         };
         fixture.coordinator.runtime.save_app(&app).unwrap();
     }

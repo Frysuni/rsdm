@@ -25,17 +25,20 @@ struct State {
     invocation: AtomicU8, process_present: AtomicBool, control_pid: AtomicU32,
     deadline: Deadline, expire_final: AtomicBool, cancel_final: AtomicBool,
     second_pid: AtomicU32,
+    scoped: AtomicBool, scope_invocation: AtomicU8,
 }
 struct Manager(Arc<State>);
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Manager")]
 impl Manager {
-    fn get_unit(&self, _unit: &str) -> OwnedObjectPath { OwnedObjectPath::try_from("/app").unwrap() }
+    fn get_unit(&self, unit: &str) -> OwnedObjectPath {
+        OwnedObjectPath::try_from(if unit.ends_with(".scope") { "/scope" } else { "/app" }).unwrap()
+    }
 
     #[zbus(name = "GetUnitByPID")]
     fn get_unit_by_pid(&self, pid: u32) -> OwnedObjectPath {
         assert!(pid == self.0.pid.load(Ordering::SeqCst) || pid == self.0.second_pid.load(Ordering::SeqCst));
-        self.get_unit("")
+        self.get_unit(if self.0.scoped.load(Ordering::SeqCst) { "app-test.scope" } else { "" })
     }
 
     fn get_unit_processes(&self, _unit: &str) -> Vec<(String, u32, String)> {
@@ -47,19 +50,24 @@ impl Manager {
     }
 }
 
-struct Unit(Arc<State>);
+struct Unit { state: Arc<State>, scope: bool }
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Unit")]
 impl Unit {
     #[zbus(property)]
-    fn id(&self) -> String { crate::helper_start_fixture::app().unit }
+    fn id(&self) -> String {
+        if self.scope { "app-test.scope".into() } else { crate::helper_start_fixture::app().unit }
+    }
+    #[zbus(property)]
+    fn active_state(&self) -> &str { "active" }
     #[zbus(property, name = "InvocationID")]
     fn invocation_id(&self) -> Vec<u8> {
-        if self.0.checks.load(Ordering::SeqCst) >= 4 {
-            if self.0.expire_final.load(Ordering::SeqCst) { self.0.deadline.set(1); }
-            if self.0.cancel_final.load(Ordering::SeqCst) { self.0.control.cancelled.store(true, Ordering::SeqCst); }
+        if self.state.checks.load(Ordering::SeqCst) >= 4 {
+            if self.state.expire_final.load(Ordering::SeqCst) { self.state.deadline.set(1); }
+            if self.state.cancel_final.load(Ordering::SeqCst) { self.state.control.cancelled.store(true, Ordering::SeqCst); }
         }
-        vec![self.0.invocation.load(Ordering::SeqCst); 16]
+        let invocation = if self.scope { &self.state.scope_invocation } else { &self.state.invocation };
+        vec![invocation.load(Ordering::SeqCst); 16]
     }
 }
 
@@ -69,6 +77,19 @@ struct Service(Arc<State>);
 impl Service {
     #[zbus(property, name = "ControlPID")]
     fn control_pid(&self) -> u32 { self.0.control_pid.load(Ordering::SeqCst) }
+    #[zbus(property)]
+    fn control_group(&self) -> &str { "/escaped.service" }
+}
+
+struct Scope;
+
+#[zbus_macros::interface(name = "org.freedesktop.systemd1.Scope")]
+impl Scope {
+    #[zbus(property)]
+    fn control_group(&self) -> String {
+        std::fs::read_to_string("/proc/self/cgroup").unwrap().lines()
+            .find_map(|line| line.strip_prefix("0::")).unwrap_or("/").into()
+    }
 }
 
 struct Fixture { directory: PathBuf, runtime: Runtime, manager: UserManager, state: Arc<State>, _server: zbus::Connection }
@@ -90,13 +111,16 @@ impl Fixture {
         let state = Arc::new(State { control: Arc::default(), pid: AtomicU32::new(0),
             checks: AtomicUsize::new(0), cancel_at: AtomicUsize::new(usize::MAX),
             invocation: AtomicU8::new(1), process_present: AtomicBool::new(true), control_pid: AtomicU32::new(0),
-            deadline: Deadline::default(), expire_final: AtomicBool::new(false), cancel_final: AtomicBool::new(false), second_pid: AtomicU32::new(0) });
+            deadline: Deadline::default(), expire_final: AtomicBool::new(false), cancel_final: AtomicBool::new(false), second_pid: AtomicU32::new(0),
+            scoped: AtomicBool::new(false), scope_invocation: AtomicU8::new(1) });
         let shared = state.clone();
         let (server, connection) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
                 .serve_at("/org/freedesktop/systemd1", Manager(shared.clone())).unwrap()
-                .serve_at("/app", Unit(shared.clone())).unwrap().serve_at("/app", Service(shared)).unwrap().build().await.unwrap()
+                .serve_at("/app", Unit { state: shared.clone(), scope: false }).unwrap()
+                .serve_at("/scope", Unit { state: shared.clone(), scope: true }).unwrap().serve_at("/scope", Scope).unwrap()
+                .serve_at("/app", Service(shared)).unwrap().build().await.unwrap()
         });
         let connection = zbus::connection::Builder::unix_stream(connection).p2p().build().await.unwrap();
         let mut manager = UserManager::with_connection(connection);
@@ -130,6 +154,9 @@ async fn cancellation_reaches_worker_before_shutdown_messages() {
     cases.push("followup-phase2-invocation-forced".into());
     cases.push("followup-die-cgroup-forced".into());
     cases.push("followup-die-lease".into());
+    for request in ["phase2", "die", "interact"] {
+        for change in ["owned", "reused"] { cases.push(format!("followup-{request}-scope-{change}")); }
+    }
     cases.push("group".into());
     cases.extend(["quota-startup", "quota-local", "quota-cancel", "quota-disabled", "quota-shutdown", "quota-deadline"].map(str::to_string));
     for mode in &cases {

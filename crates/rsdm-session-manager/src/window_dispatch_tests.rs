@@ -105,3 +105,43 @@ async fn current_dedicated_cgroup_authorizes_one_close_without_nested_request_sl
     while let Some(result) = workers.join_next().await { result.unwrap(); }
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn migrated_scope_ownership_is_rechecked_after_waiting_for_the_dispatch_slot() {
+    for revoked in ["none", "escaped-main", "service-ended", "scope", "app"] {
+        let mut fixture = Fixture::new().await;
+        let handle = ProcessHandle::open(std::process::id()).unwrap().unwrap();
+        let Some(identity) = handle.id().unwrap() else { return; };
+        fixture.app.original_process = Some(crate::app_origin::OriginalProcess { pid: std::process::id(), pidfd_id: identity });
+        fixture.app.migrated_scope = Some(crate::app_scope::MigratedScope { unit: "app-test.scope".into(), invocation_id: vec![1; 16] });
+        fixture.state.present.store(false, Ordering::SeqCst);
+        fixture.state.scope_present.store(true, Ordering::SeqCst);
+        if revoked == "escaped-main" {
+            fixture.state.present.store(true, Ordering::SeqCst);
+            *fixture.state.group.lock().unwrap() = "/old-service".into();
+        }
+        let expected = matches!(revoked, "none" | "escaped-main" | "service-ended") && *fixture.state.scope_group.lock().unwrap() != "/";
+        let (mut prepared, mut peer, _events, _socket) = prepared().await;
+        let server = tokio::spawn(async move {
+            let mut command = String::new();
+            if expected {
+                peer.read_line(&mut command).await.unwrap();
+                assert_eq!(serde_json::from_str::<Value>(&command).unwrap(), json!({"Action":{"CloseWindow":{"id":42}}}));
+                peer.get_mut().write_all(b"{\"Ok\":\"Handled\"}\n").await.unwrap();
+            } else { assert!(tokio::time::timeout(Duration::from_millis(100), peer.read_line(&mut command)).await.is_err()); }
+        });
+        let control = ShutdownControl::default();
+        let (mut workers, release) = occupy(&fixture.manager).await;
+        let request = close_prepared(&fixture.manager, &fixture.record, &fixture.app, &mut prepared, &control);
+        tokio::pin!(request);
+        assert!(tokio::time::timeout(Duration::from_millis(25), &mut request).await.is_err());
+        if revoked == "scope" { fixture.state.scope_invocation.store(2, Ordering::SeqCst); }
+        if revoked == "app" { fixture.state.app_invocation.store(2, Ordering::SeqCst); }
+        if revoked == "service-ended" { fixture.state.app_invocation.store(0, Ordering::SeqCst); }
+        release.add_permits(1);
+        assert_eq!(tokio::time::timeout(Duration::from_secs(1), &mut request).await.unwrap().unwrap(), expected, "{revoked}");
+        release.add_permits(3);
+        while let Some(result) = workers.join_next().await { result.unwrap(); }
+        server.await.unwrap();
+    }
+}

@@ -228,7 +228,7 @@ async fn resuming_waits_for_the_record_lease_without_blocking_timers() {
         policy: Default::default(), deadline_usec: Some(monotonic_usec().unwrap() + 30_000_000),
         quit_started: true,
         dispatch: None,
-        window_close_sent: false, original_process: None, preparation: None,
+        window_close_sent: false, original_process: None, migrated_scope: None, preparation: None,
     };
     fixture.coordinator.runtime.save_app(&app).unwrap();
     fixture.coordinator.begin_stop("logout", None).await.unwrap();

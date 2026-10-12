@@ -31,7 +31,7 @@ fn app() -> AppRecord {
         deadline_usec: None,
         quit_started: false,
         dispatch: None,
-        window_close_sent: false, original_process: None, preparation: None,
+        window_close_sent: false, original_process: None, migrated_scope: None, preparation: None,
     }
 }
 
@@ -46,6 +46,16 @@ fn recovery_records_are_private_and_preserve_the_policy() {
     assert_eq!(fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
     assert_eq!(runtime.app(&record.unit).unwrap().policy, record.policy);
     assert_eq!(runtime.apps().unwrap().len(), 1);
+}
+
+#[test]
+fn legacy_app_records_have_no_original_process_or_migrated_scope() {
+    let serialized = toml::to_string(&app()).unwrap();
+    assert!(!serialized.contains("original_process"));
+    assert!(!serialized.contains("migrated_scope"));
+    let restored: AppRecord = toml::from_str(&serialized).unwrap();
+    assert!(restored.original_process.is_none());
+    assert!(restored.migrated_scope.is_none());
 }
 
 #[test]

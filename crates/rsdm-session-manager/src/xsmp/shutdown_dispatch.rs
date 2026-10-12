@@ -33,7 +33,7 @@ pub(super) async fn send(manager: &UserManager, runtime: &Runtime, peer: &mut Pe
             else { cancel(peer); return Ok(false); };
             session = current;
             peer.die_claimed.set(true);
-            die_claim = Some(app);
+            die_claim = Some(app.clone());
         } else if matches!(request, Request::Die) && !app.dispatch.as_ref().is_some_and(|dispatch|
             dispatch.transaction_id.as_deref() == transaction_id && dispatch.invocation_id == peer.invocation
             && dispatch.method == crate::app_dispatch::Method::Xsmp && dispatch.state == crate::app_dispatch::State::Sent
@@ -42,7 +42,7 @@ pub(super) async fn send(manager: &UserManager, runtime: &Runtime, peer: &mut Pe
             cancel(peer);
             return Ok(false);
         }
-        if !current_process(&connection, peer).await? || !current_invocation(&connection, peer).await?
+        if !current_peer(&connection, &app, peer).await?
             || !peer.alive().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?
         {
             cancel(peer);
@@ -62,6 +62,14 @@ pub(super) async fn send(manager: &UserManager, runtime: &Runtime, peer: &mut Pe
 
 fn active(session: &SessionRecord, transaction_id: Option<&str>) -> bool {
     !session.disabled && session.phase != SessionPhase::Closed && session.pending_transaction_id() == transaction_id
+}
+
+async fn current_peer(connection: &Connection, app: &crate::runtime::AppRecord, peer: &Peer) -> zbus::Result<bool> {
+    if app.migrated_scope.is_none() {
+        return Ok(current_process(connection, peer).await? && current_invocation(connection, peer).await?);
+    }
+    let manager = Proxy::new(connection, "org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager").await?;
+    crate::app_ownership::current(&manager, app, peer.pid, &peer.process).await
 }
 
 async fn current_process(connection: &Connection, peer: &Peer) -> zbus::Result<bool> {

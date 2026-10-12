@@ -18,7 +18,10 @@ pub(super) async fn request(manager: &UserManager, runtime: &Runtime, app: &AppR
     let records = runtime.clone();
     let record = runtime::blocking(move || records.session()).await?;
     if record.disabled { return Err(SessionError::Disabled); }
-    let Some(mut prepared) = prepare(manager, &record, app).await else { return Ok(false); };
+    let Some(mut prepared) = prepare(manager, &record, app).await else {
+        tracing::debug!(unit = app.unit, "no verified window is available for close");
+        return Ok(false);
+    };
     if control.cancelled() { return Ok(true); }
     let transaction = control.transaction_id.as_deref();
     if !app_dispatch::claim(runtime, app, transaction, Method::WindowClose, &manager.deadline).await? { return Ok(true); }
@@ -60,6 +63,7 @@ async fn prepare(manager: &UserManager, record: &SessionRecord, app: &AppRecord)
 async fn prepare_endpoint(manager: &UserManager, record: &SessionRecord, app: &AppRecord, name: &str, path: &Path) -> Result<Option<PreparedClose>, SessionError> {
     let Some((connection, events, mut windows)) = connect_endpoint(manager, record, name, path).await? else { return Ok(None); };
     let pids = processes::app_processes(manager, app).await?;
+    tracing::debug!(unit = app.unit, endpoint = name, window_count = windows.len(), process_count = pids.len(), "checking application windows");
     connection.order_windows(&mut windows);
     for window in windows {
         let Some(pid) = window.pid.and_then(|pid| u32::try_from(pid).ok()).filter(|pid| pids.contains(pid)) else { continue; };
@@ -67,15 +71,20 @@ async fn prepare_endpoint(manager: &UserManager, record: &SessionRecord, app: &A
         // second window snapshot in dispatch is checked while it stays pinned.
         let Some(handle) = ProcessHandle::open(pid)? else { continue; };
         if owns_process(manager, app, pid, &handle).await? {
+            tracing::debug!(unit = app.unit, pid, window = window.id, "prepared owned window close");
             return Ok(Some(PreparedClose { connection, events, window, process: handle }));
         }
+        tracing::debug!(unit = app.unit, pid, window = window.id, "window process ownership could not be verified");
     }
     Ok(None)
 }
 
 pub(super) async fn connect_endpoint(manager: &UserManager, record: &SessionRecord, name: &str, path: &Path) -> Result<Option<(Connection, Events, Vec<Window>)>, SessionError> {
     let mut connection = manager.request(async { Ok(Connection::connect(name, path, record.identity.uid).await) }).await??;
-    if !owns_compositor(manager, record, connection.pid()).await? { return Ok(None); }
+    if !owns_compositor(manager, record, connection.pid()).await? {
+        tracing::debug!(endpoint = name, pid = connection.pid(), "compositor ownership could not be verified");
+        return Ok(None);
+    }
     if let Connection::KWin(kwin) = &mut connection {
         kwin.authenticate(manager).await?;
         let windows = manager.request(async { Ok(connection.windows().await) }).await??;
@@ -102,14 +111,20 @@ async fn close_prepared(manager: &UserManager, record: &SessionRecord, app: &App
     let pid = window.pid.and_then(|pid| u32::try_from(pid).ok()).unwrap_or(0);
     let bus = manager.connection();
     manager.request(async {
-        if !super::window_ownership::current(&bus, record, app, connection.pid(), pid, handle).await? { return Ok(Ok(false)); }
+        if !super::window_ownership::current(&bus, record, app, connection.pid(), pid, handle).await? {
+            tracing::debug!(unit = app.unit, pid, window = window.id, "final ownership proof rejected window close");
+            return Ok(Ok(false));
+        }
         manager.actions.check_generation_async().await.map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
         manager.deadline.remaining(std::time::Duration::MAX)?;
         if control.cancelled() || !handle.alive()? { return Ok(Ok(false)); }
         manager.actions.check().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
         match events.unchanged(connection, window) {
             Ok(true) => {}
-            Ok(false) => return Ok(Ok(false)),
+            Ok(false) => {
+                tracing::debug!(unit = app.unit, window = window.id, "window changed before close");
+                return Ok(Ok(false));
+            }
             Err(error) => { tracing::debug!(%error, "window events cannot authorize close"); return Ok(Ok(false)); }
         }
         Ok(connection.close(window.id).await)
@@ -126,10 +141,9 @@ pub(super) async fn owns_compositor(manager: &UserManager, record: &SessionRecor
 
 async fn owns_process(manager: &UserManager, app: &AppRecord, pid: u32, handle: &ProcessHandle) -> Result<bool, SessionError> {
     if !handle.alive()? || !processes::app_processes(manager, app).await?.contains(&pid) { return Ok(false); }
-    let group: String = manager.unit_property(&app.unit, SERVICE, "ControlGroup").await?;
-    if !group.starts_with('/') || group == "/" { return Ok(false); }
+    let groups = processes::process_groups(manager, app).await?;
     let membership = runtime::blocking(move || Ok(std::fs::read_to_string(format!("/proc/{pid}/cgroup"))?)).await?;
-    Ok(processes::belongs_to_cgroup(&membership, &group) && handle.alive()? && processes::verify_invocation(manager, app).await?)
+    Ok(groups.iter().any(|group| processes::belongs_to_cgroup(&membership, group)) && handle.alive()?)
 }
 
 #[cfg(test)]
