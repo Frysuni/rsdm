@@ -14,6 +14,8 @@ mod client;
 mod followup;
 #[path = "transaction_group_tests.rs"]
 mod group;
+#[path = "transaction_quota_tests.rs"]
+mod quota;
 
 const TEST: &str = "xsmp::handle::transaction_tests::cancellation_reaches_worker_before_shutdown_messages";
 const ROLE: &str = "RSDM_XSMP_TRANSACTION_TEST";
@@ -116,6 +118,7 @@ async fn cancellation_reaches_worker_before_shutdown_messages() {
     }
     if mode.starts_with("followup-") { followup::worker(&mode).await; return; }
     if mode == "group" { group::worker().await; return; }
+    if mode.starts_with("quota-") { quota::worker(&mode).await; return; }
     if !mode.is_empty() { worker(&mode).await; return; }
     let mut failed = Vec::new();
     let mut cases: Vec<String> = ["already-cancelled", "ownership-check", "forced", "after-send", "phase2", "interact"].map(str::to_string).into();
@@ -128,6 +131,7 @@ async fn cancellation_reaches_worker_before_shutdown_messages() {
     cases.push("followup-die-cgroup-forced".into());
     cases.push("followup-die-lease".into());
     cases.push("group".into());
+    cases.extend(["quota-startup", "quota-local", "quota-cancel", "quota-disabled", "quota-shutdown", "quota-deadline"].map(str::to_string));
     for mode in &cases {
         let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", TEST, "--nocapture"]).env(ROLE, mode).kill_on_drop(true).spawn().unwrap();

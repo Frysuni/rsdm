@@ -90,6 +90,12 @@ impl UserManager {
         })))).await.map_err(|error| zbus::Error::from(zbus::fdo::Error::Failed(error.to_string())))?
     }
 
+    #[cfg(feature = "xsmp")]
+    pub(super) async fn cleanup_request<T>(&self, operation: impl Future<Output = zbus::Result<T>>) -> zbus::Result<T> {
+        // Releasing an existing save remains allowed after the action gate closes.
+        self.transport.request(operation).await
+    }
+
     pub async fn start_service(&self, unit: &str, properties: &UnitProperties) -> Result<(), SessionError> {
         let submitted = AtomicBool::new(false);
         self.start_service_tracked(unit, properties, &submitted, None).await

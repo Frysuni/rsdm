@@ -62,7 +62,13 @@ pub(super) async fn run(
     };
     // Cancellation releases clients already saving or interacting. It must
     // precede connection teardown even when the gate rejects new shutdown work.
-    server.cancel();
+    tokio::select! {
+        biased;
+        _ = interrupt.stopped() => {},
+        result = server.cancel() => {
+            if let Err(error) = result { tracing::debug!(%error, "could not release XSMP saves before disconnect"); }
+        }
+    }
     server.peers.clear();
     if let Err(error) = server._authority.remove().await {
         let _ = notices.send(Notice::Failed(error.to_string()));
@@ -87,7 +93,9 @@ impl Server {
             ffi::IceSetErrorHandler(callbacks::protocol_error);
             ffi::SmsSetErrorHandler(callbacks::protocol_error);
         }
-        let listeners = Listeners::open()?;
+        let listeners = manager.request(async {
+            Listeners::open().map_err(|error| zbus::fdo::Error::Failed(error.to_string()).into())
+        }).await?;
         if listeners.count() > 32 { return Err(SessionError::State("too many local ICE transports".into())); }
         let listener_sockets = (0..listeners.count()).map(|index| interrupt.register(listeners.fd(index)))
             .collect::<Result<Vec<_>, _>>()?;
@@ -135,7 +143,7 @@ impl Server {
                 let result = self.prepare(&units, &transaction_id, cancellable, control).await.map_err(|error| error.to_string());
                 let _ = reply.try_send(result);
             }
-            Message::Cancel => self.cancel(),
+            Message::Cancel => self.cancel().await?,
         }
         Ok(())
     }
@@ -144,9 +152,13 @@ impl Server {
         self.manager.actions.check()?;
         if index >= self.listeners.count() {
             let peer = (&mut *self.peers[index - self.listeners.count()]) as *mut Peer;
-            self.admission.peer.set(peer);
-            unsafe { Peer::process(peer); }
-            self.admission.peer.set(ptr::null_mut());
+            self.manager.request(async {
+                self.manager.actions.check().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
+                self.admission.peer.set(peer);
+                unsafe { Peer::process(peer); }
+                self.admission.peer.set(ptr::null_mut());
+                Ok(())
+            }).await?;
             return Ok(());
         }
         match Peer::accept(self.listeners.object(index), &self.manager, &self.runtime, &self.interrupt).await {

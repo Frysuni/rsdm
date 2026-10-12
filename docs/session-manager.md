@@ -365,6 +365,12 @@ slot and rechecks the live process, current unit invocation, cgroup membership
 excluding `ControlPID`, generation record, transaction and deadlines. Force
 does not bypass these checks. Revoked ownership releases an outstanding save
 with `ShutdownCancelled` and prevents further shutdown messages on that peer.
+Listener creation, accept, protocol processing and callback replies, local
+checkpoints and cancellation share the same four IPC slots as user-manager
+requests. Cancellation of an existing save remains allowed after disable or
+deadline expiry within the worker's 100 ms cleanup grace. Saturation or stalled
+I/O may prevent delivery before disconnection. Disconnect disables
+[ICE shutdown negotiation](https://xorg.freedesktop.org/archive/current/doc/libICE/ICElib.html).
 The dedicated Tokio thread awaits socket readiness. Stop interrupts ICE I/O
 during admission and awaits completion inside the session deadline without join.
 

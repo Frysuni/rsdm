@@ -8,6 +8,8 @@ use super::{interrupt::Interrupt, server};
 use crate::{SessionError, bus::UserManager, control::Reply, deadline::Deadline,
     provider::{Provider, ProviderKind}, runtime::Runtime};
 
+pub(super) const CANCEL_GRACE: Duration = Duration::from_millis(100);
+
 pub enum Notice {
     Connected(String),
     Disconnected(String),
@@ -98,7 +100,7 @@ impl Handle {
             });
             tokio::select! {
                 result = &mut completion => result,
-                _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                _ = tokio::time::sleep(CANCEL_GRACE) => {
                     // Responsive workers can first send ShutdownCancelled.
                     // Stalled FFI or admission still uses the same total budget.
                     interrupt.stop();

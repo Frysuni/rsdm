@@ -9,6 +9,9 @@ use super::super::super::ffi::{self, Callback, Data, IceConn};
 type SmcConn = *mut c_void;
 static DISCONNECTED: AtomicBool = AtomicBool::new(false);
 
+#[path = "transaction_quota_client.rs"]
+mod quota;
+
 #[repr(C)]
 struct Callbacks {
     save: Callback<unsafe extern "C" fn(SmcConn, Data, c_int, c_int, c_int, c_int)>,
@@ -32,7 +35,7 @@ unsafe extern "C" {
 #[derive(Default)]
 struct State {
     mode: String, saves: usize, dies: usize, cancels: usize, phase2: usize, interactions: usize,
-    ready: bool, request_failed: bool, die_journal_visible: bool,
+    ready: bool, request_failed: bool, die_journal_visible: bool, local_saves: usize,
 }
 
 pub(super) fn run(mode: &str) {
@@ -58,20 +61,27 @@ pub(super) fn run(mode: &str) {
     unsafe { SmcCloseConnection(connection, 0, ptr::null_mut()); }
     let followup = mode.starts_with("followup-");
     let owned = followup && mode.ends_with("-owned");
-    assert_eq!(state.saves, usize::from(followup || matches!(mode, "forced" | "after-send" | "phase2" | "interact")), "unexpected shutdown SaveYourself on the wire");
+    assert_eq!(state.saves, usize::from(followup || matches!(mode, "forced" | "after-send" | "phase2" | "interact" | "quota-disabled" | "quota-shutdown")), "unexpected shutdown SaveYourself on the wire");
     assert_eq!(state.dies, usize::from(owned || mode == "forced"), "unexpected Die on the wire");
-    assert_eq!(state.cancels, usize::from((followup && !owned) || matches!(mode, "after-send" | "phase2" | "interact")), "unexpected ShutdownCancelled on the wire");
+    assert_eq!(state.cancels, usize::from((followup && !owned) || matches!(mode, "after-send" | "phase2" | "interact" | "quota-disabled")), "unexpected ShutdownCancelled on the wire");
     assert_eq!(state.phase2, usize::from(owned && mode.contains("-phase2-")), "unexpected phase 2 on the wire");
     assert_eq!(state.interactions, usize::from(owned && mode.contains("-interact-")), "unexpected interaction on the wire");
     assert!(!state.request_failed, "libSM did not send the client's phase 2 or interaction request");
     assert!(state.dies == 0 || state.die_journal_visible, "Die reached the client before its durable claim");
+    assert_eq!(state.local_saves, usize::from(mode == "quota-local"));
 }
 
 unsafe extern "C" fn save(connection: SmcConn, data: Data, _kind: c_int, shutdown: c_int, _style: c_int, _fast: c_int) {
     // SAFETY: the connection owns this live callback context for its lifetime.
     let state = unsafe { &mut *data.cast::<State>() };
+    if shutdown == 0 && state.ready && state.mode == "quota-local" { quota::save(connection, state); return; }
     if shutdown != 0 {
         state.saves += 1;
+        if matches!(state.mode.as_str(), "quota-disabled" | "quota-shutdown") {
+            println!("xsmp-client-saving");
+            let _ = std::io::stdout().flush();
+            return;
+        }
         if state.mode.starts_with("followup-") || matches!(state.mode.as_str(), "after-send" | "phase2" | "interact") {
             println!("xsmp-client-saving");
             let _ = std::io::stdout().flush();
@@ -107,13 +117,14 @@ unsafe extern "C" fn die(_connection: SmcConn, data: Data) {
         .is_some_and(|dispatch| matches!(dispatch.xsmp_die_state, Some(crate::app_dispatch::State::Intent | crate::app_dispatch::State::Sent)));
 }
 
-unsafe extern "C" fn complete(_connection: SmcConn, data: Data) {
+unsafe extern "C" fn complete(connection: SmcConn, data: Data) {
     let state = unsafe { &mut *data.cast::<State>() };
     if !state.ready {
         state.ready = true;
         println!("xsmp-client-ready");
         let _ = std::io::stdout().flush();
-    }
+        if state.mode == "quota-local" { quota::request(connection); }
+    } else if state.mode == "quota-local" { quota::complete(); }
 }
 
 unsafe extern "C" fn cancel(connection: SmcConn, data: Data) {

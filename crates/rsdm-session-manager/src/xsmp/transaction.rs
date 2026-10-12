@@ -15,7 +15,7 @@ impl Server {
         let transaction_id = crate::runtime::blocking(move || Ok(records.session()?.pending_transaction_id().map(str::to_string))).await?;
         if transaction_id.as_deref().unwrap_or("") != requested { return Err(SessionError::State("shutdown transaction is stale".into())); }
         self.control = control;
-        if self.cancelled() { self.cancel(); return Ok(Vec::new()); }
+        if self.cancelled() { self.cancel().await?; return Ok(Vec::new()); }
         self.transaction_id = transaction_id.clone();
         let mut selected = Vec::new();
         for unit in units {
@@ -68,19 +68,32 @@ impl Server {
         Ok(Some((app, peers)))
     }
 
-    pub fn cancel(&mut self) {
-        for peer in &mut self.peers { shutdown_dispatch::cancel(peer); }
+    pub async fn cancel(&mut self) -> Result<(), SessionError> {
+        let manager = self.manager.clone();
+        let selected = self.peers.iter().any(|peer| peer.selected);
+        let deadline = tokio::time::Instant::now() + super::handle::CANCEL_GRACE;
+        let cancellation = async {
+            if tokio::time::Instant::now() >= deadline { return Err(zbus::fdo::Error::TimedOut("XSMP cancellation timed out".into()).into()); }
+            for peer in &mut self.peers { shutdown_dispatch::cancel(peer); }
+            Ok::<_, zbus::Error>(())
+        };
+        if selected {
+            tokio::time::timeout_at(deadline, manager.cleanup_request(cancellation)).await
+                .map_err(|_| SessionError::State("XSMP cancellation timed out".into()))??;
+        }
+        else { cancellation.await?; }
         self.cancellable = true;
         self.control = None;
+        Ok(())
     }
 
     pub async fn advance(&mut self) -> Result<(), SessionError> {
         self.start_pending_saves().await?;
-        if self.cancelled() { self.cancel(); return Ok(()); }
+        if self.cancelled() { self.cancel().await?; return Ok(()); }
         if self.peers.iter().any(|peer| peer.selected && (peer.cancellation_requested || peer.phase == Phase::Failed)) {
             let failure = self.peers.iter().find(|peer| peer.selected && peer.phase == Phase::Failed).map(|peer| peer.unit.clone());
             if self.can_cancel() {
-                self.cancel();
+                self.cancel().await?;
                 let _ = self.notices.send(failure.map_or(Notice::Cancelled, Notice::Failed));
                 return Ok(());
             }
@@ -104,7 +117,7 @@ impl Server {
                 }
             }
         }
-        if self.cancelled() { self.cancel(); }
+        if self.cancelled() { self.cancel().await?; }
         Ok(())
     }
 
@@ -124,16 +137,24 @@ impl Server {
         for peer in &mut self.peers {
             self.manager.actions.check()?;
             if matches!(peer.phase, Phase::InitialDone | Phase::CancelledDone) {
-                unsafe { ffi::SmsSaveComplete(peer.sms); }
-                peer.phase = Phase::Idle;
+                self.manager.request(async {
+                    self.manager.actions.check().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
+                    unsafe { ffi::SmsSaveComplete(peer.sms); }
+                    peer.phase = Phase::Idle;
+                    Ok(())
+                }).await?;
             }
             if peer.phase == Phase::Idle && peer.selected {
                 if !active { peer.selected = false; continue; }
                 start_save(&self.manager, &self.runtime, peer, self.transaction_id.as_deref(), self.control.as_deref()).await?;
             } else if peer.phase == Phase::Idle && peer.local_save_requested {
-                peer.local_save_requested = false;
-                peer.phase = Phase::InitialSave;
-                unsafe { ffi::SmsSaveYourself(peer.sms, 1, 0, 0, 0); }
+                self.manager.request(async {
+                    self.manager.actions.check().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
+                    peer.local_save_requested = false;
+                    peer.phase = Phase::InitialSave;
+                    unsafe { ffi::SmsSaveYourself(peer.sms, 1, 0, 0, 0); }
+                    Ok(())
+                }).await?;
             }
         }
         Ok(())
@@ -150,7 +171,7 @@ impl Server {
             let deadline = hard.map_or(peer.deadline, |hard| peer.deadline.min(hard));
             if now >= deadline {
                 if peer.cancel_on_timeout && cancellable {
-                    self.cancel();
+                    self.cancel().await?;
                     let _ = self.notices.send(Notice::Cancelled);
                     return Ok(true);
                 }

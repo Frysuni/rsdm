@@ -141,7 +141,12 @@ Executable lookup, procfs membership checks and XSMP record/credential files als
 use blocking filesystem tasks. Cookie registration stays on the libICE thread;
 unclaimed credential files are removed when a cancelled startup job completes.
 Cloned user-manager connections share four slots for short requests, including
-reference restoration. Job completion and application-exit waits release those
+reference restoration. XSMP listener creation, accept, protocol dispatch and
+callback replies, checkpoints and cancellation use the same pool. Accept releases
+its slot before the separate user-manager admission checks. Cancellation releases
+an existing save even after disable or deadline expiry, with the worker's bounded
+cleanup grace. Local disconnect disables ICE shutdown negotiation and sends no
+new protocol requests. Job completion and application-exit waits release those
 slots; preparation starts for every application before collecting worker results.
 
 Bare compositors use a transient service and a per-generation anchor. The

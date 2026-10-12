@@ -49,15 +49,19 @@ impl Peer {
     }
 
     pub async fn accept(listener: ffi::ListenObj, manager: &UserManager, runtime: &Runtime, interrupt: &Interrupt) -> Result<Box<Self>, SessionError> {
-        let mut status = 0;
-        // SAFETY: the listener belongs to the server; a successful accept gives
-        // this function one owned connection reference.
-        let ice = unsafe { ffi::IceAcceptConnection(listener, &mut status) };
-        if ice.is_null() { return Err(SessionError::State("ICE connection could not be accepted".into())); }
-        let mut accepted = Accepted(ice);
-        unsafe { ffi::IceSetShutdownNegotiation(ice, 0); }
-        let socket = interrupt.register(unsafe { ffi::IceConnectionNumber(ice) })?;
-        let peer = Self::admit(ice, socket, manager, runtime).await?;
+        let (mut accepted, socket) = manager.request(async {
+            let mut status = 0;
+            // SAFETY: the listener belongs to the server; a successful accept gives
+            // this function one owned connection reference.
+            let ice = unsafe { ffi::IceAcceptConnection(listener, &mut status) };
+            if ice.is_null() { return Err(zbus::fdo::Error::Failed("ICE connection could not be accepted".into()).into()); }
+            let accepted = Accepted(ice);
+            unsafe { ffi::IceSetShutdownNegotiation(ice, 0); }
+            let socket = interrupt.register(unsafe { ffi::IceConnectionNumber(ice) })
+                .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
+            Ok((accepted, socket))
+        }).await?;
+        let peer = Self::admit(accepted.0, socket, manager, runtime).await?;
         accepted.0 = ptr::null_mut();
         Ok(peer)
     }
