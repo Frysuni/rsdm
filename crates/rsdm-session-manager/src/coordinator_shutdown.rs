@@ -116,7 +116,8 @@ impl Coordinator {
             return Ok(());
         }
         if self.provider.kind == super::provider::ProviderKind::Attached && self.action == "logout" {
-            return self.resume("prepared", "registered applications prepared; the external WM remains running").await;
+            self.prepare_attached_logout();
+            return Ok(());
         }
         self.begin_finish().await
     }
@@ -140,7 +141,7 @@ impl Coordinator {
         }
     }
 
-    async fn begin_finish(&mut self) -> Result<(), SessionError> {
+    pub(super) async fn begin_finish(&mut self) -> Result<(), SessionError> {
         if self.provider.kind == super::provider::ProviderKind::Attached {
             self.respond_stop("prepared", "registered applications prepared; external session infrastructure is retained");
             self.lifecycle.phase = SessionPhase::Closed;
@@ -163,7 +164,7 @@ impl Coordinator {
         Ok(())
     }
 
-    async fn resume(&mut self, result: &str, message: &str) -> Result<(), SessionError> {
+    pub(super) async fn resume(&mut self, result: &str, message: &str) -> Result<(), SessionError> {
         self.xsmp.cancel();
         self.respond_stop(result, message);
         // Restore the last verified phase. Observation will confirm any real

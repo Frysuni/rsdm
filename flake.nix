@@ -130,6 +130,7 @@
           wayfire-discovery = import ./tests/session-lifecycle/wayfire.nix { inherit pkgs rsdm; };
           wayland-discovery = import ./tests/session-lifecycle/wayland-discovery.nix { inherit pkgs rsdm; };
           native-de-handoff = import ./tests/session-lifecycle/native.nix { inherit pkgs rsdm; };
+          native-attached = import ./tests/session-lifecycle/native-attached.nix { inherit pkgs rsdm; };
           power-lifecycle = import ./tests/session-lifecycle/power.nix { inherit pkgs rsdm; };
           lock-power = import ./tests/session-lifecycle/lock.nix { inherit pkgs rsdm; };
           dm-lifecycle = import ./tests/session-lifecycle/dm.nix { inherit pkgs rsdm; };

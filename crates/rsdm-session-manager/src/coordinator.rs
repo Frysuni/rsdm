@@ -30,6 +30,7 @@ pub(super) enum Work {
     Launched(String, Reply<String>, Result<String, SessionError>),
     Prepared(Result<Vec<String>, SessionError>),
     Delegated(Result<(), SessionError>),
+    AttachedReady(Result<Option<super::native_attached::Scoped>, SessionError>),
     PowerRequested(Result<(), SessionError>),
     StatusDetails(Reply<super::status::SessionStatusDetails>, Result<super::status::SessionStatusDetails, SessionError>),
     Finished(SessionProcess, Result<(), SessionError>),
@@ -212,6 +213,7 @@ impl Coordinator {
             }
             Work::Prepared(result) => self.prepared(result).await?,
             Work::Delegated(result) => self.delegated(result).await?,
+            Work::AttachedReady(result) => self.attached_ready(result).await?,
             Work::PowerRequested(result) => self.power_requested(result).await?,
             Work::Finished(process, result) => {
                 self.process = Some(process);

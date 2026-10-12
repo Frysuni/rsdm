@@ -4,9 +4,23 @@ use zbus::{Connection, names::OwnedUniqueName, proxy::MethodFlags};
 
 use super::{SessionError, bus::UserManager, control_caller::Caller, provider::{Provider, ProviderKind}};
 
-struct Peer { service: &'static str, owner: OwnedUniqueName, process: Caller }
+pub(super) struct Peer { service: &'static str, pub(super) owner: OwnedUniqueName, process: Caller, broker_pinned: bool }
 
 impl Peer {
+    pub(super) async fn verify_login(&self, connection: &Connection, logind: &Connection,
+        identity: &super::identity::SessionIdentity) -> zbus::Result<()> {
+        if !self.broker_pinned {
+            return Err(zbus::fdo::Error::AccessDenied("native login ownership requires a broker-provided ProcessFD".into()).into());
+        }
+        let belongs = self.process.belongs_to_login(logind, identity).await
+            .map_err(|error| match error {
+                SessionError::Bus(error) => error,
+                error => zbus::fdo::Error::AccessDenied(error.to_string()).into(),
+            })?;
+        if !belongs { return Err(zbus::fdo::Error::AccessDenied("native desktop process has no verified login session".into()).into()); }
+        self.verify(connection).await
+    }
+
     async fn verify(&self, connection: &Connection) -> zbus::Result<()> {
         if current_owner(connection, self.service).await? != self.owner {
             return Err(zbus::fdo::Error::AccessDenied("native desktop bus owner changed before shutdown dispatch".into()).into());
@@ -88,7 +102,7 @@ async fn pin(manager: &UserManager, connection: &Connection, name: &'static str)
     manager.request(pin_peer(connection, name)).await.map_err(Into::into)
 }
 
-async fn pin_peer(connection: &Connection, name: &'static str) -> zbus::Result<Peer> {
+pub(super) async fn pin_peer(connection: &Connection, name: &'static str) -> zbus::Result<Peer> {
     let owner = current_owner(connection, name).await?;
     let reply = connection.call_method(Some("org.freedesktop.DBus"), "/org/freedesktop/DBus",
         Some("org.freedesktop.DBus"), "GetConnectionCredentials", &(owner.as_str(),)).await?;
@@ -96,7 +110,7 @@ async fn pin_peer(connection: &Connection, name: &'static str) -> zbus::Result<P
     // SAFETY: geteuid has no preconditions; native shutdown stays within this UID.
     let process = Caller::from_credentials(&credentials, unsafe { libc::geteuid() })
         .map_err(|error| zbus::fdo::Error::AccessDenied(error.to_string()))?;
-    Ok(Peer { service: name, owner, process })
+    Ok(Peer { service: name, owner, process, broker_pinned: credentials.process_fd().is_some() })
 }
 
 async fn probe(connection: &Connection, kind: ProviderKind) -> zbus::Result<bool> {

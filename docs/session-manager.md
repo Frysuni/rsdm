@@ -30,11 +30,19 @@ Attached status uses provider `partial`. Application units do not require
 endpoint are scoped to new managed applications; the user's global environment
 remains untouched. Quit-command helpers bind to the attached coordinator's
 verified invocation and run with the application's environment and working
-directory. `session stop` prepares registered applications and returns
-`prepared`, retaining the external WM. Power requests prepare these applications
-before requesting logind; disabling releases only the attached coordinator.
-Native desktop delegation and window-close capabilities require verified backend
-ownership; this attached path currently reports preparation without native logout.
+directory. `session stop` prepares registered applications, then delegates logout
+to live GNOME or Plasma peers verified in this logind session using the broker's
+ProcessFD credentials. Numeric PID credentials alone cannot prove this ownership.
+The desktop retains confirmation dialogs and completion. Discovery remains
+cancellable; before the native call, the actor saves its dispatch phase and the
+worker rechecks the transaction, peer owners, process handles, login membership,
+gate and deadline.
+Without an authenticated native peer, stop returns `prepared` and retains the
+external WM, with the limitation in status and the stop result. Native peers in
+user services without a provable logind session remain unavailable, including an
+unstarted on-demand Plasma prompt. Attached lookup does not activate it.
+Power requests prepare applications before requesting logind; disabling releases
+only the attached coordinator. Window-close also requires verified backend ownership.
 
 ## Quick start
 

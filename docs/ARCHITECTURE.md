@@ -198,8 +198,17 @@ originating process, whose UID, logind ID and graphical type are verified before
 the service acquires the UID lease. Its own unit and InvocationID are recorded
 for internal helper authorization. Partial coordination publishes no manager
 environment or graphical targets, creates no WM process and owns no PAM login.
-New applications receive the generation's private XSMP endpoint. Logout returns
-prepared; disabling drops the coordinator and retains the external session.
+New applications receive the generation's private XSMP endpoint. After app
+preparation, logout discovery pins native peers on their original user bus and
+requires a broker-provided ProcessFD and their exact logind login identity.
+Numeric credentials alone cannot establish attached native ownership. The actor
+retains cancellation during discovery, then persists its dispatch phase before
+authorization. Dispatch repeats login, owner and process checks inside the shared
+IPC quota and checks the pending transaction and current budget. Unauthenticated
+or absent native peers return
+prepared; peers outside a logind session are unavailable and attached discovery
+never activates a native helper. Disabling drops the coordinator and retains the
+external session.
 
 CLI start, stop hooks and recovery consume these updates. A disabled generation
 closes control admission and cancels pending manager calls and preparation. It

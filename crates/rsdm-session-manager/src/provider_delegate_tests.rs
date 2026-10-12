@@ -16,6 +16,7 @@ struct Broker {
     activatable: bool,
     replaced_desktop: bool,
     desktop_queries: std::sync::atomic::AtomicUsize,
+    gnome_missing: bool,
 }
 
 struct Activation { calls: std::sync::atomic::AtomicUsize, lost: bool, replace_desktop: bool }
@@ -25,7 +26,7 @@ impl Broker {
         // SAFETY: geteuid has no preconditions.
         Self { uid: Some(unsafe { libc::geteuid() }), pid: Some(std::process::id()), replaced: false,
             missing: false, owner_queries: Default::default(), descriptor: None, activation: None, disable: None,
-            activatable: false, replaced_desktop: false, desktop_queries: Default::default() }
+            activatable: false, replaced_desktop: false, desktop_queries: Default::default(), gnome_missing: false }
     }
 }
 
@@ -33,6 +34,7 @@ impl Broker {
 impl Broker {
     fn get_name_owner(&self, name: &str) -> zbus::fdo::Result<String> {
         assert!(matches!(name, "org.gnome.SessionManager" | "org.kde.LogoutPrompt" | "org.kde.ksmserver"));
+        if self.gnome_missing && name == "org.gnome.SessionManager" { return Err(zbus::fdo::Error::NameHasNoOwner("GNOME is absent".into())); }
         let activated = self.activation.as_ref().is_some_and(|state| state.calls.load(std::sync::atomic::Ordering::SeqCst) != 0);
         if self.missing && !(name == "org.kde.ksmserver" && self.activation.is_some()) && !activated {
             return Err(zbus::fdo::Error::NameHasNoOwner("desktop is absent".into()));
@@ -250,3 +252,6 @@ mod activation_tests;
 
 #[path = "provider_capability_tests.rs"]
 mod capability_tests;
+
+#[path = "native_attached_tests.rs"]
+mod attached_tests;

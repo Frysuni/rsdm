@@ -34,6 +34,11 @@ class Manager(dbus.service.Object):
         super().__init__(bus, path)
 
     def request(self, action):
+        required = RUNTIME / "native-require-saved"
+        if required.exists() and (RUNTIME / required.read_text().strip()).read_text() != "saved\n":
+            raise dbus.exceptions.DBusException(
+                "registered application was not prepared", name="org.freedesktop.DBus.Error.Failed"
+            )
         if (RUNTIME / "native-deny").exists():
             raise dbus.exceptions.DBusException(
                 "native request denied", name="org.freedesktop.DBus.Error.AccessDenied"

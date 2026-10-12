@@ -98,12 +98,18 @@ fn base_details(status: SessionStatus, record: &SessionRecord) -> SessionStatusD
 async fn native_logout(manager: &UserManager, record: &SessionRecord) -> Capability {
     let kind = match record.provider.as_str() {
         "gnome" => crate::provider::ProviderKind::Gnome, "plasma" => crate::provider::ProviderKind::Plasma,
-        "partial" => return Capability::new("native-logout", "unavailable", "This attached provider currently prepares apps without native desktop delegation."),
+        "partial" => crate::provider::ProviderKind::Attached,
         _ => return Capability::new("native-logout", "not-applicable", "This provider uses its own session lifecycle."),
     };
     let provider = crate::provider::Provider { kind, native_unit: None, logout_command: Vec::new() };
-    let query = provider.logout_available(manager);
+    let query = async {
+        if kind == crate::provider::ProviderKind::Attached {
+            crate::native_attached::discover(manager, &record.identity).await.map(|target| target.is_some())
+        } else { provider.logout_available(manager).await }
+    };
     match tokio::time::timeout(Duration::from_secs(2), query).await {
+        Ok(Ok(true)) if kind == crate::provider::ProviderKind::Attached =>
+            Capability::new("native-logout", "available", "The native logout peers belong to this logind session; the desktop owns confirmation dialogs."),
         Ok(Ok(true)) => Capability::new("native-logout", "available", "A verified native desktop has an owned or activatable logout service; it owns confirmation dialogs."),
         Ok(Ok(false)) => Capability::new("native-logout", "unavailable", "No live native desktop with an owned or activatable logout service was found."),
         Ok(Err(SessionError::Bus(zbus::Error::MethodError(name, reason, _)))) if name.as_str() == "org.freedesktop.DBus.Error.AccessDenied" =>

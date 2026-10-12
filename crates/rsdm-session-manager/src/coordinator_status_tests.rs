@@ -88,6 +88,7 @@ async fn full_status_retains_actual_dispatch_and_archived_results_without_rewrit
 #[tokio::test]
 async fn partial_status_reports_external_lifecycle_limits() {
     let mut fixture = Fixture::new().await;
+    fixture._server.object_server().at("/org/freedesktop/DBus", super::attached::NoNative).await.unwrap();
     fixture.coordinator.record.provider = "partial".into();
     fixture.coordinator.provider.kind = ProviderKind::Attached;
     let details = query(&mut fixture).await;
@@ -96,6 +97,7 @@ async fn partial_status_reports_external_lifecycle_limits() {
     assert!(details.limitations[0].contains("PAM"));
     assert!(details.limitations[0].contains("prepared"));
     assert!(details.capabilities.iter().any(|capability| capability.name == "compositor-lifecycle" && capability.state == "unavailable"));
+    assert!(details.capabilities.iter().any(|capability| capability.name == "native-logout" && capability.state == "unavailable"));
 }
 
 #[tokio::test]
