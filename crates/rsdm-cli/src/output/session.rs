@@ -2,13 +2,13 @@ use std::io;
 
 use ratatui::{style::Style, text::{Line, Span}};
 use rsdm_core::domain::ShutdownPolicy;
-use rsdm_session_manager::SessionStatus;
+use rsdm_session_manager::{SessionStatus, SessionStatusDetails};
 
 use super::{ACCENT, MUTED, Report, SUCCESS, WARNING, badge, safe_text, state_color};
 
-pub fn session_status(status: &SessionStatus) -> io::Result<()> {
+fn status_report(status: &SessionStatus) -> Report {
     if status.phase == "disabled" {
-        return super::notice("SESSION STATUS", "disabled: session manager is disabled\n", MUTED).stdout();
+        return super::notice("SESSION STATUS", "disabled: session manager is disabled\n", MUTED);
     }
     let mut report = Report::new("SESSION STATUS", ACCENT);
     let summary = format!("{}: {} (login {}, desktop {}, generation {})\n", status.provider,
@@ -48,7 +48,33 @@ pub fn session_status(status: &SessionStatus) -> io::Result<()> {
             ]),
         ]);
     }
-    report.stdout()
+    report
+}
+
+pub fn session_status_details(details: &SessionStatusDetails) -> io::Result<()> {
+    details_report(details).stdout()
+}
+
+fn details_report(details: &SessionStatusDetails) -> Report {
+    if !details.enabled || (details.capabilities.is_empty() && details.status.phase != "inactive") { return status_report(&details.status); }
+    if details.state == "inactive" {
+        return super::notice("SESSION STATUS", "inactive: no session manager coordinator is running\n", MUTED);
+    }
+    let mut report = status_report(&details.status);
+    report.field("manager", safe_text(&details.state), if details.state == "full" { SUCCESS } else { WARNING });
+    for reason in &details.limitations { report.field("limitation", safe_text(reason), WARNING); }
+    report.section("CAPABILITIES");
+    for capability in &details.capabilities {
+        let value = format!("{}: {} ({})", capability.name, capability.state, capability.reason);
+        report.field("capability", safe_text(&value), if capability.state == "available" { SUCCESS } else { MUTED });
+    }
+    if !details.preparations.is_empty() { report.section("LAST APPLICATION PREPARATIONS"); }
+    for preparation in &details.preparations {
+        let value = format!("{}: {}, method {}, dispatch {}, escalated {}", preparation.unit,
+            preparation.result, preparation.method, preparation.dispatch_state, preparation.escalated);
+        report.field("preparation", safe_text(&value), state_color(&preparation.result));
+    }
+    report
 }
 
 pub fn application(argv: &[String], policy: &ShutdownPolicy) -> io::Result<()> {
@@ -64,3 +90,7 @@ pub fn application(argv: &[String], policy: &ShutdownPolicy) -> io::Result<()> {
     report.field("method", method, ACCENT);
     report.interactive_stdout()
 }
+
+#[cfg(test)]
+#[path = "session_tests.rs"]
+mod tests;

@@ -15,7 +15,7 @@ use ratatui::{
 
 pub use usage::usage;
 pub use events::ConsoleFormat;
-pub use session::{application, session_status};
+pub use session::{application, session_status_details};
 pub use journal::journal_record;
 
 pub const ACCENT: Color = Color::Rgb(94, 234, 212);

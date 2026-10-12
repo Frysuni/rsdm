@@ -5,6 +5,9 @@ use super::*;
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
 const GENERATION: &str = "0123456789abcdef0123456789abcdef";
 
+#[path = "runtime_results_tests.rs"]
+mod results;
+
 struct Directory(PathBuf);
 
 impl Directory {

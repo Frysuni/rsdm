@@ -47,8 +47,8 @@ pub enum SessionAction {
     /// Cancel preparation while the compositor is still running.
     #[command(after_help = "Examples:\n  rsdm session cancel\n\nApps that already closed are not restarted.")]
     Cancel,
-    /// Show the coordinator and its registered applications.
-    #[command(after_help = "Examples:\n  rsdm session status\n  rsdm session status > session-status.txt")]
+    /// Show manager scope, capabilities and recent application preparation results.
+    #[command(after_help = "Examples:\n  rsdm session status\n  rsdm session status > session-status.txt\n\nReading status never starts the coordinator. Older coordinators use the legacy status response.")]
     Status,
     /// Coordinate applications in the current external graphical login.
     Attach,
@@ -116,8 +116,8 @@ pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
             Ok(())
         }
         SessionAction::Status => {
-            let status = session_manager::status(&cfg).await?;
-            output::session_status(&status)?;
+            let details = session_manager::status_details(&cfg).await?;
+            output::session_status_details(&details)?;
             Ok(())
         }
         SessionAction::AppStop { generation, unit } => {

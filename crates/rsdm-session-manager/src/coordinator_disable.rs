@@ -58,6 +58,7 @@ impl Coordinator {
     pub(super) fn disabled_completed(&mut self, work: Work) {
         self.workers = self.workers.saturating_sub(1);
         match work {
+            Work::StatusDetails(reply, _) => { let _ = reply.try_send(Ok(super::status::SessionStatusDetails::disabled())); }
             Work::Observed(result) => self.process = result.process,
             Work::Finished(process, _) => self.process = Some(process),
             Work::Boot(Ok(id)) => self.record.compositor_invocation = id,
@@ -77,6 +78,7 @@ fn reject_disabled(request: Request) {
         Request::Finalize { reply, .. } | Request::Cancel { reply, .. } => { let _ = reply.try_send(Err(message)); }
         Request::Stop { reply, .. } => { let _ = reply.try_send(Ok(StopOutcome::disabled())); }
         Request::Status(reply) => { let _ = reply.try_send(Ok(SessionStatus::disabled())); }
+        Request::StatusDetails(reply) => { let _ = reply.try_send(Ok(super::status::SessionStatusDetails::disabled())); }
         Request::XsmpPrepare { reply, .. } => { let _ = reply.try_send(Err(message)); }
         Request::StopReplySent(permit) => drop(permit),
     }

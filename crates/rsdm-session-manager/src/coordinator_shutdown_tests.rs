@@ -15,6 +15,9 @@ mod disable;
 
 #[path = "coordinator_transaction_tests.rs"]
 mod transaction;
+
+#[path = "coordinator_status_tests.rs"]
+mod status;
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
 
 struct FixtureReady;

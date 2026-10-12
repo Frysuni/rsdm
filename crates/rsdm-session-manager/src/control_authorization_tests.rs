@@ -1,4 +1,5 @@
 use rsdm_core::domain::SessionPhase;
+use crate::SessionStatusDetails;
 
 use super::*;
 
@@ -17,6 +18,7 @@ async fn assert_all_requests_denied(endpoint: Endpoint, receiver: tokio::sync::m
             proxy.call::<_, _, String>("Handshake", &()).await.map(|_| ()),
             proxy.call::<_, _, SessionStatus>("Attach", &()).await.map(|_| ()),
             proxy.call::<_, _, SessionStatus>("Status", &()).await.map(|_| ()),
+            proxy.call::<_, _, SessionStatusDetails>("StatusDetails", &()).await.map(|_| ()),
             proxy.call::<_, _, String>("Launch", &(launch(),)).await.map(|_| ()),
             proxy.call::<_, _, ()>("Finalize", &(launch().generation, Vec::<(String, String)>::new())).await,
             proxy.call::<_, _, StopOutcome>("Stop", &(launch().generation, "logout")).await.map(|_| ()),

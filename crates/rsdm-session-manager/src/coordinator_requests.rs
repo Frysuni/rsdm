@@ -2,13 +2,12 @@
 
 use std::{sync::atomic::Ordering, time::Instant};
 
-use rsdm_core::domain::{SessionPhase, ShutdownMethod};
+use rsdm_core::domain::SessionPhase;
 
 use super::{
     SessionError, apps,
-    control::{LaunchRequest, Reply, Request, SessionStatus, StopOutcome},
+    control::{LaunchRequest, Reply, Request, StopOutcome},
     coordinator::{Coordinator, Work, MAX_COORDINATOR_WORKERS},
-    runtime::AppRecord,
 };
 
 impl Coordinator {
@@ -27,6 +26,7 @@ impl Coordinator {
             Request::Status(reply) => {
                 let _ = reply.try_send(Ok(self.status().await?));
             }
+            Request::StatusDetails(reply) => self.request_status_details(reply),
             Request::StopReplySent(permit) => {
                 self.replies_pending = self.replies_pending.saturating_sub(1);
                 drop(permit);
@@ -92,40 +92,6 @@ impl Coordinator {
         control.cancelled.store(true, Ordering::SeqCst);
         self.xsmp.cancel();
         Ok(())
-    }
-
-    async fn status(&self) -> Result<SessionStatus, SessionError> {
-        let runtime = self.runtime.clone();
-        let apps = super::runtime::blocking(move || runtime.apps()).await?.into_iter().map(|app| {
-            let method = self.app_method(&app);
-            let state = if app.quit_started { "quitting" } else { "registered" };
-            (app.unit, method, app.policy.timeout_secs, state.to_string())
-        }).collect();
-        Ok(SessionStatus {
-            generation: self.runtime.generation.clone(),
-            login_session_id: self.record.identity.login_session_id.clone(),
-            desktop_entry_id: self.record.identity.desktop_entry_id.clone().unwrap_or_default(),
-            provider: self.provider.name().into(),
-            phase: self.lifecycle.phase.to_string(),
-            xsmp_available: self.xsmp.available(),
-            apps,
-        })
-    }
-
-    fn app_method(&self, app: &AppRecord) -> String {
-        if !app.policy.quit_command.is_empty() {
-            return "command".into();
-        }
-        if app.policy.method != ShutdownMethod::Auto {
-            return app.policy.method.to_string();
-        }
-        if self.provider.native_desktop() {
-            return "native".into();
-        }
-        if self.xsmp.connected.contains(&app.unit) {
-            return "xsmp".into();
-        }
-        "term".into()
     }
 
     pub async fn launch(&mut self, request: LaunchRequest, reply: Reply<String>) -> Result<(), SessionError> {

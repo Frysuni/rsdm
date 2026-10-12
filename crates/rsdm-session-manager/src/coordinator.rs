@@ -31,6 +31,7 @@ pub(super) enum Work {
     Prepared(Result<Vec<String>, SessionError>),
     Delegated(Result<(), SessionError>),
     PowerRequested(Result<(), SessionError>),
+    StatusDetails(Reply<super::status::SessionStatusDetails>, Result<super::status::SessionStatusDetails, SessionError>),
     Finished(SessionProcess, Result<(), SessionError>),
 }
 
@@ -196,6 +197,10 @@ impl Coordinator {
         }
         self.workers = self.workers.saturating_sub(1);
         match work {
+            Work::StatusDetails(reply, result) => {
+                let _ = reply.try_send(result.map_err(|error| error.to_string()));
+                return Ok(());
+            }
             Work::Observed(result) => self.observation_completed(result).await?,
             Work::Boot(result) => self.boot_completed(result).await?,
             Work::TargetsChecked(result) => self.targets_checked(result).await?,

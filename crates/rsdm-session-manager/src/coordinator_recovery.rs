@@ -84,6 +84,7 @@ impl Coordinator {
     fn recovered(&mut self, work: Work) {
         self.workers = self.workers.saturating_sub(1);
         match work {
+            Work::StatusDetails(reply, _) => { let _ = reply.try_send(Err("session coordinator failed".into())); }
             Work::Observed(result) => {
                 self.observation_busy = false;
                 self.process = result.process;
@@ -106,6 +107,7 @@ fn reject(request: Request) {
         Request::Finalize { reply, .. } | Request::Cancel { reply, .. } => { let _ = reply.try_send(Err(message)); }
         Request::Stop { reply, .. } => { let _ = reply.try_send(Err(message)); }
         Request::Status(reply) => { let _ = reply.try_send(Err(message)); }
+        Request::StatusDetails(reply) => { let _ = reply.try_send(Err(message)); }
         Request::XsmpPrepare { reply, .. } => { let _ = reply.try_send(Err(message)); }
         Request::StopReplySent(permit) => drop(permit),
     }

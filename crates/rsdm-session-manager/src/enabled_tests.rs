@@ -13,6 +13,9 @@ async fn disabled_entries_run_in_a_fresh_process_without_access_to_a_bus() {
         let status = status(&cfg).await.unwrap();
         assert_eq!(status.phase, "disabled");
         assert!(status.generation.is_empty() && status.apps.is_empty() && !status.xsmp_available);
+        let details = status_details(&cfg).await.unwrap();
+        assert!(!details.enabled && details.state == "disabled");
+        assert!(details.capabilities.is_empty() && details.preparations.is_empty());
         assert_eq!(stop("invalid action", &cfg).await.unwrap().result, "disabled");
         assert_eq!(cancel(&cfg).await.unwrap().result, "disabled");
         assert!(generation(&cfg).await.unwrap_err().to_string().contains("disabled"));

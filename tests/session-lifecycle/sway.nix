@@ -65,6 +65,11 @@ in pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds(session + "swaymsg -t get_tree -r | grep 'foreign 1'")
         foreign = {window["id"] for window in windows() if window["name"].startswith("foreign ")}
         assert len(foreign) == 2
+        status = machine.succeed(session + "rsdm session status")
+        assert "manager: full\n" in status, status
+        assert "window-close: available (SWAYSOCK:" in status, status
+        machine.fail("test -e /run/user/1000/owned-closes")
+        machine.fail("test -e /run/user/1000/foreign-closes")
         machine.fail(session + "rsdm session stop")
         assert machine.succeed("cat /run/user/1000/owned-closes").splitlines() == ["close"]
         assert len([window for window in windows() if window["name"].startswith("owned ")]) == 3
@@ -77,6 +82,8 @@ in pkgs.testers.runNixOSTest {
         assert application_record["dispatch"]["method"] == "window_close"
         assert application_record["dispatch"]["state"] == "sent"
         assert application_record["preparation"]["outcome"] == "cancelled"
+        status = machine.succeed(session + "rsdm session status")
+        assert "cancelled, method window-close, dispatch sent, escalated false" in status, status
         assert machine.succeed(user + "systemctl --user show " + compositor + " -p MainPID -p InvocationID") == compositor_state
         machine.succeed("touch /run/user/1000/owned-finish /run/user/1000/foreign-finish")
         machine.wait_until_fails("test -e " + directory + "/apps/" + application_record["unit"] + ".toml")
@@ -92,6 +99,8 @@ in pkgs.testers.runNixOSTest {
         assert saved["dispatch"]["method"] == "window_close"
         assert saved["preparation"]["outcome"] == "clean"
         assert not saved["preparation"]["escalated"]
+        status = machine.succeed(session + "rsdm session status")
+        assert "preparation: " + application_record["unit"] + ": clean, method window-close, dispatch sent, escalated false" in status, status
         assert machine.succeed("cat /run/user/1000/clean-closes").splitlines() == ["close"]
         machine.fail("test -e /run/user/1000/clean-term")
         assert machine.succeed(user + "systemctl --user show " + compositor + " -p MainPID -p InvocationID") == compositor_state

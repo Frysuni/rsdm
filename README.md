@@ -62,7 +62,7 @@ rsdm status                  # configuration and live lock state
 rsdm session start -- niri-session # use niri's original native session wrapper
 rsdm session stop            # prepare registered apps, then close the session
 rsdm session cancel          # cancel preparation before infrastructure teardown
-rsdm session status          # provider, phase, generation and app policies
+rsdm session status          # full/partial scope, capabilities and preparation results
 rsdm power reboot            # prepare the current session and request reboot
 rsdm power poweroff          # prepare the current session and request shutdown
 rsdm app -- waybar           # launch a program into the graphical session

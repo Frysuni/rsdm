@@ -3,6 +3,24 @@
 use super::*;
 
 impl Runtime {
+    pub fn archived_apps(&self) -> Result<Vec<AppRecord>, SessionError> {
+        let directory = self.path.join("results");
+        match fs::symlink_metadata(&directory) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+            Ok(_) => {},
+        }
+        verify_directory(&directory)?;
+        let mut records = Vec::new();
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            if let Some(unit) = entry.file_name().to_str().and_then(|name| name.strip_suffix(".toml")) {
+                records.push(self.archived_app(unit)?);
+            }
+        }
+        Ok(records)
+    }
+
     pub fn remove_app_until(&self, prepared: &AppRecord, deadline: &Deadline) -> Result<(), SessionError> {
         let _lease = self.app_lease_until(&prepared.unit, deadline)?;
         let current = match self.app(&prepared.unit) {

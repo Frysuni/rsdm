@@ -67,6 +67,30 @@ are described [below](#native-wm-and-de-ownership).
 
 ## Orderly logout
 
+`rsdm session status` reads the current coordinator without activating it. It
+reports `inactive` when no coordinator is running and `disabled` when session
+management is off. A manually started session can report `full` even when DM is
+disabled; attaching to an external WM reports `partial`, with the specific
+lifecycle limitations.
+
+The authorized `org.rsdm.Session1.StatusDetails` method returns `enabled`,
+`state`, the existing status fields in `status`, `capabilities`, `limitations`
+and `preparations`. Capabilities have a name, state (`available`, `unavailable`,
+`not-applicable` or `unknown`) and reason. A missing optional window-close
+backend does not change a full session into partial. Window-close capability
+probes authenticate the current IPC instance and read its window/event APIs;
+they do not close windows. Probes run outside the coordinator actor with a
+bounded timeout.
+
+Preparation results include the application InvocationID, transaction, selected
+method, dispatch state, `clean`/`forced`/`cancelled`/`unknown` result and escalation
+flag. Retired app records remain visible for the current generation. `clean`
+means no escalation was recorded; it does not certify that an app saved its data.
+The original Status and Stop wire formats remain unchanged. When an older
+coordinator lacks StatusDetails, the CLI reads and displays its legacy Status
+using the same existing unique bus owner. Authorization and other failures are
+reported rather than masked by that fallback.
+
 Use these commands from the graphical session:
 
 ```sh

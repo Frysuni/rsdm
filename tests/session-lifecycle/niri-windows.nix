@@ -18,6 +18,11 @@ in {
         machine.wait_until_succeeds(session + "niri msg --json windows | grep 'foreign 1'")
         before = {window["id"] for window in windows() if window["title"].startswith("foreign ")}
         assert len(before) == 2
+        status = machine.succeed(session + "rsdm session status")
+        assert "manager: full\n" in status, status
+        assert "window-close: available (NIRI_SOCKET:" in status, status
+        machine.fail("test -e /run/user/1000/owned-closes")
+        machine.fail("test -e /run/user/1000/foreign-closes")
         machine.fail(session + "rsdm session stop")
         machine.wait_for_file("/run/user/1000/owned-closes")
         assert machine.succeed("cat /run/user/1000/owned-closes").splitlines() == ["close"]
@@ -35,6 +40,8 @@ in {
         assert record["dispatch"]["method"] == "window_close"
         assert record["dispatch"]["state"] == "sent"
         assert record["preparation"]["outcome"] == "cancelled"
+        status = machine.succeed(session + "rsdm session status")
+        assert "cancelled, method window-close, dispatch sent, escalated false" in status, status
         machine.succeed("touch /run/user/1000/owned-finish /run/user/1000/foreign-finish")
         machine.wait_until_fails(session + "niri msg --json windows | grep 'owned '")
         machine.wait_until_fails(user + "systemctl --user is-active --quiet rsdm-foreign-window")
@@ -49,6 +56,8 @@ in {
         saved = tomllib.loads(machine.succeed("cat " + directory + "/results/" + record["unit"] + ".toml"))
         assert saved["preparation"]["outcome"] == "clean"
         assert not saved["preparation"]["escalated"]
+        status = machine.succeed(session + "rsdm session status")
+        assert "preparation: " + record["unit"] + ": clean, method window-close, dispatch sent, escalated false" in status, status
         assert machine.succeed("cat /run/user/1000/clean-closes").splitlines() == ["close"]
         machine.fail("test -e /run/user/1000/clean-term")
         machine.succeed(user + "systemctl --user is-active --quiet niri.service")

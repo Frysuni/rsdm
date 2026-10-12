@@ -4,10 +4,16 @@
         machine.wait_until_succeeds(user + "systemctl --user show rsdm-session-manager.service -p LoadState --value | grep -qx not-found")
         machine.succeed("rm -f " + runtime + "/attach-app-*")
         machine.succeed("printf '[session_manager]\\nenabled = true\\n' > /etc/rsdm-toggle.toml; mv /etc/rsdm-toggle.toml /etc/rsdm.toml")
+        assert machine.succeed(control + "rsdm session status") == "inactive: no session manager coordinator is running\n"
+        machine.fail(user + "busctl --user list | grep org.rsdm.Session1")
+        machine.succeed(user + "systemctl --user show rsdm-session-manager.service -p LoadState --value | grep -qx not-found")
 
     def attached_generation():
         status = machine.succeed(control + "rsdm session status")
         assert status.startswith("partial: running "), status
+        assert "manager: partial\n" in status, status
+        assert "compositor-lifecycle: unavailable" in status, status
+        assert "PAM lifecycle are not owned" in status, status
         return status.split("generation ")[1].split(")")[0]
 
     def retire_attached_session():
@@ -35,6 +41,9 @@
             assert machine.succeed("cat " + runtime + "/attach-app-generation").strip() == current
             assert "prepared" in machine.succeed(control + "rsdm session stop")
             machine.wait_for_file(runtime + "/attach-app-saved")
+            status = machine.succeed(control + "rsdm session status")
+            assert "preparation: app-rsdm-" in status, status
+            assert "clean, method term, dispatch sent, escalated false" in status, status
             retire_attached_session()
 
     with subtest("concurrent attach requests join one current coordinator"):

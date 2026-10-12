@@ -22,6 +22,8 @@
 # Configuration monitoring retains the last valid policy if an update cannot be loaded.
 # Switching to false detaches SM, leaving apps, WM and session environment running.
 # The launcher still waits for the actual WM exit before returning to DM.
+# session status reports full/partial scope, capabilities and preparation results without starting SM.
+# DM enablement is independent: manual session start can be full; external attach is partial.
 # Re-enabling does not resume stop hooks or recovery for a generation recorded as disabled.
 enabled = true # optional | bool | default: true | values: true, false
 # Extra environment variable names exported after the Wayland socket appears.

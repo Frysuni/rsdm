@@ -26,6 +26,7 @@ mod coordinator_requests;
 mod coordinator_recovery;
 mod coordinator_shutdown;
 mod coordinator_startup;
+mod coordinator_status;
 mod deadline;
 mod env;
 mod identity;
@@ -49,6 +50,7 @@ mod session_wait;
 mod shutdown_transaction;
 mod signals;
 mod startup;
+mod status;
 mod unit_name;
 mod units;
 mod xsmp;
@@ -68,8 +70,9 @@ mod disabled_generation_tests;
 use rsdm_core::domain::{SessionManagerConfig, SessionManagerUpdate, ShutdownPolicy};
 use thiserror::Error;
 
-pub use client::{cancel, generation, is_running, status, stop};
+pub use client::{cancel, generation, is_running, status, status_details, stop};
 pub use control::{SessionStatus, StopOutcome};
+pub use status::{Capability, PreparationStatus, SessionStatusDetails};
 pub use provider::StartOptions;
 
 pub async fn attach_with_config_updates(updates: tokio::sync::watch::Receiver<SessionManagerUpdate>, path: &std::path::Path) -> Result<StopOutcome, SessionError> {

@@ -5,8 +5,12 @@ use std::time::Duration;
 use rsdm_core::domain::{SessionManagerConfig, ShutdownPolicy};
 
 use super::{
-    SessionError, control::{self, LaunchRequest, SessionStatus, StopOutcome}, env,
+    SessionError, control::{self, LaunchRequest, StopOutcome}, env,
 };
+
+#[path = "client_status.rs"]
+mod status_query;
+pub use status_query::{status, status_details};
 
 pub async fn generation(cfg: &SessionManagerConfig) -> Result<String, SessionError> {
     if !cfg.enabled { return Err(SessionError::State("session manager is disabled".into())); }
@@ -49,12 +53,6 @@ pub async fn finalize(cfg: &SessionManagerConfig, names: &[String]) -> Result<()
     let connection = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(25)).build().await?;
     control::proxy(&connection).await?.call::<_, _, ()>("Finalize", &(generation, pairs)).await?;
     Ok(())
-}
-
-pub async fn status(cfg: &SessionManagerConfig) -> Result<SessionStatus, SessionError> {
-    if !cfg.enabled { return Ok(SessionStatus::disabled()); }
-    let connection = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await?;
-    Ok(control::proxy(&connection).await?.call("Status", &()).await?)
 }
 
 pub async fn stop(action: &str, cfg: &SessionManagerConfig) -> Result<StopOutcome, SessionError> {

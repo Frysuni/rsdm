@@ -73,6 +73,7 @@ pub(super) enum Request {
     Stop { generation: String, action: String, reply: Reply<StopOutcome> },
     Cancel { generation: String, reply: Reply<()> },
     Status(Reply<SessionStatus>),
+    StatusDetails(Reply<super::status::SessionStatusDetails>),
     XsmpPrepare { generation: String, transaction_id: String, units: Vec<String>, cancellable: bool, reply: Reply<Vec<String>> },
     StopReplySent(Arc<Permit>),
 }
@@ -207,6 +208,14 @@ impl Endpoint {
         let permit = self.admission.acquire(Class::Regular)?;
         self.authorize(connection, &header).await?;
         self.request(permit, Request::Status).await
+    }
+
+    async fn status_details(
+        &self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<super::status::SessionStatusDetails> {
+        let permit = self.admission.acquire(Class::Regular)?;
+        self.authorize(connection, &header).await?;
+        self.request(permit, Request::StatusDetails).await
     }
 
     async fn xsmp_prepare(
