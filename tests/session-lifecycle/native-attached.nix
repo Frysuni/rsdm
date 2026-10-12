@@ -32,7 +32,7 @@ in pkgs.testers.runNixOSTest {
     user = "runuser -u alice -- env XDG_RUNTIME_DIR=" + runtime + " DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus "
     control = "${controller} system rsdm-test-native-attached.service "
     foreign = "${controller} system rsdm-test-foreign-login.service "
-    settings = " --collect --uid=alice --property=PAMName=login --setenv=XDG_SESSION_TYPE=wayland --setenv=XDG_RUNTIME_DIR=" + runtime + " --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus "
+    settings = " --collect --uid=alice --property=Type=exec --property=PAMName=login --setenv=XDG_SESSION_TYPE=wayland --setenv=XDG_RUNTIME_DIR=" + runtime + " --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus "
 
     for desktop in ["GNOME", "KDE"]:
         with subtest(desktop + " attached logout delegates only after registered apps are prepared"):
