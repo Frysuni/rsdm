@@ -89,14 +89,24 @@ pub(super) async fn connect_endpoint(manager: &UserManager, record: &SessionReco
 }
 
 async fn dispatch(manager: &UserManager, record: &SessionRecord, app: &AppRecord, prepared: &mut PreparedClose, control: &ShutdownControl) -> Result<bool, SessionError> {
-    let PreparedClose { connection, events, window, process: handle } = prepared;
+    let PreparedClose { connection, window, process: handle, .. } = prepared;
     let pid = window.pid.and_then(|pid| u32::try_from(pid).ok()).unwrap_or(0);
     if !owns_compositor(manager, record, connection.pid()).await? || !owns_process(manager, app, pid, handle).await? { return Ok(false); }
     let windows = manager.request(async { Ok(connection.windows().await) }).await??;
     if !windows.contains(window) || !owns_process(manager, app, pid, handle).await? { return Ok(false); }
+    close_prepared(manager, record, app, prepared, control).await
+}
+
+async fn close_prepared(manager: &UserManager, record: &SessionRecord, app: &AppRecord, prepared: &mut PreparedClose, control: &ShutdownControl) -> Result<bool, SessionError> {
+    let PreparedClose { connection, events, window, process: handle } = prepared;
+    let pid = window.pid.and_then(|pid| u32::try_from(pid).ok()).unwrap_or(0);
+    let bus = manager.connection();
     manager.request(async {
+        if !super::window_ownership::current(&bus, record, app, connection.pid(), pid, handle).await? { return Ok(Ok(false)); }
         manager.actions.check_generation_async().await.map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
+        manager.deadline.remaining(std::time::Duration::MAX)?;
         if control.cancelled() || !handle.alive()? { return Ok(Ok(false)); }
+        manager.actions.check().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
         match events.unchanged(connection, window) {
             Ok(true) => {}
             Ok(false) => return Ok(Ok(false)),
@@ -125,3 +135,7 @@ async fn owns_process(manager: &UserManager, app: &AppRecord, pid: u32, handle: 
 #[cfg(test)]
 #[path = "window_close_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "window_dispatch_tests.rs"]
+mod dispatch_tests;

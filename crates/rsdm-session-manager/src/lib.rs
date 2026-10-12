@@ -41,6 +41,7 @@ mod sway;
 mod hyprland;
 mod window_backend;
 mod window_close;
+mod window_ownership;
 mod window_capability;
 mod wayfire;
 mod wayland_registry;
