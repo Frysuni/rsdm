@@ -14,9 +14,11 @@ pub(super) async fn verify_invocation(manager: &UserManager, app: &AppRecord) ->
             // An unreferenced unit can lose its invocation identity as its
             // final processes exit. Require both stopped state and an empty
             // cgroup before treating that terminal race as a closed app.
-            if id.iter().all(|byte| *byte == 0) && !manager.active(&app.unit).await?
-                && manager.processes(&app.unit).await?.is_empty()
-            { return Ok(false); }
+            if id.iter().all(|byte| *byte == 0) && !manager.active(&app.unit).await? {
+                let mut pids = manager.processes(&app.unit).await?.into_iter().map(|(_, pid, _)| pid).collect();
+                super::app_lifetime::exclude_process(app, &mut pids)?;
+                if pids.is_empty() { return Ok(false); }
+            }
             if app.invocation_id.is_empty() || id != app.invocation_id {
                 return Err(SessionError::State(format!("{} invocation changed", app.unit)));
             }
@@ -34,6 +36,7 @@ pub(super) async fn app_processes(manager: &UserManager, app: &AppRecord) -> Res
         pids.sort_unstable();
         pids.dedup();
     }
+    super::app_lifetime::exclude_process(app, &mut pids)?;
     if let Some(origin) = &app.original_process {
         if !pids.contains(&origin.pid) {
             if let Some(handle) = ProcessHandle::open(origin.pid)? {

@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use rsdm_core::domain::{SessionPhase, ShutdownPolicy};
+use rsdm_core::domain::SessionPhase;
 use serde::{Deserialize, Serialize};
 
 use super::{SessionError, deadline::Deadline, identity::{SessionIdentity, valid_generation}};
@@ -59,25 +59,7 @@ impl SessionRecord {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct AppRecord {
-    pub unit: String,
-    pub invocation_id: Vec<u8>,
-    #[serde(default)]
-    pub original_process: Option<super::app_origin::OriginalProcess>,
-    #[serde(default)]
-    pub migrated_scope: Option<super::app_scope::MigratedScope>,
-    pub policy: ShutdownPolicy,
-    pub deadline_usec: Option<u64>,
-    pub quit_started: bool,
-    #[serde(default)]
-    pub dispatch: Option<super::app_dispatch::Dispatch>,
-    #[serde(default)]
-    pub window_close_sent: bool,
-    #[serde(default)]
-    pub preparation: Option<super::app_result::Preparation>,
-}
+pub(super) use super::app_record::AppRecord;
 
 #[derive(Debug, Clone)]
 pub(super) struct Runtime {

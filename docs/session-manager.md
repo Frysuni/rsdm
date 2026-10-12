@@ -181,6 +181,14 @@ scope invocation is an ownership error. Legacy records and unsupported pidfd
 identities cannot adopt a scope; an uncaptured live original process prevents
 reporting a clean exit after its service stops.
 
+With unified cgroups and stable pidfs IDs, a private lifetime observer remains
+in the launch service. It keeps that service active if the original process exits
+while its scope children are still running, preventing an automatic ExecStop
+from requesting their shutdown. The observer pins cgroup files and is excluded
+from application ownership, process counts and signals. After hot disable it
+only observes process exit; it neither writes recovery records nor dispatches
+shutdown actions. Its own exit does not mean that application data was saved.
+
 In a managed WM or native niri session, auto chooses an explicit quit command,
 a connected XSMP client, a verified window close, then SIGTERM to the main process. Remaining children
 are tracked through the service cgroup and any authenticated migrated scope. Force timeout gives them up to five

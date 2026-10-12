@@ -4,7 +4,7 @@ let
   controller = import ./controller.nix { inherit pkgs; };
   python = pkgs.python3.withPackages (packages: [ packages.dbus-python ]);
   application = pkgs.writeShellScript "test-scope-lifetime-app" ''
-    exec ${python}/bin/python3 ${./scope-lifetime-app.py}
+    exec ${python}/bin/python3 ${./scope-lifetime-app.py} "$@"
   '';
 in pkgs.testers.runNixOSTest {
   name = "rsdm-scope-lifetime";
@@ -79,7 +79,63 @@ in pkgs.testers.runNixOSTest {
     assert not saved["preparation"]["escalated"], saved
     machine.wait_until_succeeds(user + "systemctl --user show " + scope + " -p ActiveState --value | grep '^inactive$'")
     assert machine.succeed(user + "systemctl --user show " + compositor + " -p MainPID -p InvocationID") == before
-    machine.succeed(control + "rsdm session stop")
+
+    machine.succeed("rm -f /run/user/1000/scope-app-ready /run/user/1000/scope-app-stopped /run/user/1000/scope-app-unit")
+    machine.succeed(control + "rsdm app --shutdown-method term --shutdown-timeout 3 --on-timeout cancel -- ${application} tree")
+    machine.wait_for_file("/run/user/1000/scope-child-ready")
+    machine.wait_until_succeeds("grep -q '^\\[migrated_scope\\]$' " + directory + "/apps/*.toml")
+    child = int(machine.succeed("cat /run/user/1000/scope-child-ready"))
+    app = tomllib.loads(machine.succeed("cat " + directory + "/apps/*.toml"))
+    scope = app["migrated_scope"]["unit"]
+    main = app["original_process"]["pid"]
+    scope_group = machine.succeed(user + "systemctl --user show " + scope + " -p ControlGroup --value").strip()
+    assert "0::" + scope_group in machine.succeed("cat /proc/" + str(child) + "/cgroup").splitlines()
+    machine.succeed("touch /run/user/1000/scope-main-exit")
+    machine.wait_until_succeeds("test ! -e /proc/" + str(main))
+    machine.sleep(3)
+    if machine.execute("test ! -e /run/user/1000/scope-child-stopped")[0] != 0:
+        print(machine.succeed("journalctl --no-pager _UID=1000 -n 100"))
+    machine.succeed("test ! -e /run/user/1000/scope-child-stopped")
+    machine.succeed("kill -0 " + str(child))
+    machine.succeed(user + "systemctl --user is-active --quiet " + app["unit"])
+    machine.succeed(user + "systemctl --user stop " + app["unit"])
+    machine.wait_for_file("/run/user/1000/scope-child-stopped")
+    path = directory + "/results/" + app["unit"] + ".toml"
+    machine.wait_for_file(path)
+    saved = tomllib.loads(machine.succeed("cat " + shlex.quote(path)))
+    assert saved["preparation"]["outcome"] == "clean", saved
+    assert not saved["preparation"]["escalated"], saved
+    machine.wait_until_succeeds(user + "systemctl --user show " + scope + " -p ActiveState --value | grep '^inactive$'")
+    assert machine.succeed(user + "systemctl --user show " + compositor + " -p MainPID -p InvocationID") == before
+    machine.succeed("rm -f /run/user/1000/scope-app-ready /run/user/1000/scope-app-stopped /run/user/1000/scope-app-unit /run/user/1000/scope-child-ready /run/user/1000/scope-child-stopped /run/user/1000/scope-main-exit")
+    machine.succeed(control + "rsdm app --shutdown-method term --shutdown-timeout 3 --on-timeout cancel -- ${application} tree")
+    machine.wait_for_file("/run/user/1000/scope-child-ready")
+    machine.wait_until_succeeds("grep -q '^\\[migrated_scope\\]$' " + directory + "/apps/*.toml")
+    app = tomllib.loads(machine.succeed("cat " + directory + "/apps/*.toml"))
+    child = int(machine.succeed("cat /run/user/1000/scope-child-ready"))
+    main = app["original_process"]["pid"]
+    observer = app["lifetime_process"]["pid"]
+    registered = machine.succeed("cat " + directory + "/apps/*.toml")
+    machine.succeed("printf '[session_manager]\\nenabled = false\\n' > /etc/rsdm-toggle.toml; mv /etc/rsdm-toggle.toml /etc/rsdm.toml")
+    machine.wait_until_succeeds("grep -q '^disabled = true$' " + directory + "/session.toml")
+    machine.wait_until_fails(user + "busctl --user list | grep org.rsdm.Session1")
+    machine.succeed("touch /run/user/1000/scope-main-exit")
+    machine.wait_until_succeeds("test ! -e /proc/" + str(main))
+    machine.succeed(control + "rsdm session app-stop --generation " + values["RSDM_SESSION_GENERATION"] + " --unit " + app["unit"])
+    machine.succeed(control + "rsdm session cleanup --generation " + values["RSDM_SESSION_GENERATION"])
+    machine.sleep(3)
+    machine.succeed("test ! -e /run/user/1000/scope-child-stopped")
+    machine.succeed("kill -0 " + str(child) + " " + str(observer))
+    machine.succeed(user + "systemctl --user is-active --quiet " + app["unit"])
+    assert machine.succeed("cat " + directory + "/apps/*.toml") == registered
+    assert machine.succeed(user + "systemctl --user show " + compositor + " -p MainPID -p InvocationID") == before
+    machine.succeed("loginctl show-session " + record["identity"]["login_session_id"])
+    machine.succeed("test ! -e /tmp/rsdm-scope-session-exited")
+    machine.succeed("kill -TERM " + str(child))
+    machine.wait_for_file("/run/user/1000/scope-child-stopped")
+    machine.wait_until_succeeds("test ! -e /proc/" + str(observer))
+    machine.wait_until_fails(user + "systemctl --user is-active --quiet " + app["unit"])
+    machine.succeed(user + "systemctl --user stop " + compositor)
     machine.wait_for_file("/tmp/rsdm-scope-session-exited")
   '';
 }

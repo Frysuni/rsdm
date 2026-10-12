@@ -71,6 +71,13 @@ pub enum SessionAction {
         argv: Vec<String>,
     },
     #[command(hide = true)]
+    AppWatch {
+        #[arg(long)]
+        generation: String,
+        #[arg(long)]
+        unit: String,
+    },
+    #[command(hide = true)]
     Cleanup {
         #[arg(long)]
         generation: String,
@@ -96,7 +103,7 @@ pub struct AppOptions {
 }
 
 pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
-    let updates = if matches!(&action, SessionAction::Start { .. } | SessionAction::Attach | SessionAction::Serve | SessionAction::Finalize { .. } | SessionAction::AppStop { .. } | SessionAction::AppExec { .. } | SessionAction::Cleanup { .. }) {
+    let updates = if matches!(&action, SessionAction::Start { .. } | SessionAction::Attach | SessionAction::Serve | SessionAction::Finalize { .. } | SessionAction::AppStop { .. } | SessionAction::AppExec { .. } | SessionAction::AppWatch { .. } | SessionAction::Cleanup { .. }) {
         Some(watch_session_config(path).await?)
     } else { None };
     let cfg = match &updates {
@@ -134,6 +141,9 @@ pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
         }
         SessionAction::AppExec { generation, unit, argv } => {
             session_manager::exec_app_with_config_updates(&generation, &unit, &argv, updates.expect("application configuration")).await.context("starting the application")
+        }
+        SessionAction::AppWatch { generation, unit } => {
+            session_manager::watch_app_with_config_updates(&generation, &unit, updates.expect("application lifetime configuration")).await.context("observing application lifetime")
         }
         SessionAction::Cleanup { generation } => {
             session_manager::cleanup_with_config_updates(&generation, updates.expect("recovery configuration")).await.context("recovering the graphical session")

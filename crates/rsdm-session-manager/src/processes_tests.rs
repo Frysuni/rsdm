@@ -69,6 +69,20 @@ async fn a_cleared_invocation_cannot_hide_remaining_processes() {
     assert!(stop_invocation(&manager, "native.service", &[1; 16]).await.is_err());
 }
 
+#[tokio::test]
+async fn a_stopped_invocation_excludes_only_its_verified_lifetime_process() {
+    let pid = std::process::id();
+    let handle = ProcessHandle::open(pid).unwrap().unwrap();
+    let Some(identity) = handle.id().unwrap() else { return; };
+    let (manager, _server, _) = manager(vec![0; 16], "inactive", vec![pid]).await;
+    let mut app = crate::helper_start_fixture::app();
+    app.unit = "native.service".into();
+    app.lifetime_process = Some(crate::app_lifetime::LifetimeProcess { pid, pidfd_id: identity });
+    assert!(!verify_invocation(&manager, &app).await.unwrap());
+    app.lifetime_process.as_mut().unwrap().pidfd_id = identity.wrapping_add(1);
+    assert!(verify_invocation(&manager, &app).await.is_err());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cleared_invocation_cannot_hide_an_active_unit() {
     let (manager, _server, _) = manager(vec![0; 16], "active", Vec::new()).await;
@@ -85,7 +99,7 @@ async fn recovery_does_not_stop_a_replacement_native_invocation() {
 async fn process_signaling_does_not_repeat_full_cgroup_snapshots() {
     let (manager, _server, queries) = manager(vec![1; 16], "active", vec![std::process::id(); 128]).await;
     let app = AppRecord { unit: "native.service".into(), invocation_id: vec![1; 16],
-        policy: rsdm_core::domain::ShutdownPolicy::default(), deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, preparation: None };
+        policy: rsdm_core::domain::ShutdownPolicy::default(), deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, lifetime_process: None, preparation: None };
     signal_app(&manager, &app, 0, &ShutdownControl::default()).await.unwrap();
     assert_eq!(queries.load(Ordering::SeqCst), 1);
 }
@@ -94,7 +108,7 @@ async fn process_signaling_does_not_repeat_full_cgroup_snapshots() {
 async fn process_signaling_rejects_a_replacement_before_taking_a_snapshot() {
     let (manager, _server, queries) = manager(vec![2; 16], "active", vec![std::process::id()]).await;
     let app = AppRecord { unit: "native.service".into(), invocation_id: vec![1; 16],
-        policy: rsdm_core::domain::ShutdownPolicy::default(), deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, preparation: None };
+        policy: rsdm_core::domain::ShutdownPolicy::default(), deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, lifetime_process: None, preparation: None };
     assert!(signal_app(&manager, &app, 0, &ShutdownControl::default()).await.is_err());
     assert_eq!(queries.load(Ordering::SeqCst), 0);
 }

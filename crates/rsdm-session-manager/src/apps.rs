@@ -44,7 +44,7 @@ pub(super) async fn register(
     }
     let app = AppRecord {
         unit: app_unit_name(program, &runtime.generation), invocation_id: Vec::new(),
-        policy, deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, preparation: None,
+        policy, deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, lifetime_process: None, preparation: None,
     };
     let runtime = runtime.clone();
     blocking(move || {

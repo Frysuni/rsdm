@@ -108,12 +108,15 @@ async fn current_dedicated_cgroup_authorizes_one_close_without_nested_request_sl
 
 #[tokio::test]
 async fn migrated_scope_ownership_is_rechecked_after_waiting_for_the_dispatch_slot() {
-    for revoked in ["none", "escaped-main", "service-ended", "scope", "app"] {
+    for revoked in ["none", "escaped-main", "service-ended", "scope", "app", "lifetime"] {
         let mut fixture = Fixture::new().await;
         let handle = ProcessHandle::open(std::process::id()).unwrap().unwrap();
         let Some(identity) = handle.id().unwrap() else { return; };
         fixture.app.original_process = Some(crate::app_origin::OriginalProcess { pid: std::process::id(), pidfd_id: identity });
-        fixture.app.migrated_scope = Some(crate::app_scope::MigratedScope { unit: "app-test.scope".into(), invocation_id: vec![1; 16] });
+        fixture.app.migrated_scope = Some(crate::app_scope::MigratedScope { unit: "app-test.scope".into(), invocation_id: vec![1; 16], lifetime_group: None });
+        if revoked == "lifetime" {
+            fixture.app.lifetime_process = Some(crate::app_lifetime::LifetimeProcess { pid: std::process::id(), pidfd_id: identity });
+        }
         fixture.state.present.store(false, Ordering::SeqCst);
         fixture.state.scope_present.store(true, Ordering::SeqCst);
         if revoked == "escaped-main" {

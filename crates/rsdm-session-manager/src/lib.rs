@@ -43,6 +43,9 @@ mod window_backend;
 mod window_close;
 mod window_ownership;
 mod app_origin;
+mod app_record;
+mod app_lifetime;
+mod app_lifetime_group;
 mod app_scope;
 mod app_scope_lineage;
 mod app_ownership;
@@ -172,8 +175,11 @@ pub async fn exec_app_with_config_updates(generation: &str, unit: &str, argv: &[
     if argv.is_empty() { return Err(SessionError::EmptyCommand); }
     if updates.borrow().config.enabled {
         let actions = action_gate::ActionGate::new(Some(updates));
-        if let Err(error) = app_origin::capture(generation, unit, actions).await {
-            tracing::warn!(%error, unit, "application process identity could not be captured");
+        if let Err(error) = async {
+            app_origin::capture(generation, unit, actions.clone()).await?;
+            app_lifetime::start(generation, unit, actions).await
+        }.await {
+            tracing::warn!(%error, unit, "application lifetime could not be captured");
         }
     }
     use std::os::unix::process::CommandExt;
@@ -191,6 +197,11 @@ pub async fn exec_app_with_config_updates(generation: &str, unit: &str, argv: &[
         });
     }
     Err(command.exec().into())
+}
+
+pub async fn watch_app_with_config_updates(generation: &str, unit: &str, updates: tokio::sync::watch::Receiver<SessionManagerUpdate>) -> Result<(), SessionError> {
+    if !updates.borrow().config.enabled { return Ok(()); }
+    app_lifetime::watch(generation, unit, action_gate::ActionGate::new(Some(updates))).await
 }
 
 pub async fn stop_hook(generation: &str, unit: &str, cfg: &SessionManagerConfig) -> Result<(), SessionError> {

@@ -12,6 +12,8 @@ const SCOPE: &str = "org.freedesktop.systemd1.Scope";
 pub(super) struct MigratedScope {
     pub unit: String,
     pub invocation_id: Vec<u8>,
+    #[serde(default)]
+    pub lifetime_group: Option<super::app_lifetime_group::GroupIdentity>,
 }
 
 pub(super) fn registered_scope(app: &AppRecord) -> Result<Option<&MigratedScope>, SessionError> {
@@ -67,14 +69,18 @@ async fn discover(manager: &UserManager, app: &AppRecord) -> Result<Option<Migra
     pids.sort_unstable();
     let initial = pids.clone();
     let origin = origin.clone();
-    let Some(owned) = runtime::blocking(move || super::app_scope_lineage::pin_owned(&pids, &group, &origin)).await? else { return Ok(None); };
+    let Some((owned, lifetime_group)) = runtime::blocking(move || {
+        let Some(owned) = super::app_scope_lineage::pin_owned(&pids, &group, &origin)? else { return Ok(None); };
+        let lifetime_group = super::app_lifetime_group::Group::open(&group)?.identity;
+        Ok(Some((owned, lifetime_group)))
+    }).await? else { return Ok(None); };
     let mut current = manager.processes(&unit).await?.into_iter().map(|(_, pid, _)| pid).collect::<Vec<_>>();
     current.sort_unstable();
     if initial != current || manager.unit_for_pid(main).await? != unit || manager.invocation_id(&unit).await? != invocation_id
         || !processes::verify_invocation(manager, app).await? || !handle.alive()?
     { return Ok(None); }
     for handle in owned { if !handle.alive()? { return Ok(None); } }
-    Ok(Some(MigratedScope { unit, invocation_id }))
+    Ok(Some(MigratedScope { unit, invocation_id, lifetime_group: Some(lifetime_group) }))
 }
 
 pub(super) async fn processes(manager: &UserManager, scope: &MigratedScope) -> Result<Vec<u32>, SessionError> {

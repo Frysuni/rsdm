@@ -52,7 +52,7 @@ fn migrate_client(fixture: &Fixture, pid: u32) {
     let process = crate::processes::ProcessHandle::open(pid).unwrap().unwrap();
     let mut app = fixture.runtime.app(&crate::helper_start_fixture::app().unit).unwrap();
     app.original_process = Some(crate::app_origin::OriginalProcess { pid, pidfd_id: process.id().unwrap().unwrap() });
-    app.migrated_scope = Some(crate::app_scope::MigratedScope { unit: "app-test.scope".into(), invocation_id: vec![1; 16] });
+    app.migrated_scope = Some(crate::app_scope::MigratedScope { unit: "app-test.scope".into(), invocation_id: vec![1; 16], lifetime_group: None });
     fixture.runtime.save_app(&app).unwrap();
     fixture.state.scoped.store(true, Ordering::SeqCst);
 }

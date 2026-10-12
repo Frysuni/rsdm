@@ -1,6 +1,7 @@
 use std::{os::unix::fs::symlink, sync::atomic::{AtomicUsize, Ordering}, thread, time::{Duration, Instant}};
 
 use super::*;
+use rsdm_core::domain::ShutdownPolicy;
 
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
 const GENERATION: &str = "0123456789abcdef0123456789abcdef";
@@ -31,7 +32,7 @@ fn app() -> AppRecord {
         deadline_usec: None,
         quit_started: false,
         dispatch: None,
-        window_close_sent: false, original_process: None, migrated_scope: None, preparation: None,
+        window_close_sent: false, original_process: None, migrated_scope: None, lifetime_process: None, preparation: None,
     }
 }
 
@@ -53,9 +54,11 @@ fn legacy_app_records_have_no_original_process_or_migrated_scope() {
     let serialized = toml::to_string(&app()).unwrap();
     assert!(!serialized.contains("original_process"));
     assert!(!serialized.contains("migrated_scope"));
+    assert!(!serialized.contains("lifetime_process"));
     let restored: AppRecord = toml::from_str(&serialized).unwrap();
     assert!(restored.original_process.is_none());
     assert!(restored.migrated_scope.is_none());
+    assert!(restored.lifetime_process.is_none());
 }
 
 #[test]

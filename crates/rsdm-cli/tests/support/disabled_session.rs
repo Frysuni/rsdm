@@ -15,6 +15,7 @@ async fn disabled_hooks_and_requests_leave_the_existing_coordinator_untouched() 
         vec!["session", "stop"],
         vec!["session", "cancel"],
         vec!["session", "app-stop", "--generation", "../invalid", "--unit", "../invalid"],
+        vec!["session", "app-watch", "--generation", "../invalid", "--unit", "../invalid"],
         vec!["session", "cleanup", "--generation", "../invalid"],
         vec!["session", "status"],
     ] {

@@ -11,7 +11,7 @@ use super::*;
 mod escalation;
 
 #[derive(Clone, Copy)]
-enum Snapshot { Cancel, CancelDuringSignal, EmptyDuringSignal, FailDuringSignal, FailAfterFirstBatch }
+enum Snapshot { Observe, Cancel, CancelDuringSignal, EmptyDuringSignal, FailDuringSignal, FailAfterFirstBatch }
 
 struct Manager {
     pid: u32, process: crate::processes::ProcessHandle, control: Arc<ShutdownControl>,
@@ -117,6 +117,22 @@ impl Drop for Fixture {
         let _ = self.child.wait();
         let _ = fs::remove_dir_all(&self.directory);
     }
+}
+
+#[tokio::test]
+async fn lifetime_observation_excludes_only_the_recorded_kernel_process() {
+    let control = Arc::new(ShutdownControl::default());
+    let mut fixture = Fixture::new(control.clone(), Snapshot::Observe).await;
+    let handle = crate::processes::ProcessHandle::open(fixture.child.id()).unwrap().unwrap();
+    let Some(identity) = handle.id().unwrap() else { return; };
+    let mut app = fixture.save_app();
+    app.lifetime_process = Some(crate::app_lifetime::LifetimeProcess { pid: fixture.child.id(), pidfd_id: identity });
+    assert!(crate::processes::app_processes(&fixture.manager, &app).await.unwrap().is_empty());
+    assert!(!crate::processes::signal_app(&fixture.manager, &app, libc::SIGTERM, &control).await.unwrap());
+    assert!(fixture.child.try_wait().unwrap().is_none());
+
+    app.lifetime_process.as_mut().unwrap().pidfd_id = identity.wrapping_add(1);
+    assert_eq!(crate::processes::app_processes(&fixture.manager, &app).await.unwrap(), vec![fixture.child.id()]);
 }
 
 #[tokio::test]

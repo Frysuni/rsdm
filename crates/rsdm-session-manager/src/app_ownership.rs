@@ -5,7 +5,8 @@ use zbus::{Proxy, proxy::CacheProperties, zvariant::OwnedObjectPath};
 use super::{processes::{self, ProcessHandle}, runtime::{self, AppRecord}};
 
 pub(super) async fn current(manager: &Proxy<'_>, app: &AppRecord, pid: u32, handle: &ProcessHandle) -> zbus::Result<bool> {
-    if !valid_invocation(&app.invocation_id) || !handle.alive()? { return Ok(false); }
+    if !valid_invocation(&app.invocation_id) || !handle.alive()?
+        || super::app_lifetime::owns_process(app, pid, handle)? { return Ok(false); }
     let unit = unit_proxy(manager, &app.unit, "Unit").await?;
     if !current_application(manager, &unit, app).await? { return Ok(false); }
     Ok(current_process(manager, app, pid, handle).await?
@@ -48,7 +49,10 @@ async fn current_application(manager: &Proxy<'_>, unit: &Proxy<'_>, app: &AppRec
     let state: String = unit.get_property("ActiveState").await?;
     if !matches!(state.as_str(), "inactive" | "failed") { return Ok(false); }
     let processes: Vec<(String, u32, String)> = manager.call("GetUnitProcesses", &(&app.unit,)).await?;
-    Ok(processes.is_empty())
+    let mut pids = processes.into_iter().map(|(_, pid, _)| pid).collect();
+    super::app_lifetime::exclude_process(app, &mut pids)
+        .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
+    Ok(pids.is_empty())
 }
 
 pub(super) async fn unit_proxy<'a>(manager: &Proxy<'a>, unit: &str, interface: &str) -> zbus::Result<Proxy<'a>> {

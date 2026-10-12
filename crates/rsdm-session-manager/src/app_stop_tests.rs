@@ -60,7 +60,7 @@ impl Fixture {
         let runtime = Runtime { path, generation: GENERATION.into() };
         let app = AppRecord {
             unit: format!("app-rsdm-example@{GENERATION}-1.service"), invocation_id: vec![1; 16],
-            policy: ShutdownPolicy::default(), deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, preparation: None,
+            policy: ShutdownPolicy::default(), deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, lifetime_process: None, preparation: None,
         };
         runtime.save_app(&app).unwrap();
         let queries = Arc::new(AtomicUsize::new(0));

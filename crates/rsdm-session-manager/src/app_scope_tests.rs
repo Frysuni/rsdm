@@ -68,7 +68,7 @@ async fn an_uncaptured_live_original_process_cannot_be_reported_as_a_clean_exit(
 #[test]
 fn a_saved_scope_requires_an_original_process_and_nonzero_invocation() {
     let mut app = crate::helper_start_fixture::app();
-    app.migrated_scope = Some(MigratedScope { unit: "app-test.scope".into(), invocation_id: vec![1; 16] });
+    app.migrated_scope = Some(MigratedScope { unit: "app-test.scope".into(), invocation_id: vec![1; 16], lifetime_group: None });
     assert!(registered_scope(&app).is_err());
     app.original_process = Some(crate::app_origin::OriginalProcess { pid: 1, pidfd_id: 2 });
     assert!(registered_scope(&app).unwrap().is_some());
