@@ -32,7 +32,10 @@
   sessionManager = lib.mkOption {
     type = lib.types.bool;
     default = true;
-    description = "Wrap the compositor in the systemd --user graphical session manager (uwsm-style).";
+    description = ''
+      Enable Session Manager independently of dm.enable. It can supervise
+      rsdm session start or attach to an existing graphical login.
+    '';
   };
 
   keyring = lib.mkOption {

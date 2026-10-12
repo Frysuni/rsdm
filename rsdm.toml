@@ -16,7 +16,7 @@
 # commented because TOML has no null value.
 
 [session_manager]
-# Wrap the compositor in a systemd --user graphical session and supervise it.
+# Supervise session start or attach application coordination to an existing graphical login.
 # False runs app/session start commands normally; finalize, stop hooks and cleanup do nothing.
 # DM and Lock power actions continue through logind when session management is disabled.
 # Configuration monitoring retains the last valid policy if an update cannot be loaded.
