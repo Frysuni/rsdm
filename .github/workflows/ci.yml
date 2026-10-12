@@ -96,6 +96,7 @@ jobs:
             .#checks.x86_64-linux.sway-windows \
             .#checks.x86_64-linux.hyprland-windows \
             .#checks.x86_64-linux.wayfire-discovery \
+            .#checks.x86_64-linux.wayland-discovery \
             .#checks.x86_64-linux.native-de-handoff \
             .#checks.x86_64-linux.power-lifecycle \
             .#checks.x86_64-linux.lock-power \

@@ -321,6 +321,31 @@ TERM fallback, preservation of foreign windows and the owned compositor, and
 unchanged configuration. This does not establish window-close support or
 verification of other Wayfire versions, hardware rendering or XWayland.
 
+## Wayland registry discovery
+
+For owned compositors without a supported command transport, StatusDetails
+queries the generation's recorded `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR`.
+An absolute display socket is also accepted. The peer must match the session
+UID, live pidfd, compositor MainPID and current InvocationID before and after
+the query. Core registry discovery uses only `get_registry` and `sync`, bounded
+by the IPC concurrency limit, a two-second deadline and a one-MiB event budget.
+
+Status reports advertised `ext_foreign_toplevel_list_v1`,
+`zwlr_foreign_toplevel_manager_v1` and `org_kde_plasma_window_management`
+versions. Removed globals are excluded. Registry presence alone does not
+establish window PID/cgroup ownership or an authenticated close handle;
+window-close remains unavailable and TERM follows the registered app policy.
+No foreign-toplevel, Plasma or River window-manager interface is bound.
+Titles and app IDs are not used to infer ownership. Unowned attached sessions
+do not connect to the compositor for this probe.
+
+The isolated check covers Labwc 0.20.0 and River 0.4.5 with software rendering.
+Labwc additionally runs registered and foreign GTK Wayland windows to verify
+policy TERM fallback without close requests or configuration changes. River
+is checked for registry discovery only, without binding its exclusive window
+manager API. These checks do not establish KWin standalone close support,
+hardware rendering, XWayland or the full application compatibility matrix.
+
 ## XSMP
 
 Official builds enable `xsmp`. Managed WM and native niri sessions publish

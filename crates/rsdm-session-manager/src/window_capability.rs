@@ -44,7 +44,30 @@ async fn probe(manager: &UserManager, record: &SessionRecord) -> Capability {
             Err(error) => reason = format!("{name}: {error}"),
         }
     }
+    if record.exported_environment.iter().any(|(name, _)| name == "WAYLAND_DISPLAY") {
+        let discovery = match discover_wayland(manager, record).await {
+            Ok(interfaces) if interfaces.is_empty() => "WAYLAND_DISPLAY: no foreign-toplevel or Plasma window-management protocol is advertised.".into(),
+            Ok(interfaces) => format!("WAYLAND_DISPLAY: advertised {}; registry discovery alone provides no verified window PID/cgroup or close handle. TERM fallback remains subject to app policy.", interfaces.join(", ")),
+            Err(error) => format!("WAYLAND_DISPLAY: {error}"),
+        };
+        reason.push(' ');
+        reason.push_str(&discovery);
+    }
     Capability::new("window-close", "unavailable", &reason)
+}
+
+async fn discover_wayland(manager: &UserManager, record: &SessionRecord) -> Result<Vec<String>, SessionError> {
+    let path = super::wayland_registry::socket_path(&record.exported_environment)
+        .ok_or_else(|| SessionError::State("the recorded Wayland endpoint is invalid".into()))?;
+    let mut connection = manager.request(async { Ok(super::wayland_registry::Connection::connect(&path, record.identity.uid).await) }).await??;
+    if !window_close::owns_compositor(manager, record, connection.pid).await? {
+        return Err(SessionError::State("Wayland peer does not match the recorded compositor invocation".into()));
+    }
+    let interfaces = manager.request(async { Ok(connection.discover().await) }).await??;
+    if !window_close::owns_compositor(manager, record, connection.pid).await? {
+        return Err(SessionError::State("compositor invocation changed during Wayland discovery".into()));
+    }
+    Ok(interfaces)
 }
 
 async fn discover_wayfire(manager: &UserManager, record: &SessionRecord, path: &Path) -> Result<(), SessionError> {
@@ -62,3 +85,7 @@ async fn discover_wayfire(manager: &UserManager, record: &SessionRecord, path: &
 #[cfg(test)]
 #[path = "window_capability_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "window_wayland_capability_tests.rs"]
+mod wayland_tests;
