@@ -95,6 +95,11 @@ For Plasma they also verify KSMServer and recognize an activatable LogoutPrompt
 without starting it. Status queries do not request shutdown or show native dialogs;
 an ownership failure is unavailable and a transport failure is unknown.
 
+GNOME and Plasma report `partial` when this necessary lifecycle capability is
+unavailable or unknown, with the probe's reason in the limitations. The provider
+and legacy status fields stay unchanged; optional window backends still do not
+affect the manager's scope.
+
 Preparation results include the application InvocationID, transaction, selected
 method, dispatch state, `clean`/`forced`/`cancelled`/`unknown` result and escalation
 flag. Retired app records remain visible for the current generation. `clean`

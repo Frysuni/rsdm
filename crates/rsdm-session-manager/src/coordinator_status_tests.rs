@@ -110,9 +110,17 @@ async fn native_status_distinguishes_rejected_ownership_from_transport_failure()
             fixture._server.object_server().at("/org/freedesktop/DBus", broker).await.unwrap();
             fixture.coordinator.provider.kind = kind;
             fixture.coordinator.record.provider = fixture.coordinator.provider.name().into();
+            fixture.coordinator.runtime.save_session(&fixture.coordinator.record).unwrap();
+            let before = fs::read(fixture.directory.join("session.toml")).unwrap();
             let details = query(&mut fixture).await;
             let capability = details.capabilities.iter().find(|capability| capability.name == "native-logout").unwrap();
             assert_eq!(capability.state, if failed { "unknown" } else { "unavailable" });
+            assert_eq!(details.state, "partial");
+            assert_eq!(details.status.provider, fixture.coordinator.provider.name());
+            assert!(details.limitations[0].contains(&capability.reason));
+            let lifecycle = details.capabilities.iter().find(|capability| capability.name == "compositor-lifecycle").unwrap();
+            assert_eq!(lifecycle.state, capability.state);
+            assert_eq!(fs::read(fixture.directory.join("session.toml")).unwrap(), before);
         }
     }
 }
@@ -171,6 +179,6 @@ async fn a_pending_capability_probe_does_not_block_cancellation() {
     let work = tokio::time::timeout(Duration::from_secs(1), fixture.coordinator.work.recv()).await.unwrap().unwrap();
     fixture.coordinator.completed(work).await.unwrap();
     let details = status.try_recv().unwrap().unwrap();
-    assert_eq!(details.state, "full");
+    assert_eq!(details.state, "partial");
     assert!(details.capabilities.iter().any(|capability| capability.name == "native-logout" && capability.state == "unavailable"));
 }

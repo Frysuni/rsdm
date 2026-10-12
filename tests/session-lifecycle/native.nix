@@ -89,6 +89,7 @@ pkgs.testers.runNixOSTest {
             status = machine.succeed(session + "rsdm session status")
             assert "XSMP: unavailable" in status, status
             assert "capability: native-logout: available" in status, status
+            assert "manager: full\n" in status, status
             machine.fail("test -e " + runtime + "/native-requests")
             machine.fail(session + "rsdm app --on-timeout cancel -- ${application} rejected")
             machine.fail(session + "rsdm app --shutdown-method xsmp -- ${application} rejected")

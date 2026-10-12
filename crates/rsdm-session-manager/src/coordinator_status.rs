@@ -62,9 +62,9 @@ async fn snapshot(manager: &UserManager, runtime: Runtime, record: SessionRecord
     for app in archived.iter().chain(&apps) {
         if let Some(preparation) = status::preparation(app) { preparations.insert((app.unit.clone(), app.invocation_id.clone()), preparation); }
     }
-    let mut details = base_details(status, &record);
+    let native = native_logout(manager, &record).await;
+    let mut details = base_details(status, &record, native);
     details.preparations = preparations.into_values().collect();
-    details.capabilities.push(native_logout(manager, &record).await);
     details.capabilities.push(crate::window_capability::capability(manager, &record).await);
     if manager.actions.check().is_err() { return Ok(SessionStatusDetails::disabled()); }
     Ok(details)
@@ -72,16 +72,20 @@ async fn snapshot(manager: &UserManager, runtime: Runtime, record: SessionRecord
 
 fn app_state(app: &AppRecord) -> &'static str { if app.quit_started { "quitting" } else { "registered" } }
 
-fn base_details(status: SessionStatus, record: &SessionRecord) -> SessionStatusDetails {
-    let partial = record.provider == "partial";
+fn base_details(status: SessionStatus, record: &SessionRecord, native: Capability) -> SessionStatusDetails {
+    let attached = record.provider == "partial";
+    let native_limited = matches!(record.provider.as_str(), "gnome" | "plasma") && native.state != "available";
+    let partial = attached || native_limited;
     let mut capabilities = vec![
         Capability::new("app-registration", "available", "Only explicitly registered application units are managed."),
         Capability::new("quit-command", "available", "Application-specific quit commands use the registered invocation's environment."),
         Capability::new("process-observation", "available", "Completion is observed through the unit and its cgroup."),
         Capability::new("term-kill", "available", "Signals require current invocation, cgroup and pinned process ownership."),
     ];
-    capabilities.push(if partial {
+    capabilities.push(if attached {
         Capability::new("compositor-lifecycle", "unavailable", "The external WM, shared targets and PAM login are not owned.")
+    } else if native_limited {
+        Capability::new("compositor-lifecycle", &native.state, &native.reason)
     } else { Capability::new("compositor-lifecycle", "available", "The session launcher or native provider controls the session lifecycle.") });
     capabilities.push(if status.xsmp_available {
         Capability::new("xsmp", "available", "The private XSMP server accepts authenticated registered application peers.")
@@ -90,8 +94,14 @@ fn base_details(status: SessionStatus, record: &SessionRecord) -> SessionStatusD
     } else if !cfg!(feature = "xsmp") {
         Capability::new("xsmp", "unavailable", "This build has no libSM/libICE support.")
     } else { Capability::new("xsmp", "not-applicable", "This provider does not run a private XSMP server.") });
+    let limitations = if attached {
+        vec!["Only registered apps are prepared; compositor and PAM lifecycle are not owned. Non-native logout returns prepared and leaves the external WM running.".into()]
+    } else if native_limited {
+        vec![format!("Native desktop lifecycle control could not be verified: {}", native.reason)]
+    } else { Vec::new() };
+    capabilities.push(native);
     SessionStatusDetails { enabled: true, state: if partial { "partial" } else { "full" }.into(), status, capabilities,
-        limitations: if partial { vec!["Only registered apps are prepared; compositor and PAM lifecycle are not owned. Non-native logout returns prepared and leaves the external WM running.".into()] } else { Vec::new() },
+        limitations,
         preparations: Vec::new() }
 }
 

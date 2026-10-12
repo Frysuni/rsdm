@@ -63,6 +63,9 @@ in pkgs.testers.runNixOSTest {
                     machine.succeed("systemctl is-active --quiet rsdm-test-own-login")
                 status = machine.succeed(control + "rsdm session status")
                 assert "capability: native-logout: unavailable" in status, status
+                assert "manager: partial\n" in status, status
+                assert "capability: compositor-lifecycle: unavailable" in status, status
+                assert "Native desktop lifecycle control could not be verified" in status, status
                 machine.succeed("kill -TERM $(cat " + runtime + "/own-launcher-pid)")
                 machine.wait_until_succeeds("test \"$(systemctl show --property=LoadState --value rsdm-test-own-login.service)\" = not-found")
                 if scope == "another-login":

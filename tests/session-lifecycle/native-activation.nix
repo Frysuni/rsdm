@@ -8,6 +8,7 @@
         for attempt in range(3):
             status = machine.succeed(control + "rsdm session status")
             assert "capability: native-logout: available" in status, status
+            assert "manager: full\n" in status, status
         machine.succeed(user + "busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus NameHasOwner s org.kde.LogoutPrompt | grep 'b false'")
         machine.fail("test -e " + runtime + "/native-prompt-started")
         for args in ["session stop", "power reboot", "power poweroff"]:
