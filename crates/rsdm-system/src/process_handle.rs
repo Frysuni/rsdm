@@ -41,16 +41,17 @@ impl ProcessHandle {
         Ok(result == 0)
     }
 
-    pub fn signal(&self, signal: i32) -> io::Result<()> {
+    /// Return whether the kernel accepted the signal for the pinned process.
+    pub fn signal(&self, signal: i32) -> io::Result<bool> {
         // SAFETY: the owned pidfd identifies the process; no siginfo is supplied.
         let result = unsafe {
             libc::syscall(libc::SYS_pidfd_send_signal, self.0.as_raw_fd(), signal, std::ptr::null::<libc::siginfo_t>(), 0)
         };
         if result < 0 {
             let error = io::Error::last_os_error();
-            if error.raw_os_error() != Some(libc::ESRCH) { return Err(error); }
+            return if error.raw_os_error() == Some(libc::ESRCH) { Ok(false) } else { Err(error) };
         }
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -63,7 +64,7 @@ mod tests {
         let (socket, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
         let handle = ProcessHandle::socket_peer(&socket).unwrap();
         assert!(handle.alive().unwrap());
-        handle.signal(0).unwrap();
+        assert!(handle.signal(0).unwrap());
     }
 
     #[test]
@@ -71,11 +72,11 @@ mod tests {
         let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
         let handle = ProcessHandle::open(child.id()).unwrap().unwrap();
         assert!(handle.alive().unwrap());
-        handle.signal(libc::SIGTERM).unwrap();
+        assert!(handle.signal(libc::SIGTERM).unwrap());
         child.wait().unwrap();
         assert!(!handle.alive().unwrap());
         let mut replacement = std::process::Command::new("sleep").arg("30").spawn().unwrap();
-        handle.signal(libc::SIGKILL).unwrap();
+        assert!(!handle.signal(libc::SIGKILL).unwrap());
         let untouched = replacement.try_wait().unwrap().is_none();
         replacement.kill().unwrap();
         replacement.wait().unwrap();

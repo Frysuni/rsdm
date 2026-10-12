@@ -76,8 +76,7 @@ pub(super) async fn signal_app(manager: &UserManager, app: &AppRecord, signal: i
             manager.actions.check_generation_async().await?;
             if control.cancelled() { return Ok(sent); }
             manager.actions.check()?;
-            handle.signal(signal)?;
-            sent = true;
+            sent |= handle.signal(signal)?;
         }
     }
     Ok(sent)
@@ -134,8 +133,7 @@ pub(super) async fn terminate_main(manager: &UserManager, app: &AppRecord, contr
         manager.actions.check_generation_async().await?;
         if control.cancelled() { return Ok(false); }
         manager.actions.check()?;
-        handle.signal(libc::SIGTERM)?;
-        return Ok(true);
+        return Ok(handle.signal(libc::SIGTERM)?);
     }
     Ok(false)
 }
@@ -144,7 +142,7 @@ pub(super) async fn terminate_main(manager: &UserManager, app: &AppRecord, contr
 pub(super) fn require_pidfds() -> Result<(), SessionError> {
     let handle = ProcessHandle::open(std::process::id())?
         .ok_or_else(|| SessionError::State("could not pin the session coordinator process".into()))?;
-    handle.signal(0).map_err(|error| SessionError::State(format!("Linux pidfd signals are required: {error}")))
+    handle.signal(0).map(|_| ()).map_err(|error| SessionError::State(format!("Linux pidfd signals are required: {error}")))
 }
 
 #[cfg(test)]
@@ -159,9 +157,9 @@ mod tests {
     fn a_pidfd_remains_bound_to_the_original_child_after_exit() {
         let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
         let handle = ProcessHandle::open(child.id()).unwrap().unwrap();
-        handle.signal(libc::SIGTERM).unwrap();
+        assert!(handle.signal(libc::SIGTERM).unwrap());
         assert!(!child.wait().unwrap().success());
-        handle.signal(libc::SIGTERM).unwrap();
+        assert!(!handle.signal(libc::SIGTERM).unwrap());
     }
 
 }
