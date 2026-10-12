@@ -1,6 +1,6 @@
 //! Socket credentials, pinned process identity and registered app ownership.
 
-use std::{os::fd::OwnedFd, ptr, sync::Arc, time::Instant};
+use std::{cell::Cell, os::fd::OwnedFd, ptr, rc::Rc, sync::Arc, time::Instant};
 
 use super::{ffi, interrupt::Interrupt, properties::Properties, protocol::Phase};
 use crate::{SessionError, apps, bus::UserManager,
@@ -16,6 +16,7 @@ pub(super) struct Peer {
     _interrupt: Arc<OwnedFd>,
     pub phase: Phase,
     pub selected: bool,
+    pub die_claimed: Rc<Cell<bool>>,
     pub interaction_requested: bool,
     pub interacting: bool,
     pub cancellation_requested: bool,
@@ -40,7 +41,7 @@ impl Peer {
         Box::new(Self {
             ice: ptr::null_mut(), sms: ptr::null_mut(), unit: String::new(), invocation: Vec::new(),
             pid, process: ProcessHandle::open(pid).unwrap().unwrap(), _interrupt: interrupt,
-            phase: Phase::InitialSave, selected: false, interaction_requested: false,
+            phase: Phase::InitialSave, selected: false, die_claimed: Rc::default(), interaction_requested: false,
             interacting: false, cancellation_requested: false, local_save_requested: false,
             deadline: 0, cancel_on_timeout: false, properties: Properties::default(),
             accepted: Instant::now(), actions,
@@ -84,7 +85,7 @@ impl Peer {
         }
         Ok(Box::new(Self {
             ice, sms: ptr::null_mut(), unit, invocation: app.invocation_id, pid, process, _interrupt: interrupt,
-            phase: Phase::Registering, selected: false, interaction_requested: false, interacting: false,
+            phase: Phase::Registering, selected: false, die_claimed: Rc::default(), interaction_requested: false, interacting: false,
             cancellation_requested: false, local_save_requested: false, deadline: 0,
             cancel_on_timeout: false, properties: Properties::default(), accepted: Instant::now(),
             actions: manager.actions.clone(),

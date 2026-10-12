@@ -12,6 +12,8 @@ use crate::{app_stop::ShutdownControl, app_dispatch::State as DispatchState};
 mod client;
 #[path = "transaction_followup_tests.rs"]
 mod followup;
+#[path = "transaction_group_tests.rs"]
+mod group;
 
 const TEST: &str = "xsmp::handle::transaction_tests::cancellation_reaches_worker_before_shutdown_messages";
 const ROLE: &str = "RSDM_XSMP_TRANSACTION_TEST";
@@ -20,6 +22,7 @@ struct State {
     control: Arc<ShutdownControl>, pid: AtomicU32, checks: AtomicUsize, cancel_at: AtomicUsize,
     invocation: AtomicU8, process_present: AtomicBool, control_pid: AtomicU32,
     deadline: Deadline, expire_final: AtomicBool, cancel_final: AtomicBool,
+    second_pid: AtomicU32,
 }
 struct Manager(Arc<State>);
 
@@ -29,7 +32,7 @@ impl Manager {
 
     #[zbus(name = "GetUnitByPID")]
     fn get_unit_by_pid(&self, pid: u32) -> OwnedObjectPath {
-        assert_eq!(pid, self.0.pid.load(Ordering::SeqCst));
+        assert!(pid == self.0.pid.load(Ordering::SeqCst) || pid == self.0.second_pid.load(Ordering::SeqCst));
         self.get_unit("")
     }
 
@@ -37,7 +40,8 @@ impl Manager {
         let check = self.0.checks.fetch_add(1, Ordering::SeqCst) + 1;
         if check == self.0.cancel_at.load(Ordering::SeqCst) { self.0.control.cancelled.store(true, Ordering::SeqCst); }
         if !self.0.process_present.load(Ordering::SeqCst) { return Vec::new(); }
-        vec![("/app".into(), self.0.pid.load(Ordering::SeqCst), "xsmp-client".into())]
+        [self.0.pid.load(Ordering::SeqCst), self.0.second_pid.load(Ordering::SeqCst)].into_iter()
+            .filter(|pid| *pid != 0).map(|pid| ("/app".into(), pid, "xsmp-client".into())).collect()
     }
 }
 
@@ -84,7 +88,7 @@ impl Fixture {
         let state = Arc::new(State { control: Arc::default(), pid: AtomicU32::new(0),
             checks: AtomicUsize::new(0), cancel_at: AtomicUsize::new(usize::MAX),
             invocation: AtomicU8::new(1), process_present: AtomicBool::new(true), control_pid: AtomicU32::new(0),
-            deadline: Deadline::default(), expire_final: AtomicBool::new(false), cancel_final: AtomicBool::new(false) });
+            deadline: Deadline::default(), expire_final: AtomicBool::new(false), cancel_final: AtomicBool::new(false), second_pid: AtomicU32::new(0) });
         let shared = state.clone();
         let (server, connection) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
@@ -111,6 +115,7 @@ async fn cancellation_reaches_worker_before_shutdown_messages() {
         return;
     }
     if mode.starts_with("followup-") { followup::worker(&mode).await; return; }
+    if mode == "group" { group::worker().await; return; }
     if !mode.is_empty() { worker(&mode).await; return; }
     let mut failed = Vec::new();
     let mut cases: Vec<String> = ["already-cancelled", "ownership-check", "forced", "after-send", "phase2", "interact"].map(str::to_string).into();
@@ -121,6 +126,8 @@ async fn cancellation_reaches_worker_before_shutdown_messages() {
     }
     cases.push("followup-phase2-invocation-forced".into());
     cases.push("followup-die-cgroup-forced".into());
+    cases.push("followup-die-lease".into());
+    cases.push("group".into());
     for mode in &cases {
         let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", TEST, "--nocapture"]).env(ROLE, mode).kill_on_drop(true).spawn().unwrap();
@@ -165,8 +172,10 @@ async fn start_client(fixture: &Fixture, handle: &Handle, mode: &str) -> (tokio:
     let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", TEST, "--nocapture"]).env(ROLE, "client")
         .env("RSDM_XSMP_CLIENT_MODE", mode).envs(handle.environment.clone())
+        .env("RSDM_XSMP_APP_RECORD", fixture.runtime.path.join("apps").join(format!("{}.toml", crate::helper_start_fixture::app().unit)))
         .stdin(Stdio::piped()).stdout(Stdio::piped()).kill_on_drop(true).spawn().unwrap();
-    fixture.state.pid.store(child.id().unwrap(), Ordering::SeqCst);
+    if fixture.state.pid.load(Ordering::SeqCst) == 0 { fixture.state.pid.store(child.id().unwrap(), Ordering::SeqCst); }
+    else { fixture.state.second_pid.store(child.id().unwrap(), Ordering::SeqCst); }
     let mut output = BufReader::new(child.stdout.take().unwrap()).lines();
     wait_marker(&mut output, "xsmp-client-ready").await;
     (child, output)

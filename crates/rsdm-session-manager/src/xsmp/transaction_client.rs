@@ -30,7 +30,10 @@ unsafe extern "C" {
 }
 
 #[derive(Default)]
-struct State { mode: String, saves: usize, dies: usize, cancels: usize, phase2: usize, interactions: usize, ready: bool, request_failed: bool }
+struct State {
+    mode: String, saves: usize, dies: usize, cancels: usize, phase2: usize, interactions: usize,
+    ready: bool, request_failed: bool, die_journal_visible: bool,
+}
 
 pub(super) fn run(mode: &str) {
     let mut state = State { mode: mode.into(), ..State::default() };
@@ -61,6 +64,7 @@ pub(super) fn run(mode: &str) {
     assert_eq!(state.phase2, usize::from(owned && mode.contains("-phase2-")), "unexpected phase 2 on the wire");
     assert_eq!(state.interactions, usize::from(owned && mode.contains("-interact-")), "unexpected interaction on the wire");
     assert!(!state.request_failed, "libSM did not send the client's phase 2 or interaction request");
+    assert!(state.dies == 0 || state.die_journal_visible, "Die reached the client before its durable claim");
 }
 
 unsafe extern "C" fn save(connection: SmcConn, data: Data, _kind: c_int, shutdown: c_int, _style: c_int, _fast: c_int) {
@@ -94,7 +98,13 @@ unsafe extern "C" fn save(connection: SmcConn, data: Data, _kind: c_int, shutdow
 }
 
 unsafe extern "C" fn die(_connection: SmcConn, data: Data) {
-    unsafe { (*data.cast::<State>()).dies += 1; }
+    let state = unsafe { &mut *data.cast::<State>() };
+    state.dies += 1;
+    state.die_journal_visible = std::env::var_os("RSDM_XSMP_APP_RECORD")
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|encoded| toml::from_str::<crate::runtime::AppRecord>(&encoded).ok())
+        .and_then(|app| app.dispatch)
+        .is_some_and(|dispatch| matches!(dispatch.xsmp_die_state, Some(crate::app_dispatch::State::Intent | crate::app_dispatch::State::Sent)));
 }
 
 unsafe extern "C" fn complete(_connection: SmcConn, data: Data) {

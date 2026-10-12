@@ -19,6 +19,8 @@ struct client {
     int saved;
     int cancelled;
     int saving;
+    int shutdown_saves;
+    int dies;
 };
 
 static struct client *active_client;
@@ -78,6 +80,7 @@ static void save(SmcConn connection, SmPointer data, int kind, Bool shutdown, in
     if (kind != SmSaveBoth || style != SmInteractStyleAny) exit(6);
     display_alive(client);
     marker(client, "saving");
+    if (++client->shutdown_saves > 1) marker(client, "save-replayed");
     client->saving = 1;
     if (strcmp(client->mode, "phase2") == 0 || strcmp(client->mode, "hot-phase2") == 0) {
         if (!SmcRequestSaveYourselfPhase2(connection, phase2, client)) exit(7);
@@ -104,7 +107,8 @@ static void die(SmcConn connection, SmPointer data) {
     display_alive(client);
     if (!client->saved) exit(9);
     marker(client, "die");
-    if (strcmp(client->mode, "stay") == 0) return;
+    if (++client->dies > 1) marker(client, "die-replayed");
+    if (strcmp(client->mode, "stay") == 0 || strcmp(client->mode, "no-replay") == 0) return;
     SmcCloseConnection(connection, 0, NULL);
     exit(0);
 }

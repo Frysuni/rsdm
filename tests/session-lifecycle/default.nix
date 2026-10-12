@@ -459,5 +459,6 @@ pkgs.testers.runNixOSTest {
   '' + (import ./hot-disable.nix { inherit application stubborn; })
     + (import ./retirement.nix { inherit application; })
     + (import ./xsmp-hot-disable.nix { inherit xsmpClient; })
+    + (import ./xsmp-replay.nix { inherit xsmpClient; })
     + (import ./bootstrap-disable.nix { inherit pkgs rsdm; });
 }

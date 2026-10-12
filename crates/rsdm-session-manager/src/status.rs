@@ -72,7 +72,8 @@ pub(super) fn preparation(app: &AppRecord) -> Option<PreparationStatus> {
         unit: app.unit.clone(), invocation_id: app.invocation_id.clone(),
         transaction_id: prepared.transaction_id.clone().unwrap_or_default(),
         method: dispatch.map_or("unknown", |dispatch| method(dispatch.method)).into(),
-        dispatch_state: dispatch.map_or("unknown", |dispatch| match dispatch.state {
+        dispatch_state: dispatch.map_or("unknown", |dispatch| match dispatch.xsmp_die_state
+            .filter(|state| matches!(state, State::Intent | State::Sent)).unwrap_or(dispatch.state) {
             State::Intent => "intent", State::Sent => "sent", State::NotSent => "not_sent", State::Cancelled => "cancelled",
         }).into(),
         result: match outcome { Outcome::Clean => "clean", Outcome::Forced => "forced", Outcome::Cancelled => "cancelled", Outcome::Unknown => "unknown" }.into(),

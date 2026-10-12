@@ -15,29 +15,49 @@ pub(super) async fn send(manager: &UserManager, runtime: &Runtime, peer: &mut Pe
     transaction_id: Option<&str>, control: Option<&ShutdownControl>, request: Request) -> Result<bool, SessionError> {
     if control.is_some_and(ShutdownControl::cancelled) { return Ok(false); }
     let connection = manager.connection();
-    manager.request(async {
-        let process_owned = current_process(&connection, peer).await?;
+    let mut die_claim = None;
+    let mut sent = false;
+
+    let result = manager.request(async {
         let records = runtime.clone();
         let unit = peer.unit.clone();
-        let (session, app) = crate::runtime::blocking(move || Ok((records.session()?, records.app(&unit)?))).await
+        let (mut session, app) = crate::runtime::blocking(move || Ok((records.session()?, records.app(&unit)?))).await
             .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
-        if !process_owned || app.invocation_id != peer.invocation || !active(&session, transaction_id) {
+        if app.invocation_id != peer.invocation || !active(&session, transaction_id) {
             cancel(peer);
             return Ok(false);
         }
-        if !current_invocation(&connection, peer).await? || !peer.alive().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))? {
+        if matches!(request, Request::Die) && !peer.die_claimed.get() {
+            let Some(current) = crate::app_dispatch::claim_xsmp_die(runtime, &app, transaction_id, &manager.deadline).await
+                .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?
+            else { cancel(peer); return Ok(false); };
+            session = current;
+            peer.die_claimed.set(true);
+            die_claim = Some(app);
+        } else if matches!(request, Request::Die) && !app.dispatch.as_ref().is_some_and(|dispatch|
+            dispatch.transaction_id.as_deref() == transaction_id && dispatch.invocation_id == peer.invocation
+            && dispatch.method == crate::app_dispatch::Method::Xsmp && dispatch.state == crate::app_dispatch::State::Sent
+            && matches!(dispatch.xsmp_die_state, Some(crate::app_dispatch::State::Intent | crate::app_dispatch::State::Sent)))
+        {
             cancel(peer);
             return Ok(false);
         }
-        manager.deadline.remaining(Duration::MAX)?;
-        let deadline = session.shutdown_deadline_usec.map_or(peer.deadline, |hard| peer.deadline.min(hard));
-        if monotonic_usec().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))? >= deadline
-            || control.is_some_and(ShutdownControl::cancelled)
-        { return Ok(false); }
-        manager.actions.check().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
-        dispatch(peer, request);
-        Ok(true)
-    }).await.map_err(Into::into)
+        if !current_process(&connection, peer).await? || !current_invocation(&connection, peer).await?
+            || !peer.alive().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?
+        {
+            cancel(peer);
+            return Ok(false);
+        }
+        sent = dispatch(manager, peer, &session, control, request)?;
+        Ok(sent)
+    }).await;
+
+    if let Some(app) = die_claim {
+        let state = if sent { crate::app_dispatch::State::Sent } else { crate::app_dispatch::State::NotSent };
+        crate::app_dispatch::finish_xsmp_die(runtime, &app, transaction_id, state, &manager.deadline).await?;
+        if !sent { peer.die_claimed.set(false); }
+    }
+    result.map_err(Into::into)
 }
 
 fn active(session: &SessionRecord, transaction_id: Option<&str>) -> bool {
@@ -65,7 +85,15 @@ async fn current_invocation(connection: &Connection, peer: &Peer) -> zbus::Resul
     Ok(name == peer.unit && !peer.invocation.is_empty() && peer.invocation.iter().any(|byte| *byte != 0) && invocation == peer.invocation)
 }
 
-fn dispatch(peer: &mut Peer, request: Request) {
+fn dispatch(manager: &UserManager, peer: &mut Peer, session: &SessionRecord,
+    control: Option<&ShutdownControl>, request: Request) -> zbus::Result<bool> {
+    manager.deadline.remaining(Duration::MAX)?;
+    let deadline = session.shutdown_deadline_usec.map_or(peer.deadline, |hard| peer.deadline.min(hard));
+    if monotonic_usec().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))? >= deadline
+        || control.is_some_and(ShutdownControl::cancelled)
+    { return Ok(false); }
+    manager.actions.check().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
+
     // The worker owns this live libSM connection and holds one request slot.
     unsafe {
         match request {
@@ -75,6 +103,7 @@ fn dispatch(peer: &mut Peer, request: Request) {
             Request::Interact => { peer.interaction_requested = false; peer.interacting = true; ffi::SmsInteract(peer.sms); }
         }
     }
+    Ok(true)
 }
 
 pub(super) fn cancel(peer: &mut Peer) {

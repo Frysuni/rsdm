@@ -40,7 +40,7 @@ impl Server {
         Ok(selected.into_iter().map(|(app, _)| app.unit).collect())
     }
 
-    async fn select_application(&self, unit: &str, transaction_id: Option<&str>) -> Result<Option<(crate::runtime::AppRecord, Vec<usize>)>, SessionError> {
+    async fn select_application(&mut self, unit: &str, transaction_id: Option<&str>) -> Result<Option<(crate::runtime::AppRecord, Vec<usize>)>, SessionError> {
         if !apps::pin_pending(&self.manager, &self.runtime, unit).await? { return Ok(None); }
         let records = self.runtime.clone();
         let app_unit = unit.to_string();
@@ -60,6 +60,8 @@ impl Server {
             crate::app_dispatch::Method::Xsmp, &self.manager.deadline).await?
         { return Ok(None); }
 
+        let die_claimed = std::rc::Rc::new(std::cell::Cell::new(false));
+        for index in &peers { self.peers[*index].die_claimed = die_claimed.clone(); }
         let records = self.runtime.clone();
         let app_unit = app.unit.clone();
         let app = crate::runtime::blocking(move || records.app(&app_unit)).await?;

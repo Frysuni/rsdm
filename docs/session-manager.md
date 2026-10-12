@@ -555,8 +555,13 @@ Before a graceful action, the application record stores its transaction ID,
 InvocationID, method and dispatch intent. An unconfirmed reply preserves that
 intent and prevents replay or a second graceful method. Only a proven unsent
 request permits fallback. Cancellation preserves command and window-close
-claims; a confirmed cancelled XSMP save can start again in a new transaction.
-Legacy `quit_started=true` records are treated as possibly dispatched.
+claims. XSMP records distinguish the save from `Die`: before `Die`, a separate
+intent is persisted for the same transaction and InvocationID. A sent or
+unconfirmed `Die` blocks another graceful close after cancellation or recovery.
+A cancelled save can start again in a new transaction only when the record
+proves that `Die` was not sent. Legacy records without this evidence remain
+conservative; `quit_started=true` is treated as possibly dispatched. StatusDetails
+reports an outstanding `Die` intent even when the preceding save was sent.
 
 Application preparation records retain `clean`, `forced`, `cancelled` or
 `unknown`, bound to the transaction and InvocationID. Before escalation, its

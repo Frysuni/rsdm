@@ -18,7 +18,7 @@ impl PendingBus {
 fn prepared(outcome: Outcome, method: Method) -> crate::runtime::AppRecord {
     let mut app = crate::helper_start_fixture::app();
     app.preparation = Some(Preparation { transaction_id: Some("transaction".into()), outcome, escalated: false, escalation_pending: Some(0) });
-    app.dispatch = Some(Dispatch { transaction_id: Some("transaction".into()), invocation_id: app.invocation_id.clone(), method, state: State::Sent });
+    app.dispatch = Some(Dispatch { transaction_id: Some("transaction".into()), invocation_id: app.invocation_id.clone(), method, state: State::Sent, xsmp_die_state: None });
     app
 }
 
@@ -28,6 +28,18 @@ async fn query(fixture: &mut Fixture) -> crate::SessionStatusDetails {
     let work = tokio::time::timeout(Duration::from_secs(3), fixture.coordinator.work.recv()).await.unwrap().unwrap();
     fixture.coordinator.completed(work).await.unwrap();
     result.try_recv().unwrap().unwrap()
+}
+
+#[test]
+fn xsmp_die_intent_is_reported_even_after_save_yourself_was_sent() {
+    let mut app = prepared(Outcome::Unknown, Method::Xsmp);
+    for (die, reported) in [(State::NotSent, "sent"), (State::Intent, "intent"), (State::Sent, "sent")] {
+        app.dispatch.as_mut().unwrap().xsmp_die_state = Some(die);
+        let result = crate::status::preparation(&app).unwrap();
+        assert_eq!(result.method, "xsmp");
+        assert_eq!(result.dispatch_state, reported);
+        assert_eq!(result.result, "unknown");
+    }
 }
 
 #[tokio::test]

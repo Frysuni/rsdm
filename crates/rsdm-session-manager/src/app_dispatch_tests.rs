@@ -2,6 +2,9 @@ use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
 use super::*;
 
+#[path = "app_dispatch_xsmp_tests.rs"]
+mod xsmp;
+
 struct Fixture { directory: PathBuf, runtime: Runtime, app: AppRecord }
 
 impl Fixture {
