@@ -60,7 +60,7 @@ impl Coordinator {
         match work {
             Work::StatusDetails(reply, _) => { let _ = reply.try_send(Ok(super::status::SessionStatusDetails::disabled())); }
             Work::Observed(result) => self.process = result.process,
-            Work::Finished(process, _) => self.process = Some(process),
+            Work::Finished(process, _) | Work::LifecycleChecked(process, _) => self.process = Some(process),
             Work::Boot(Ok(id)) => self.record.compositor_invocation = id,
             Work::Boot(Err(SessionError::StartRejected { reference_retained: false, .. })) => {
                 if let Some(process) = &self.process { process.submitted.store(false, Ordering::Release); }

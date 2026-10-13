@@ -62,8 +62,7 @@ async fn snapshot(manager: &UserManager, runtime: Runtime, record: SessionRecord
     for app in archived.iter().chain(&apps) {
         if let Some(preparation) = status::preparation(app) { preparations.insert((app.unit.clone(), app.invocation_id.clone()), preparation); }
     }
-    let native = native_logout(manager, &record).await;
-    let lifecycle = compositor_lifecycle(manager, &record, &native).await;
+    let (native, lifecycle) = lifecycle_capabilities(manager, &record).await;
     let mut details = base_details(status, &record, native, lifecycle);
     details.preparations = preparations.into_values().collect();
     details.capabilities.push(crate::window_capability::capability(manager, &record).await);
@@ -72,6 +71,12 @@ async fn snapshot(manager: &UserManager, runtime: Runtime, record: SessionRecord
 }
 
 fn app_state(app: &AppRecord) -> &'static str { if app.quit_started { "quitting" } else { "registered" } }
+
+pub(super) async fn lifecycle_capabilities(manager: &UserManager, record: &SessionRecord) -> (Capability, Capability) {
+    let native = native_logout(manager, record).await;
+    let lifecycle = compositor_lifecycle(manager, record, &native).await;
+    (native, lifecycle)
+}
 
 fn base_details(status: SessionStatus, record: &SessionRecord, native: Capability, lifecycle: Capability) -> SessionStatusDetails {
     let attached = record.provider == "partial";

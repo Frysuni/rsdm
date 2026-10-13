@@ -142,12 +142,7 @@ impl Coordinator {
         }
     }
 
-    pub(super) async fn begin_finish(&mut self) -> Result<(), SessionError> {
-        if self.provider.kind == super::provider::ProviderKind::Attached {
-            self.respond_stop("prepared", "registered applications prepared; external session infrastructure is retained");
-            self.lifecycle.phase = SessionPhase::Closed;
-            return self.save().await;
-        }
+    pub(super) async fn begin_teardown(&mut self) -> Result<(), SessionError> {
         self.lifecycle.phase = SessionPhase::StoppingSession;
         self.save().await?;
         let manager = self.manager.clone();

@@ -111,6 +111,12 @@ reference release and environment cleanup. An unverified or replaced invocation
 leaves that infrastructure untouched. Application cleanup likewise rechecks
 its own invocation before sending StopUnit or releasing its reference.
 
+Before logout stops RSDM infrastructure, the coordinator uses the same bounded
+lifecycle probe as StatusDetails. Unavailable or unknown control returns
+`prepared`, restores the running phase and retains the launcher and session
+infrastructure. This probe remains cancellable; teardown begins only after the
+actor accepts its result.
+
 Preparation results include the application InvocationID, transaction, selected
 method, dispatch state, `clean`/`forced`/`cancelled`/`unknown` result and escalation
 flag. Retired app records remain visible for the current generation. `clean`

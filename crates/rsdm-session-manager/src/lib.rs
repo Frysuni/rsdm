@@ -16,6 +16,7 @@ mod control;
 mod control_caller;
 mod control_handshake;
 mod coordinator;
+mod coordinator_lifecycle;
 mod coordinator_disable;
 mod coordinator_environment;
 mod coordinator_notifications;
