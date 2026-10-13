@@ -111,6 +111,7 @@ impl Coordinator {
             pending_ready: false,
             pending_boot: false,
             preparing: false,
+            retain_launcher: false,
             forced_units: Vec::new(),
             exit_code: 0,
             replies_pending: 0,

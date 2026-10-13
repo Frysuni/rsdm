@@ -74,8 +74,19 @@ class Manager(dbus.service.Object):
     def CanPowerOff(self):
         return "no" if (RUNTIME / "power-deny-check").exists() else "yes"
 
+    @dbus.service.method(MANAGER, in_signature="", out_signature="s")
+    def CanReboot(self):
+        return "no" if (RUNTIME / "power-deny-check").exists() else "yes"
+
     @dbus.service.method(MANAGER, in_signature="b", out_signature="", sender_keyword="sender")
     def PowerOff(self, interactive, sender):
+        self.request_power(interactive, sender)
+
+    @dbus.service.method(MANAGER, in_signature="b", out_signature="", sender_keyword="sender")
+    def Reboot(self, interactive, sender):
+        self.request_power(interactive, sender)
+
+    def request_power(self, interactive, sender):
         assert interactive
         uid = self.bus.get_unix_user(sender)
         with (RUNTIME / "power-requests").open("a") as report:

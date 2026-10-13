@@ -30,7 +30,9 @@ Attached status uses provider `partial`. Application units do not require
 endpoint are scoped to new managed applications; the user's global environment
 remains untouched. Quit-command helpers use the verified live coordinator or the
 registered app unit after it stops, with the app's environment and working directory.
-`session stop` prepares registered applications, then delegates logout
+Before `session stop` prepares apps, RSDM probes scoped native logout. An available
+peer keeps ordinary `auto` applications under the desktop's native dialogs;
+explicit term/quit-command policies run preflight first. Logout then delegates
 to live GNOME or Plasma peers verified in this logind session using the broker's
 ProcessFD credentials. Numeric PID credentials alone cannot prove this ownership.
 The desktop retains confirmation dialogs and completion. Discovery remains
@@ -41,6 +43,11 @@ Without an authenticated native peer, stop returns `prepared` and retains the
 external WM, with the limitation in status and the stop result. Native peers in
 user services without a provable logind session remain unavailable, including an
 unstarted on-demand Plasma prompt. Attached lookup does not activate it.
+If the peer disappears after native preparation was selected, stop reports a
+failure and retains the external WM. It does not claim generic preparation or
+start a second close path after uncertain native dispatch. An attached `auto`
+policy with cancellation remains enforceable when generic preparation is selected;
+available native dialogs require an explicit preflight policy instead.
 Power requests prepare applications before requesting logind; disabling releases
 only the attached coordinator. Window-close also requires verified backend ownership.
 
@@ -292,16 +299,40 @@ by its shutdown policy.
 DesktopNames selects a GNOME/Plasma candidate; readiness requires its native
 manager and an active native graphical target. RSDM does not start that target
 on the manager's behalf. It preserves the DE's session-management and XSMP
-server. Ordinary native-DE policies use native shutdown without a preliminary
-SIGTERM; the native manager controls their save prompts and timeouts. Explicit
-term/quit-command policies run an RSDM preflight first. Native `auto` with
-`--on-timeout cancel` is rejected because RSDM cannot enforce cancellation inside
-native dialogs.
+server. Ordinary native-DE policies use verified native shutdown without a
+preliminary SIGTERM; the native manager controls their save prompts and timeouts.
+Explicit term/quit-command policies run an RSDM preflight first. With verified native
+control, `auto` with `--on-timeout cancel` is rejected because RSDM cannot enforce
+cancellation inside native dialogs. Native `partial` accepts this policy for
+generic preparation. If native control becomes available before shutdown, RSDM
+rejects preparation before closing apps or delegating instead of bypassing the
+registered cancellation policy.
+
+Before preparation, RSDM probes the native logout API using the same ownership
+checks as StatusDetails. If it is unavailable or unknown, registered `auto`
+applications use generic preparation too. Logout then returns `prepared` and
+retains the WM, launcher and shared infrastructure. Reboot and poweroff use
+logind after application preparation and authorization.
+
+If native lifecycle control is unavailable during external shutdown, preparation
+finishes without stopping desktop units, shared targets or the original launcher.
+The coordinator closes and releases its inhibitor, while the owning `session start`
+call continues passive observation until the original session process exits.
+The same handoff applies after logind accepts poweroff or reboot in native `partial`.
+PAM remains open during this wait, including if the completion record cannot be saved.
+Native sessions use this ownership check before teardown after a stopped
+graphical target or an exited launcher too. A lifecycle notification alone does
+not authorize stopping infrastructure when native control is unverified.
+Recovery also probes native ownership before infrastructure cleanup and launcher
+termination. If control is unavailable or unknown, it cleans up registered app
+invocations while preserving the desktop infrastructure and waiting for the
+original launcher to exit.
 
 `delegated` means the native manager accepted the request, not that logout
 completed: it may still show a dialog, cancel or wait for an application. RSDM
 keeps observing the lifecycle. Native API rejection leaves the compositor alive
-and returns an error; normal native logout has no forced generic fallback.
+and returns an error. A failed or uncertain native dispatch never starts generic
+preparation or a second power request as a fallback.
 
 Before delegation, RSDM resolves the current unique bus owner and authenticates
 its UID, broker-provided ProcessFD and logind session. It rechecks that owner and
@@ -572,6 +603,15 @@ Cleanup clears only matching exported values and retains `PATH`, `LANG` and
 InvocationID, never KillUser or a UID process sweep. Root runs recovery after
 changing to the session UID; user records and quit commands are not interpreted
 with elevated privileges.
+
+If recovery cannot confirm the launcher's exit, the owning start call releases
+the coordinator and inhibitor but keeps PAM open through passive observation.
+It retains the original process handle or child when an invocation is replaced,
+a stop fails or an unfinished worker still holds the session process. Pending
+workers cannot issue new management actions after this handoff. An unsubmitted
+managed command with no child needs no launcher wait. The original coordinator
+error or nonzero result is preserved after the wait; a clean launcher exit does
+not turn failed recovery into success.
 
 User-manager reload and reexec, including the reexec performed by a NixOS
 configuration switch, do not request logout. Temporary D-Bus read failures defer

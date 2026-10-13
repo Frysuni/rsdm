@@ -99,6 +99,13 @@ async fn recover_infrastructure(
     record: &mut SessionRecord, failure: &mut Option<SessionError>,
 ) {
     if record.provider == "partial" { return; }
+    if matches!(record.provider.as_str(), "gnome" | "plasma") {
+        let capability = super::coordinator_status::native_logout(manager, record).await;
+        if capability.state != "available" {
+            tracing::warn!(reason = %capability.reason, "retaining native session infrastructure during recovery");
+            return;
+        }
+    }
     if let Err(error) = verify_compositor(manager, runtime, record).await {
         failure.get_or_insert(error);
         return;

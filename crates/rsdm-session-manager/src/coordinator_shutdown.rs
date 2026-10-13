@@ -2,13 +2,13 @@
 
 use std::{path::{Path, PathBuf}, sync::{Arc, atomic::Ordering}, time::{Duration, Instant}};
 
-use rsdm_core::domain::{SessionPhase, ShutdownMethod};
+use rsdm_core::domain::SessionPhase;
 
 use super::{
-    SessionError, app_stop::{self, ShutdownControl}, apps, control::StopOutcome,
+    SessionError, app_stop::ShutdownControl, apps, control::StopOutcome,
     coordinator::{Coordinator, Work}, env,
     provider::Provider, runtime::{Runtime, SessionRecord}, session_process::SessionProcess,
-    bus::UserManager, units,
+    bus::UserManager, status::Capability, units,
 };
 
 impl Coordinator {
@@ -60,26 +60,22 @@ impl Coordinator {
         let control = self.shutdown.as_ref().expect("shutdown control").clone();
         let events = self.events.clone();
         let action = self.action.clone();
-        let native = self.provider.native_desktop();
+        let native = self.provider.native_desktop()
+            || (self.provider.kind == super::provider::ProviderKind::Attached && action == "logout");
+        let record = self.record.clone();
         self.workers += 1;
         tokio::spawn(async move {
-            let result = async {
-                let records = runtime.clone();
-                let mut apps = super::runtime::blocking(move || records.apps()).await?;
-                if native && !control.noncancelable.load(Ordering::SeqCst) {
-                    apps.retain(|app| app.policy.method != ShutdownMethod::Auto || !app.policy.quit_command.is_empty());
-                }
-                if !native && matches!(action.as_str(), "poweroff" | "reboot") {
-                    manager.actions.guard(manager.deadline.bound(rsdm_system::logind::check(&action))).await??;
-                }
-                app_stop::prepare_apps(&manager, &runtime, apps, control).await
-            }.await;
-            let _ = events.send(Work::Prepared(result));
+            let capability = if native && !control.noncancelable.load(Ordering::SeqCst) {
+                Some(super::coordinator_status::native_logout(&manager, &record).await)
+            } else { None };
+            let result = super::coordinator_preparation::prepare_applications(
+                &manager, &runtime, control, &action, capability.as_ref()).await;
+            let _ = events.send(Work::Prepared(result, capability));
         });
         Ok(())
     }
 
-    pub async fn prepared(&mut self, result: Result<Vec<String>, SessionError>) -> Result<(), SessionError> {
+    pub async fn prepared(&mut self, result: Result<Vec<String>, SessionError>, native: Option<Capability>) -> Result<(), SessionError> {
         let control = self.shutdown.as_ref().expect("shutdown control");
         match result {
             Ok(forced) => self.forced_units = forced,
@@ -92,16 +88,13 @@ impl Coordinator {
             }
         }
         if self.resume_if_cancelled().await? { return Ok(()); }
-        if self.provider.native_desktop() && matches!(self.action.as_str(), "logout" | "reboot" | "poweroff") {
-            self.lifecycle.phase = SessionPhase::StoppingSession;
-            let provider = self.provider.clone();
-            let identity = self.record.identity.clone();
-            let manager = self.manager.clone();
-            let action = self.action.clone();
-            let events = self.events.clone();
-            self.workers += 1;
-            tokio::spawn(async move { let _ = events.send(Work::Delegated(provider.delegate(&manager, &action, &identity).await)); });
-            return Ok(());
+        let native_available = native.as_ref().is_some_and(|capability| capability.state == "available");
+        if self.provider.native_desktop() && self.action == "logout" && !native_available {
+            let reason = native.as_ref().map_or("Native logout was not verified.", |capability| capability.reason.as_str());
+            return self.resume("prepared", &format!("registered applications prepared; native logout unavailable: {reason}")).await;
+        }
+        if self.provider.native_desktop() && native_available && matches!(self.action.as_str(), "logout" | "reboot" | "poweroff") {
+            return self.begin_native_shutdown().await;
         }
         if matches!(self.action.as_str(), "reboot" | "poweroff") {
             self.lifecycle.phase = SessionPhase::StoppingSession;
@@ -112,12 +105,12 @@ impl Coordinator {
             tokio::spawn(async move {
                 let result = manager.actions.guard(manager.deadline.bound(rsdm_system::logind::request_direct(&action))).await
                     .and_then(|result| result.map_err(SessionError::from));
-                let _ = events.send(Work::PowerRequested(result));
+                let _ = events.send(Work::PowerRequested(result, native));
             });
             return Ok(());
         }
         if self.provider.kind == super::provider::ProviderKind::Attached && self.action == "logout" {
-            self.prepare_attached_logout();
+            self.prepare_attached_logout(native);
             return Ok(());
         }
         self.begin_finish().await
@@ -131,8 +124,10 @@ impl Coordinator {
         }
     }
 
-    pub async fn power_requested(&mut self, result: Result<(), SessionError>) -> Result<(), SessionError> {
+    pub async fn power_requested(&mut self, result: Result<(), SessionError>, native: Option<Capability>) -> Result<(), SessionError> {
         match result {
+            Ok(()) if native.as_ref().is_some_and(|capability| capability.state != "available") =>
+                self.retain_session("logind accepted the power request").await,
             Ok(()) => self.begin_finish().await,
             Err(error) if self.action == "external-shutdown" => {
                 tracing::warn!(%error, "power request failed while external shutdown is in progress");

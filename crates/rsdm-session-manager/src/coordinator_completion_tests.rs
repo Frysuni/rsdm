@@ -191,7 +191,7 @@ async fn preparation_failure_and_native_delegation_resume_without_manager_reads(
                 fixture.coordinator.lifecycle.phase = SessionPhase::StoppingSession;
                 fixture.coordinator.delegated(Ok(())).await.unwrap();
             } else {
-                fixture.coordinator.prepared(Err(SessionError::State("preparation failed".into()))).await.unwrap();
+                fixture.coordinator.prepared(Err(SessionError::State("preparation failed".into())), None).await.unwrap();
             }
             assert_eq!(received.try_recv().unwrap().unwrap().result, if delegated { "delegated" } else { "failed" });
             assert_eq!(fixture.coordinator.lifecycle.phase, if ready_once { SessionPhase::Running } else { SessionPhase::Starting });
@@ -209,7 +209,7 @@ async fn observation_still_detects_a_real_stop_after_resuming() {
     let state = install_manager(&fixture).await;
     fixture.coordinator.begin_stop("logout", None).await.unwrap();
     fixture.coordinator.preparing = true;
-    fixture.coordinator.prepared(Err(SessionError::State("preparation failed".into()))).await.unwrap();
+    fixture.coordinator.prepared(Err(SessionError::State("preparation failed".into())), None).await.unwrap();
     assert_eq!(fixture.coordinator.lifecycle.phase, SessionPhase::Running);
 
     state.active.store(false, Ordering::SeqCst);
@@ -234,7 +234,7 @@ async fn resuming_waits_for_the_record_lease_without_blocking_timers() {
     fixture.coordinator.begin_stop("logout", None).await.unwrap();
     let lease = fixture.coordinator.runtime.app_lease(&app.unit).unwrap();
     {
-        let resume = fixture.coordinator.prepared(Err(SessionError::State("preparation failed".into())));
+        let resume = fixture.coordinator.prepared(Err(SessionError::State("preparation failed".into())), None);
         tokio::pin!(resume);
         tokio::select! {
             result = &mut resume => panic!("resume completed while its record was locked: {result:?}"),

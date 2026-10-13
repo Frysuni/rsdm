@@ -8,6 +8,24 @@ mod fixture;
 use fixture::{Fixture, Mode};
 
 #[tokio::test]
+async fn native_partial_apps_accept_cancellable_generic_preparation() {
+    for kind in [crate::provider::ProviderKind::Gnome, crate::provider::ProviderKind::Plasma] {
+        let fixture = Fixture::new(Mode::Accepted).await;
+        let provider = Provider { kind, native_unit: None, logout_command: Vec::new() };
+        let mut record = fixture.runtime.session().unwrap();
+        record.provider = provider.name().into();
+        fixture.runtime.save_session(&record).unwrap();
+        let mut request = fixture.request.clone();
+        request.on_timeout = "cancel".into();
+        let app = register(&fixture.runtime, &provider, &request).await.unwrap();
+        let properties = launch_properties(&fixture.manager, &fixture.runtime, "anchor.service", &request, &app, None).await.unwrap();
+        assert_eq!(app.policy.on_timeout, TimeoutAction::Cancel);
+        assert!(properties.iter().all(|(name, _)| !matches!(*name, "After" | "PartOf" | "Requisite")));
+        assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
 async fn attached_apps_keep_private_xsmp_and_have_no_graphical_lifetime_dependencies() {
     let mut fixture = Fixture::new(Mode::Accepted).await;
     let mut record = fixture.runtime.session().unwrap();

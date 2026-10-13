@@ -4,6 +4,9 @@ use super::*;
 use std::sync::{Mutex, atomic::AtomicBool};
 use zbus::zvariant::OwnedObjectPath;
 
+#[path = "coordinator_recovery_ownership_tests.rs"]
+mod recovery;
+
 struct State {
     stops: Mutex<Vec<String>>,
     invocation: Mutex<Vec<u8>>,
@@ -210,7 +213,7 @@ async fn assert_prepared(mut fixture: Fixture, state: Arc<State>) {
     let (reply, mut result) = tokio::sync::mpsc::channel(1);
     coordinator.stop_replies.push(crate::control::Reply::for_test(reply));
     coordinator.begin_stop("logout", None).await.unwrap();
-    coordinator.prepared(Ok(Vec::new())).await.unwrap();
+    coordinator.prepared(Ok(Vec::new()), None).await.unwrap();
     let work = tokio::time::timeout(Duration::from_secs(2), coordinator.work.recv()).await.unwrap().unwrap();
     coordinator.completed(work).await.unwrap();
     let outcome = result.try_recv().unwrap().unwrap();
@@ -235,7 +238,7 @@ async fn cancellation_remains_available_while_lifecycle_ownership_is_queried() {
     process.booting = false;
     coordinator.process = Some(process);
     coordinator.begin_stop("logout", None).await.unwrap();
-    coordinator.prepared(Ok(Vec::new())).await.unwrap();
+    coordinator.prepared(Ok(Vec::new()), None).await.unwrap();
     tokio::time::timeout(Duration::from_secs(1), async {
         while state.queries.load(Ordering::SeqCst) == 0 { tokio::task::yield_now().await; }
     }).await.unwrap();

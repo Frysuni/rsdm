@@ -61,7 +61,7 @@ async fn create(actions: ActionGate, path: &std::path::Path, snapshot: Snapshot)
         requests, work, events, queued: VecDeque::new(), finalize_replies: Vec::new(),
         pending_environment: VecDeque::new(), environment_reply: None, stop_replies: Vec::new(),
         stopping: Arc::new(AtomicBool::new(false)), shutdown: None, action: String::new(), ready_busy: false,
-        ready_once: false, pending_ready: false, pending_boot: false, preparing: false, forced_units: Vec::new(),
+        ready_once: false, pending_ready: false, pending_boot: false, preparing: false, retain_launcher: false, forced_units: Vec::new(),
         exit_code: 0, replies_pending: 0, workers: 0, observation_busy: false, xsmp, control_bus: bus,
         ready_deadline: Instant::now(), display_since: None, _power_monitor: Some(power), notices,
         last_reap: Instant::now(), _lease: lease,

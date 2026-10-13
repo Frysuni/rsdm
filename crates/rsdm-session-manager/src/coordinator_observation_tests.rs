@@ -37,7 +37,7 @@ async fn stopping_does_not_start_observations_that_starve_preparation() {
     assert!(!fixture.coordinator.observation_busy);
     assert!(fixture.coordinator.preparing);
     let work = tokio::time::timeout(Duration::from_secs(8), fixture.coordinator.work.recv()).await.unwrap().unwrap();
-    assert!(matches!(work, Work::Prepared(Ok(_))));
+    assert!(matches!(work, Work::Prepared(Ok(_), None)));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -76,7 +76,7 @@ async fn an_inflight_observation_returns_ownership_before_shutdown_advances() {
     assert!(!fixture.coordinator.observation_busy);
     assert!(fixture.coordinator.preparing);
     let work = tokio::time::timeout(Duration::from_secs(8), fixture.coordinator.work.recv()).await.unwrap().unwrap();
-    assert!(matches!(work, Work::Prepared(Ok(_))));
+    assert!(matches!(work, Work::Prepared(Ok(_), None)));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

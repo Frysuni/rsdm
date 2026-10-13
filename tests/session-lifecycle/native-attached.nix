@@ -11,6 +11,13 @@ let
     touch "$XDG_RUNTIME_DIR/app-attached-ready"
     while :; do sleep 1; done
   '';
+  autoApplication = pkgs.writeShellScript "test-attached-native-auto-app" ''
+    set -eu
+    trap 'touch "$XDG_RUNTIME_DIR/native-auto-term"; exit 0' TERM
+    printf '%s\n' "$$" > "$XDG_RUNTIME_DIR/native-auto-pid"
+    touch "$XDG_RUNTIME_DIR/native-auto-ready"
+    while :; do sleep 1; done
+  '';
 in pkgs.testers.runNixOSTest {
   name = "rsdm-native-attached";
   globalTimeout = 120;
@@ -35,7 +42,7 @@ in pkgs.testers.runNixOSTest {
     settings = " --collect --uid=alice --property=Type=exec --property=PAMName=login --setenv=XDG_SESSION_TYPE=wayland --setenv=XDG_RUNTIME_DIR=" + runtime + " --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/bus "
 
     for desktop in ["GNOME", "KDE"]:
-        with subtest(desktop + " attached logout delegates only after registered apps are prepared"):
+        with subtest(desktop + " attached logout prepares explicit apps and leaves auto apps to native dialogs"):
             machine.succeed("rm -f " + runtime + "/app-attached* " + runtime + "/native-* " + runtime + "/display-alive")
             machine.succeed("systemd-run --unit=rsdm-test-native-attached" + settings + " --property=TTYPath=/dev/tty1 -- ${native} " + desktop)
             machine.wait_for_file(runtime + "/native-manager-ready")
@@ -47,13 +54,18 @@ in pkgs.testers.runNixOSTest {
             assert "capability: native-logout: available" in status, status
             machine.fail("test -e " + runtime + "/native-requests")
             machine.fail(user + "systemctl --user is-active --quiet graphical-session.target")
-            machine.succeed(control + "rsdm app -- ${application}")
+            machine.succeed(control + "rsdm app --shutdown-method term -- ${application}")
             machine.wait_for_file(runtime + "/app-attached-ready")
+            machine.succeed(control + "rsdm app --shutdown-timeout 1 -- ${autoApplication}")
+            machine.wait_for_file(runtime + "/native-auto-ready")
+            auto_pid = machine.succeed("cat " + runtime + "/native-auto-pid").strip()
             machine.succeed("echo app-attached > " + runtime + "/native-require-saved")
             result = machine.succeed(control + "rsdm session stop")
             assert "delegated" in result, result
             assert machine.succeed("cat " + runtime + "/app-attached").strip() == "saved"
             assert machine.succeed("cat " + runtime + "/native-requests") == "logout\n"
+            machine.fail("test -e " + runtime + "/native-auto-term")
+            machine.succeed("kill -0 " + auto_pid)
             assert machine.succeed("systemctl show rsdm-test-native-attached -p MainPID -p InvocationID") == wm
             assert machine.succeed(user + "systemctl --user show-environment") == environment
             machine.succeed("test -e " + runtime + "/display-alive")

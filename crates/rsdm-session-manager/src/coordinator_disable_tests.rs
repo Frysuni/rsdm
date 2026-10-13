@@ -26,7 +26,7 @@ async fn late_worker_completions_cannot_resume_preparation_after_disable() {
     let coordinator = &mut fixture.coordinator;
     coordinator.disable().await.unwrap();
     coordinator.workers = 3;
-    coordinator.completed(Work::Prepared(Ok(vec!["forced.service".into()]))).await.unwrap();
+    coordinator.completed(Work::Prepared(Ok(vec!["forced.service".into()]), None)).await.unwrap();
     coordinator.completed(Work::Delegated(Ok(()))).await.unwrap();
     coordinator.completed(Work::EnvironmentPublished(Ok(()))).await.unwrap();
     assert_eq!(coordinator.workers, 0);

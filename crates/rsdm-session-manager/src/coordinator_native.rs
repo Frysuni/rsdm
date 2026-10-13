@@ -2,10 +2,25 @@
 
 use rsdm_core::domain::SessionPhase;
 
-use super::{SessionError, coordinator::{Coordinator, Work}, native_attached::Scoped};
+use super::{SessionError, coordinator::{Coordinator, Work}, native_attached::Scoped, status::Capability};
 
 impl Coordinator {
-    pub(super) fn prepare_attached_logout(&mut self) {
+    pub(super) async fn begin_native_shutdown(&mut self) -> Result<(), SessionError> {
+        self.lifecycle.phase = SessionPhase::StoppingSession;
+        self.save().await?;
+        let provider = self.provider.clone();
+        let identity = self.record.identity.clone();
+        let manager = self.manager.clone();
+        let action = self.action.clone();
+        let events = self.events.clone();
+        self.workers += 1;
+        tokio::spawn(async move {
+            let _ = events.send(Work::Delegated(provider.delegate(&manager, &action, &identity).await));
+        });
+        Ok(())
+    }
+
+    pub(super) fn prepare_attached_logout(&mut self, native: Option<Capability>) {
         self.preparing = true;
         let manager = self.manager.clone();
         let identity = self.record.identity.clone();
@@ -14,17 +29,22 @@ impl Coordinator {
         self.workers += 1;
         tokio::spawn(async move {
             let result = super::native_attached::prepare(&manager, &identity, &control).await;
-            let _ = events.send(Work::AttachedReady(result));
+            let _ = events.send(Work::AttachedReady(result, native));
         });
     }
 
-    pub(super) async fn attached_ready(&mut self, result: Result<Option<Scoped>, SessionError>) -> Result<(), SessionError> {
+    pub(super) async fn attached_ready(&mut self, result: Result<Option<Scoped>, SessionError>, native: Option<Capability>) -> Result<(), SessionError> {
         if self.resume_if_cancelled().await? { return Ok(()); }
         if self.action == "external-shutdown" { return self.begin_finish().await; }
+        let native_preparation = native.as_ref().is_some_and(|capability| capability.state == "available");
+        let unavailable_result = if native_preparation { "failed" } else { "prepared" };
+        let unavailable_reason = if native_preparation {
+            "native logout ownership changed before delegation; auto applications were left to the desktop"
+        } else { "registered applications prepared; no native logout peer belongs to this session" };
         let target = match result {
             Ok(Some(target)) => target,
-            Ok(None) => return self.resume("prepared", "registered applications prepared; no native logout peer belongs to this session").await,
-            Err(error) => return self.resume("prepared", &format!("registered applications prepared; native logout unavailable: {error}")).await,
+            Ok(None) => return self.resume(unavailable_result, unavailable_reason).await,
+            Err(error) => return self.resume(unavailable_result, &format!("{unavailable_reason}: {error}")).await,
         };
         self.lifecycle.phase = SessionPhase::StoppingSession;
         self.save().await?;

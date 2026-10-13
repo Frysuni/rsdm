@@ -143,7 +143,7 @@ async fn current_compositor(manager: &UserManager, unit: &str, invocation: &[u8]
     }
 }
 
-async fn native_logout(manager: &UserManager, record: &SessionRecord) -> Capability {
+pub(super) async fn native_logout(manager: &UserManager, record: &SessionRecord) -> Capability {
     let kind = match record.provider.as_str() {
         "gnome" => crate::provider::ProviderKind::Gnome, "plasma" => crate::provider::ProviderKind::Plasma,
         "partial" => crate::provider::ProviderKind::Attached,

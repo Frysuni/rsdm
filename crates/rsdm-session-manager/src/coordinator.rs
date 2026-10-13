@@ -28,10 +28,10 @@ pub(super) enum Work {
     Ready(Result<bool, SessionError>),
     EnvironmentPublished(Result<(), SessionError>),
     Launched(String, Reply<String>, Result<String, SessionError>),
-    Prepared(Result<Vec<String>, SessionError>),
+    Prepared(Result<Vec<String>, SessionError>, Option<super::status::Capability>),
     Delegated(Result<(), SessionError>),
-    AttachedReady(Result<Option<super::native_attached::Scoped>, SessionError>),
-    PowerRequested(Result<(), SessionError>),
+    AttachedReady(Result<Option<super::native_attached::Scoped>, SessionError>, Option<super::status::Capability>),
+    PowerRequested(Result<(), SessionError>, Option<super::status::Capability>),
     StatusDetails(Reply<super::status::SessionStatusDetails>, Result<super::status::SessionStatusDetails, SessionError>),
     Finished(SessionProcess, Result<(), SessionError>),
     LifecycleChecked(SessionProcess, super::status::Capability),
@@ -62,6 +62,7 @@ pub(super) struct Coordinator {
     pub pending_ready: bool,
     pub pending_boot: bool,
     pub preparing: bool,
+    pub retain_launcher: bool,
     pub forced_units: Vec<String>,
     pub exit_code: i32,
     pub replies_pending: usize,
@@ -93,7 +94,9 @@ pub(super) async fn start(
     };
     let launcher = coordinator.process.as_ref().expect("session process").clone();
     let result = coordinator.run(&mut signals).await;
-    if actions.check().is_ok() && result.as_ref().map_or(true, |code| *code != 0) {
+    if actions.check().is_ok() && !coordinator.retain_launcher
+        && result.as_ref().map_or(true, |code| *code != 0)
+    {
         coordinator.recover().await;
     }
     // Recovery can be interrupted by a validated disable update too. Recheck
@@ -114,6 +117,10 @@ pub(super) async fn start(
         let code = super::session_wait::wait(process, &record, &provider, connection).await?;
         disabled?;
         return Ok(code);
+    }
+    if coordinator.retain_launcher {
+        drop(actions);
+        return super::coordinator_lifecycle::wait_retained(coordinator, launcher, result).await;
     }
     if let Err(error) = coordinator.xsmp.shutdown(&coordinator.manager.deadline).await {
         if result.is_ok() { return Err(error); }
@@ -212,10 +219,10 @@ impl Coordinator {
                 self.lifecycle.complete_launch(&unit);
                 let _ = reply.try_send(result.map_err(|error| error.to_string()));
             }
-            Work::Prepared(result) => self.prepared(result).await?,
+            Work::Prepared(result, native) => self.prepared(result, native).await?,
             Work::Delegated(result) => self.delegated(result).await?,
-            Work::AttachedReady(result) => self.attached_ready(result).await?,
-            Work::PowerRequested(result) => self.power_requested(result).await?,
+            Work::AttachedReady(result, native) => self.attached_ready(result, native).await?,
+            Work::PowerRequested(result, native) => self.power_requested(result, native).await?,
             Work::LifecycleChecked(process, capability) => self.lifecycle_checked(process, capability).await?,
             Work::Finished(process, result) => {
                 self.process = Some(process);

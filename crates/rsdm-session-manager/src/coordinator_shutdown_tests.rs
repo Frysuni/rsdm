@@ -24,6 +24,16 @@ mod ownership;
 
 #[path = "coordinator_attached_tests.rs"]
 mod attached;
+
+#[path = "coordinator_native_shutdown_tests.rs"]
+mod native_shutdown;
+
+#[path = "coordinator_retention_tests.rs"]
+mod retention;
+
+#[path = "coordinator_native_recovery_tests.rs"]
+mod native_recovery;
+
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
 
 struct FixtureReady;
@@ -38,7 +48,10 @@ struct Fixture {
     notices: tokio::sync::mpsc::UnboundedSender<ShutdownNotice>,
     _server: zbus::Connection,
     directory: PathBuf,
+    _directory: Directory,
 }
+
+struct Directory(PathBuf);
 
 impl Fixture {
     async fn new() -> Self {
@@ -83,14 +96,14 @@ impl Fixture {
             shutdown: None, action: String::new(), ready_busy: false, ready_once: true,
             pending_ready: false,
             pending_boot: false,
-            preparing: false, forced_units: Vec::new(), exit_code: 0, replies_pending: 0, workers: 0, observation_busy: false,
+            preparing: false, retain_launcher: false, forced_units: Vec::new(), exit_code: 0, replies_pending: 0, workers: 0, observation_busy: false,
             xsmp, control_bus: crate::control::ControlServer::with_connection(
                 connection, endpoint,
             ), ready_deadline: Instant::now(), display_since: None,
             _power_monitor: None, notices: received, last_reap: Instant::now(),
             _lease: crate::session_lease::SessionLease::acquire_in(&directory).unwrap(),
         };
-        Self { coordinator, notices, _server: server.await.unwrap(), directory }
+        Self { coordinator, notices, _server: server.await.unwrap(), directory: directory.clone(), _directory: Directory(directory) }
     }
 
     async fn notify(&mut self, preparing: bool, budget_usec: u64) {
@@ -103,10 +116,10 @@ impl Fixture {
     }
 }
 
-impl Drop for Fixture {
+impl Drop for Directory {
     fn drop(&mut self) {
-        let _ = fs::remove_file(self.coordinator.runtime.path.with_extension("disabled"));
-        let _ = fs::remove_dir_all(&self.directory);
+        let _ = fs::remove_file(self.0.with_extension("disabled"));
+        let _ = fs::remove_dir_all(&self.0);
     }
 }
 

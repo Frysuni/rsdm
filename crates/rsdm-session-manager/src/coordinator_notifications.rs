@@ -38,6 +38,9 @@ impl Coordinator {
         let deadline = if old == 0 { proposed } else { old.min(proposed) };
         control.force(deadline);
         self.record.shutdown_deadline_usec = Some(deadline);
+        if let Some(transaction) = &mut self.record.shutdown_transaction {
+            transaction.shorten(deadline);
+        }
         self.save().await
     }
 

@@ -45,10 +45,27 @@ impl Coordinator {
         if let Err(error) = super::cleanup::recover(&self.manager, &self.runtime).await {
             tracing::error!(%error, "session recovery failed");
         }
-        if let Some(process) = &mut self.process {
-            if let Err(error) = process.stop(&self.manager, &self.provider, &self.runtime.generation).await {
-                tracing::error!(%error, "session launcher cleanup failed");
+        self.recover_launcher().await;
+    }
+
+    async fn recover_launcher(&mut self) {
+        if self.provider.native_desktop() {
+            let capability = super::coordinator_status::native_logout(&self.manager, &self.record).await;
+            if capability.state != "available" {
+                self.retain_launcher = true;
+                tracing::warn!(reason = %capability.reason, "retaining native session launcher during recovery");
+                return;
             }
+        }
+        let Some(process) = &mut self.process else {
+            // An unfinished worker may still hold the original process. The
+            // start call keeps its clone until the launcher's exit is known.
+            self.retain_launcher = self.provider.kind != super::provider::ProviderKind::Attached;
+            return;
+        };
+        if let Err(error) = process.stop(&self.manager, &self.provider, &self.runtime.generation).await {
+            self.retain_launcher = true;
+            tracing::error!(%error, "session launcher cleanup failed; waiting for its actual exit");
         }
     }
 

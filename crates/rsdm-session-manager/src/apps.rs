@@ -37,11 +37,6 @@ pub(super) async fn register(
     {
         return Err(SessionError::State("explicit XSMP requires an XSMP-enabled build and an RSDM-owned XSMP server".into()));
     }
-    if provider.native_desktop() && policy.on_timeout == TimeoutAction::Cancel
-        && policy.method == ShutdownMethod::Auto && policy.quit_command.is_empty()
-    {
-        return Err(SessionError::State("native desktop shutdown owns cancellation; use a quit command for an RSDM preflight".into()));
-    }
     let app = AppRecord {
         unit: app_unit_name(program, &runtime.generation), invocation_id: Vec::new(),
         policy, deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, lifetime_process: None, preparation: None,
@@ -106,6 +101,11 @@ async fn launch_properties(
         let (_, lifecycle) = super::coordinator_status::lifecycle_capabilities(manager, &record).await;
         lifecycle.state != "available"
     };
+    if !partial && matches!(record.provider.as_str(), "gnome" | "plasma")
+        && app.policy.on_timeout == TimeoutAction::Cancel && app.policy.method == ShutdownMethod::Auto && app.policy.quit_command.is_empty()
+    {
+        return Err(SessionError::State("native desktop shutdown owns cancellation; use a quit command for an RSDM preflight".into()));
+    }
     if partial {
         for (name, value) in &record.exported_environment {
             if environment.iter().any(|(existing, _)| existing == name)
