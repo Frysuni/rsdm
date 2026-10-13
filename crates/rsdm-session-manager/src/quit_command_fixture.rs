@@ -18,6 +18,7 @@ pub(super) struct State {
     cancel_at: Stage,
     unit: String,
     pub(super) starts: AtomicUsize,
+    pub(super) lifetime: std::sync::Mutex<Vec<(String, Vec<String>)>>,
     pub(super) stops: AtomicUsize,
     pub(super) unrefs: AtomicUsize,
     pub(super) block_preflight: AtomicBool,
@@ -51,6 +52,7 @@ struct Manager(Arc<State>);
 impl Manager {
     async fn get_unit(&self, unit: &str) -> Result<OwnedObjectPath, ManagerError> {
         if unit.starts_with("app-rsdm-") { return Ok(OwnedObjectPath::try_from("/app").unwrap()); }
+        if unit == crate::attach::UNIT { return Err(ManagerError::NoSuchUnit("coordinator was collected".into())); }
         assert_eq!(unit, self.0.unit);
         if self.0.block_preflight.load(Ordering::SeqCst) && self.0.starts.load(Ordering::SeqCst) == 0 {
             self.0.preflight_entered.notify_one();
@@ -64,10 +66,15 @@ impl Manager {
     }
 
     fn start_transient_unit(
-        &self, unit: &str, _mode: &str, _properties: Vec<(String, OwnedValue)>,
+        &self, unit: &str, _mode: &str, properties: Vec<(String, OwnedValue)>,
         _auxiliary: Vec<(String, Vec<(String, OwnedValue)>)>,
     ) -> Result<OwnedObjectPath, ManagerError> {
         assert_eq!(unit, self.0.unit);
+        for (name, value) in properties {
+            if matches!(name.as_str(), "PartOf" | "Requisite") {
+                self.0.lifetime.lock().unwrap().push((name, value.try_into().unwrap()));
+            }
+        }
         self.0.starts.fetch_add(1, Ordering::SeqCst);
         self.0.reach(Stage::Accepted);
         if self.0.cancel_at == Stage::Accepted { return Err(ManagerError::NoReply("reply lost after accepting start".into())); }
@@ -144,7 +151,7 @@ impl Fixture {
         let app = crate::helper_start_fixture::app();
         let state = Arc::new(State { control, cancel_at, invocation: AtomicU8::new(1), replacement: std::sync::Mutex::new(None), unit: app.unit.replacen("app-rsdm-", "rsdm-quit-", 1),
             preflight_complete: AtomicBool::new(false), expire_on_final_identity: AtomicBool::new(false),
-            starts: AtomicUsize::new(0), stops: AtomicUsize::new(0), unrefs: AtomicUsize::new(0),
+            starts: AtomicUsize::new(0), lifetime: std::sync::Mutex::new(Vec::new()), stops: AtomicUsize::new(0), unrefs: AtomicUsize::new(0),
             block_preflight: AtomicBool::new(false), preflight_entered: tokio::sync::Notify::new(),
             preflight_reply: tokio::sync::Semaphore::new(0) });
 

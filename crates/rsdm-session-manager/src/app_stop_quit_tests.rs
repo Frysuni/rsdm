@@ -4,28 +4,46 @@ use zbus::zvariant::OwnedObjectPath;
 
 use super::*;
 
-struct Manager(Option<Arc<ShutdownControl>>);
+struct CoordinatorState {
+    present: AtomicBool,
+    active: AtomicBool,
+    invocation: std::sync::Mutex<Vec<u8>>,
+}
+
+struct Manager { control: Option<Arc<ShutdownControl>>, coordinator: Arc<CoordinatorState> }
+
+#[derive(Debug, zbus_macros::DBusError)]
+#[zbus(prefix = "org.freedesktop.systemd1")]
+enum ManagerError { NoSuchUnit(String), #[zbus(error)] Bus(zbus::Error) }
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Manager")]
 impl Manager {
-    fn get_unit(&self, unit: &str) -> zbus::fdo::Result<OwnedObjectPath> {
-        if let Some(control) = &self.0 {
+    fn get_unit(&self, unit: &str) -> Result<OwnedObjectPath, ManagerError> {
+        if let Some(control) = &self.control {
             control.cancelled.store(true, Ordering::SeqCst);
         }
-        if unit != crate::attach::UNIT { return Err(zbus::fdo::Error::Failed("unexpected unit lookup".into())); }
+        if !matches!(unit, crate::attach::UNIT | "compositor.service") {
+            return Err(ManagerError::Bus(zbus::fdo::Error::Failed("unexpected unit lookup".into()).into()));
+        }
+        if !self.coordinator.present.load(Ordering::SeqCst) { return Err(ManagerError::NoSuchUnit("coordinator was collected".into())); }
         Ok(OwnedObjectPath::try_from("/coordinator").unwrap())
     }
+
+    fn get_unit_processes(&self, _unit: &str) -> Vec<(String, u32, String)> { Vec::new() }
 }
 
-struct Unit;
+struct Unit(Arc<CoordinatorState>);
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Unit")]
 impl Unit {
     #[zbus(property, name = "InvocationID")]
-    fn invocation_id(&self) -> Vec<u8> { vec![1; 16] }
+    fn invocation_id(&self) -> Vec<u8> { self.0.invocation.lock().unwrap().clone() }
+
+    #[zbus(property)]
+    fn active_state(&self) -> &str { if self.0.active.load(Ordering::SeqCst) { "active" } else { "inactive" } }
 }
 
-struct Fixture { directory: PathBuf, runtime: Runtime, manager: UserManager, _server: zbus::Connection }
+struct Fixture { directory: PathBuf, runtime: Runtime, manager: UserManager, coordinator: Arc<CoordinatorState>, _server: zbus::Connection }
 
 impl Fixture {
     async fn new(control: Option<Arc<ShutdownControl>>) -> Self {
@@ -33,14 +51,16 @@ impl Fixture {
         fs::create_dir(&directory).unwrap();
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
         let runtime = Runtime::create_at(&directory, crate::helper_start_fixture::GENERATION).unwrap();
+        let coordinator = Arc::new(CoordinatorState { present: AtomicBool::new(true), active: AtomicBool::new(true), invocation: std::sync::Mutex::new(vec![1; 16]) });
+        let state = coordinator.clone();
         let (server, client) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
-                .serve_at("/org/freedesktop/systemd1", Manager(control)).unwrap()
-                .serve_at("/coordinator", Unit).unwrap().build().await.unwrap()
+                .serve_at("/org/freedesktop/systemd1", Manager { control, coordinator: state.clone() }).unwrap()
+                .serve_at("/coordinator", Unit(state)).unwrap().build().await.unwrap()
         });
         let client = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
-        Self { directory, runtime, manager: UserManager::with_connection(client), _server: server.await.unwrap() }
+        Self { directory, runtime, manager: UserManager::with_connection(client), coordinator, _server: server.await.unwrap() }
     }
 
     fn save(&self, provider: &str, coordinator: Option<(String, Vec<u8>)>) {
@@ -60,10 +80,43 @@ impl Drop for Fixture {
 #[tokio::test]
 async fn owned_sessions_use_the_anchor_and_attached_sessions_use_the_verified_coordinator() {
     let fixture = Fixture::new(None).await;
-    fixture.save("managed", None);
-    assert_eq!(quit_anchor(&fixture.manager, &fixture.runtime).await.unwrap(), crate::helper_start_fixture::record().anchor_unit);
+    let app = crate::helper_start_fixture::app();
+    fixture.save("external", None);
+    assert_eq!(quit_lifetime_unit(&fixture.manager, &fixture.runtime, &app).await.unwrap(), crate::helper_start_fixture::record().anchor_unit);
+    let mut record = fixture.runtime.session().unwrap();
+    record.provider = "managed".into();
+    record.compositor_unit = Some("compositor.service".into());
+    record.compositor_invocation = vec![1; 16];
+    fixture.runtime.save_session(&record).unwrap();
+    assert_eq!(quit_lifetime_unit(&fixture.manager, &fixture.runtime, &app).await.unwrap(), record.anchor_unit);
     fixture.save("partial", Some((crate::attach::UNIT.into(), vec![1; 16])));
-    assert_eq!(quit_anchor(&fixture.manager, &fixture.runtime).await.unwrap(), crate::attach::UNIT);
+    assert_eq!(quit_lifetime_unit(&fixture.manager, &fixture.runtime, &app).await.unwrap(), crate::attach::UNIT);
+}
+
+#[tokio::test]
+async fn lost_lifecycle_control_binds_the_quit_command_to_its_owned_app() {
+    let fixture = Fixture::new(None).await;
+    let app = crate::helper_start_fixture::app();
+    fixture.save("managed", None);
+    assert_eq!(quit_lifetime_unit(&fixture.manager, &fixture.runtime, &app).await.unwrap(), app.unit);
+    let mut record = fixture.runtime.session().unwrap();
+    record.compositor_unit = Some("compositor.service".into());
+    record.compositor_invocation = vec![2; 16];
+    fixture.runtime.save_session(&record).unwrap();
+    assert_eq!(quit_lifetime_unit(&fixture.manager, &fixture.runtime, &app).await.unwrap(), app.unit);
+}
+
+#[tokio::test]
+async fn a_stopped_or_collected_attached_coordinator_does_not_block_quit_preparation() {
+    for state in ["inactive", "collected", "cleared"] {
+        let fixture = Fixture::new(None).await;
+        let app = crate::helper_start_fixture::app();
+        fixture.save("partial", Some((crate::attach::UNIT.into(), vec![1; 16])));
+        fixture.coordinator.active.store(false, Ordering::SeqCst);
+        if state == "collected" { fixture.coordinator.present.store(false, Ordering::SeqCst); }
+        if state == "cleared" { *fixture.coordinator.invocation.lock().unwrap() = vec![0; 16]; }
+        assert_eq!(quit_lifetime_unit(&fixture.manager, &fixture.runtime, &app).await.unwrap(), app.unit);
+    }
 }
 
 #[tokio::test]
@@ -74,7 +127,7 @@ async fn attached_sessions_reject_missing_foreign_or_replaced_coordinator_owners
         Some((crate::attach::UNIT.into(), vec![2; 16]))]
     {
         fixture.save("partial", coordinator);
-        assert!(quit_anchor(&fixture.manager, &fixture.runtime).await.is_err());
+        assert!(quit_lifetime_unit(&fixture.manager, &fixture.runtime, &crate::helper_start_fixture::app()).await.is_err());
     }
 }
 

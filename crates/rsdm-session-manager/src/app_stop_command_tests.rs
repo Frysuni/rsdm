@@ -13,6 +13,25 @@ use fixture::{Fixture, Stage};
 mod ownership;
 
 #[tokio::test]
+async fn partial_quit_commands_depend_on_the_registered_app_instead_of_the_session_anchor() {
+    for provider in ["managed", "gnome", "plasma", "partial"] {
+        let control = Arc::new(ShutdownControl::default());
+        let fixture = Fixture::new(control.clone(), Stage::Never).await;
+        let mut record = fixture.runtime.session().unwrap();
+        record.provider = provider.into();
+        if provider == "partial" { record.coordinator_unit = Some((crate::attach::UNIT.into(), vec![1; 16])); }
+        fixture.runtime.save_session(&record).unwrap();
+        let app = crate::helper_start_fixture::app();
+        assert!(request_quit(&fixture.manager, &fixture.runtime, &app, &control).await.unwrap().is_some());
+        assert_eq!(*fixture.state.lifetime.lock().unwrap(), vec![
+            ("PartOf".into(), vec![app.unit.clone()]), ("Requisite".into(), vec![app.unit.clone()]),
+        ]);
+        assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.saved_dispatch().unwrap().state, DispatchState::Sent);
+    }
+}
+
+#[tokio::test]
 async fn cancellation_during_command_preparation_or_start_preflight_never_sends_start() {
     for point in [Stage::Environment, Stage::Directory, Stage::DirectoryFailure, Stage::Preflight] {
         let control = Arc::new(ShutdownControl::default());

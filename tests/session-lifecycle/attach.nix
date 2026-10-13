@@ -103,7 +103,7 @@ in pkgs.testers.runNixOSTest {
         assert machine.succeed("systemctl show rsdm-test-external-session -p MainPID -p InvocationID") == wm
         machine.fail("test -e " + runtime + "/attach-wm-stopped")
         assert machine.succeed(user + "systemctl --user show-environment") == before
-    ${import ./attach-scenarios.nix { inherit application; }}
+    ${import ./attach-scenarios.nix { inherit application commandApplication quitCommand; }}
     machine.succeed("systemctl stop rsdm-test-external-session")
   '';
 }

@@ -39,7 +39,7 @@ pub(super) async fn request_quit(manager: &UserManager, runtime: &Runtime, app: 
 }
 
 async fn request_command(manager: &UserManager, runtime: &Runtime, app: &AppRecord, control: &ShutdownControl) -> Result<Option<String>, SessionError> {
-    let anchor = quit_anchor(manager, runtime).await?;
+    let anchor = quit_lifetime_unit(manager, runtime, app).await?;
     let transaction = control.transaction_id.as_deref();
     if !crate::app_dispatch::claim(runtime, app, transaction, crate::app_dispatch::Method::Command, &manager.deadline).await? {
         return Ok(None);
@@ -86,17 +86,22 @@ pub(super) async fn prepare_xsmp(
     })).await?
 }
 
-async fn quit_anchor(manager: &UserManager, runtime: &Runtime) -> Result<String, SessionError> {
+async fn quit_lifetime_unit(manager: &UserManager, runtime: &Runtime, app: &AppRecord) -> Result<String, SessionError> {
     let records = runtime.clone();
     let record = crate::runtime::blocking(move || records.session()).await?;
     if record.disabled { return Err(SessionError::Disabled); }
-    if record.provider != "partial" { return Ok(record.anchor_unit); }
+    if record.provider != "partial" {
+        let (_, lifecycle) = crate::coordinator_status::lifecycle_capabilities(manager, &record).await;
+        return Ok(if lifecycle.state == "available" { record.anchor_unit } else { app.unit.clone() });
+    }
     let (unit, invocation) = record.coordinator_unit
         .ok_or_else(|| SessionError::State("attached coordinator ownership is missing".into()))?;
     if unit != crate::attach::UNIT || invocation.is_empty() || invocation.iter().all(|byte| *byte == 0)
-        || manager.invocation_id(&unit).await? != invocation
     {
         return Err(SessionError::State("attached coordinator invocation changed before quit dispatch".into()));
+    }
+    if !manager.verify_owner(&unit, &invocation).await? || !manager.active(&unit).await? {
+        return Ok(app.unit.clone());
     }
     Ok(unit)
 }

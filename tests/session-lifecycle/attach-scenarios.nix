@@ -1,4 +1,4 @@
-{ application }:
+{ application, commandApplication, quitCommand }:
 ''
     def enable_attached_session():
         machine.wait_until_succeeds(user + "systemctl --user show rsdm-session-manager.service -p LoadState --value | grep -qx not-found")
@@ -74,4 +74,26 @@
         assert machine.succeed(user + "systemctl --user show " + app + " -p MainPID -p InvocationID") == app_state
         machine.fail("test -e " + runtime + "/attach-app-saved")
         machine.succeed(user + "systemctl --user stop " + app)
+
+    with subtest("cleanup runs the registered quit command after the attached coordinator is collected"):
+        enable_attached_session()
+        machine.succeed("rm -f " + runtime + "/attach-command-* " + runtime + "/attach-quit-request")
+        machine.succeed(control + "rsdm app --quit-command ${quitCommand} -- ${commandApplication}")
+        machine.wait_for_file(runtime + "/attach-command-ready")
+        current = attached_generation()
+        machine.succeed(user + "systemctl --user kill --signal=KILL rsdm-session-manager.service")
+        machine.wait_until_fails(user + "busctl --user list | grep org.rsdm.Session1")
+        machine.wait_until_succeeds(user + "systemctl --user show rsdm-session-manager.service -p LoadState --value | grep -qx not-found")
+        assert machine.succeed(control + "rsdm session status") == "inactive: no session manager coordinator is running\n"
+        machine.fail("test -e " + runtime + "/attach-command-saved")
+        machine.succeed(control + "rsdm session cleanup --generation " + current)
+        machine.wait_for_file(runtime + "/attach-command-saved")
+        record = tomllib.loads(machine.succeed("cat " + runtime + "/rsdm/sessions/" + current + "/session.toml"))
+        assert record["phase"] == "closed" and record["provider"] == "partial"
+        assert machine.succeed("systemctl show rsdm-test-external-session -p MainPID -p InvocationID") == wm
+        assert machine.succeed(user + "systemctl --user show-environment") == before
+        machine.succeed("loginctl show-session " + login_session_id)
+        machine.fail("test -e " + runtime + "/attach-wm-stopped")
+        machine.fail(user + "systemctl --user is-active --quiet graphical-session.target")
+        machine.fail(user + "busctl --user list | grep org.rsdm.Session1")
 ''

@@ -28,9 +28,9 @@ rejected even when its environment contains the current generation.
 Attached status uses provider `partial`. Application units do not require
 `graphical-session.target` or an external anchor. Environment and a private XSMP
 endpoint are scoped to new managed applications; the user's global environment
-remains untouched. Quit-command helpers bind to the attached coordinator's
-verified invocation and run with the application's environment and working
-directory. `session stop` prepares registered applications, then delegates logout
+remains untouched. Quit-command helpers use the verified live coordinator or the
+registered app unit after it stops, with the app's environment and working directory.
+`session stop` prepares registered applications, then delegates logout
 to live GNOME or Plasma peers verified in this logind session using the broker's
 ProcessFD credentials. Numeric PID credentials alone cannot prove this ownership.
 The desktop retains confirmation dialogs and completion. Discovery remains
@@ -121,6 +121,13 @@ New application units also probe current lifecycle control. If it is unavailable
 or unknown, they have no graphical target or anchor lifetime dependencies and
 receive the generation's private environment, while retaining the original
 provider identity. Existing units keep their passive dependencies.
+Quit-command helpers also use the current lifecycle probe. When control is lost,
+their lifetime depends on the registered app unit instead of the session anchor,
+so an inactive or foreign graphical target does not block preparation. Attached
+helpers use their verified live coordinator, or the registered app unit when
+that coordinator is stopped or collected. A replaced or unverified coordinator
+still rejects dispatch. The app invocation is
+rechecked inside the request slot before starting any quit command.
 
 Preparation results include the application InvocationID, transaction, selected
 method, dispatch state, `clean`/`forced`/`cancelled`/`unknown` result and escalation
