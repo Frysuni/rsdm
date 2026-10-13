@@ -2,7 +2,7 @@
 
 use std::{
     fs, os::unix::fs::PermissionsExt, path::PathBuf,
-    sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}},
+    sync::{Arc, Mutex, atomic::{AtomicBool, AtomicUsize, Ordering}},
 };
 
 use zbus::{Connection, zvariant::{OwnedObjectPath, OwnedValue}};
@@ -46,6 +46,11 @@ pub(super) struct State {
     pub(super) starts: AtomicUsize,
     pub(super) invocation_reads: AtomicUsize,
     pub(super) unrefs: AtomicUsize,
+    pub(super) dependencies: Mutex<Vec<String>>,
+    pub(super) compositor_exists: AtomicBool,
+    pub(super) compositor_invocation: Mutex<Vec<u8>>,
+    pub(super) compositor_active: Mutex<String>,
+    pub(super) compositor_query_failed: AtomicBool,
 }
 
 struct Manager(Arc<State>);
@@ -53,6 +58,10 @@ struct Manager(Arc<State>);
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Manager")]
 impl Manager {
     fn get_unit(&self, unit: &str) -> Result<OwnedObjectPath, ManagerError> {
+        if unit == "compositor.service" {
+            return if self.0.compositor_exists.load(Ordering::SeqCst) { Ok(OwnedObjectPath::try_from("/compositor").unwrap()) }
+                else { Err(ManagerError::NoSuchUnit("compositor is absent".into())) };
+        }
         if self.0.mode == Mode::InspectionDenied && self.0.starts.load(Ordering::SeqCst) > 0 {
             return Err(ManagerError::AccessDenied("inspection denied after acceptance".into()));
         }
@@ -63,10 +72,12 @@ impl Manager {
     }
 
     fn start_transient_unit(
-        &self, _unit: &str, _mode: &str, _properties: Vec<(String, OwnedValue)>,
+        &self, _unit: &str, _mode: &str, properties: Vec<(String, OwnedValue)>,
         _auxiliary: Vec<(String, Vec<(String, OwnedValue)>)>,
     ) -> Result<OwnedObjectPath, ManagerError> {
         self.0.starts.fetch_add(1, Ordering::SeqCst);
+        *self.0.dependencies.lock().unwrap() = properties.into_iter().map(|(name, _)| name)
+            .filter(|name| matches!(name.as_str(), "After" | "PartOf" | "Requisite")).collect();
         self.0.exists.store(self.0.mode != Mode::Denied, Ordering::SeqCst);
         match self.0.mode {
             Mode::Denied | Mode::PartialDenied => Err(ManagerError::AccessDenied("start denied".into())),
@@ -111,6 +122,20 @@ impl Service {
     }
 }
 
+struct Compositor(Arc<State>);
+
+#[zbus_macros::interface(name = "org.freedesktop.systemd1.Unit")]
+impl Compositor {
+    #[zbus(property, name = "InvocationID")]
+    fn invocation_id(&self) -> zbus::fdo::Result<Vec<u8>> {
+        if self.0.compositor_query_failed.load(Ordering::SeqCst) { return Err(zbus::fdo::Error::Failed("compositor query failed".into())); }
+        Ok(self.0.compositor_invocation.lock().unwrap().clone())
+    }
+
+    #[zbus(property)]
+    fn active_state(&self) -> String { self.0.compositor_active.lock().unwrap().clone() }
+}
+
 pub(super) struct Fixture {
     pub(super) manager: UserManager,
     pub(super) runtime: Runtime,
@@ -147,12 +172,16 @@ impl Fixture {
             native_unit: None, logout_command: Vec::new() };
         let app = register(&runtime, &provider, &request).await.unwrap();
         let state = Arc::new(State { unit: app.unit.clone(), mode, exists: AtomicBool::new(false),
-            starts: AtomicUsize::new(0), invocation_reads: AtomicUsize::new(0), unrefs: AtomicUsize::new(0) });
+            starts: AtomicUsize::new(0), invocation_reads: AtomicUsize::new(0), unrefs: AtomicUsize::new(0),
+            dependencies: Mutex::new(Vec::new()), compositor_exists: AtomicBool::new(true),
+            compositor_invocation: Mutex::new(vec![1; 16]), compositor_active: Mutex::new("active".into()),
+            compositor_query_failed: AtomicBool::new(false) });
         let shared = Arc::clone(&state);
         let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
                 .serve_at("/org/freedesktop/systemd1", Manager(Arc::clone(&shared))).unwrap()
+                .serve_at("/compositor", Compositor(Arc::clone(&shared))).unwrap()
                 .serve_at("/unit", Unit(Arc::clone(&shared))).unwrap()
                 .serve_at("/unit", Service(shared)).unwrap().build().await.unwrap()
         });

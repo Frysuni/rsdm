@@ -117,6 +117,11 @@ lifecycle probe as StatusDetails. Unavailable or unknown control returns
 infrastructure. This probe remains cancellable; teardown begins only after the
 actor accepts its result.
 
+New application units also probe current lifecycle control. If it is unavailable
+or unknown, they have no graphical target or anchor lifetime dependencies and
+receive the generation's private environment, while retaining the original
+provider identity. Existing units keep their passive dependencies.
+
 Preparation results include the application InvocationID, transaction, selected
 method, dispatch state, `clean`/`forced`/`cancelled`/`unknown` result and escalation
 flag. Retired app records remain visible for the current generation. `clean`

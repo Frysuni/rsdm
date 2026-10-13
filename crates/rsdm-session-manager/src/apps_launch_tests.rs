@@ -15,7 +15,7 @@ async fn attached_apps_keep_private_xsmp_and_have_no_graphical_lifetime_dependen
     record.exported_environment = vec![("SESSION_MANAGER".into(), "private-xsmp".into()), ("VALUE".into(), "default".into())];
     fixture.runtime.save_session(&record).unwrap();
     fixture.request.environment = vec![("SESSION_MANAGER".into(), "foreign-xsmp".into()), ("VALUE".into(), "caller".into())];
-    let properties = launch_properties(&fixture.runtime, "foreign-anchor.service", &fixture.request, &fixture.app, None).await.unwrap();
+    let properties = launch_properties(&fixture.manager, &fixture.runtime, "foreign-anchor.service", &fixture.request, &fixture.app, None).await.unwrap();
     assert!(properties.iter().all(|(name, _)| !matches!(*name, "After" | "PartOf" | "Requisite")));
     let value = properties.into_iter().find(|(name, _)| *name == "Environment").unwrap().1;
     let environment: Vec<String> = zbus::zvariant::OwnedValue::try_from(value).unwrap().try_into().unwrap();
@@ -25,10 +25,49 @@ async fn attached_apps_keep_private_xsmp_and_have_no_graphical_lifetime_dependen
 }
 
 #[tokio::test]
+async fn app_launch_detaches_lifetime_dependencies_when_compositor_control_is_lost() {
+    for case in ["replaced", "inactive", "missing", "unknown", "unverified", "unrecorded"] {
+        let fixture = Fixture::new(Mode::Accepted).await;
+        let mut record = fixture.runtime.session().unwrap();
+        record.compositor_unit = Some("compositor.service".into());
+        record.compositor_invocation = vec![1; 16];
+        match case {
+            "replaced" => *fixture.state.compositor_invocation.lock().unwrap() = vec![2; 16],
+            "inactive" => *fixture.state.compositor_active.lock().unwrap() = "inactive".into(),
+            "missing" => fixture.state.compositor_exists.store(false, Ordering::SeqCst),
+            "unknown" => fixture.state.compositor_query_failed.store(true, Ordering::SeqCst),
+            "unverified" => record.compositor_invocation.clear(),
+            "unrecorded" => record.compositor_unit = None,
+            _ => unreachable!(),
+        }
+        fixture.runtime.save_session(&record).unwrap();
+        fixture.launch().await.unwrap();
+        let dependencies = fixture.state.dependencies.lock().unwrap();
+        assert!(dependencies.is_empty(), "{case}: {dependencies:?}");
+        assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.runtime.session().unwrap().provider, "managed");
+    }
+}
+
+#[tokio::test]
+async fn app_launch_preserves_lifetime_dependencies_for_an_owned_active_compositor() {
+    for provider in ["managed", "niri", "external"] {
+        let fixture = Fixture::new(Mode::Accepted).await;
+        let mut record = fixture.runtime.session().unwrap();
+        record.provider = provider.into();
+        record.compositor_unit = Some("compositor.service".into());
+        record.compositor_invocation = vec![1; 16];
+        fixture.runtime.save_session(&record).unwrap();
+        fixture.launch().await.unwrap();
+        assert_eq!(*fixture.state.dependencies.lock().unwrap(), ["PartOf", "After", "Requisite"]);
+    }
+}
+
+#[tokio::test]
 async fn stop_hooks_preserve_the_coordinators_config_path_as_one_argument() {
     let fixture = Fixture::new(Mode::Accepted).await;
     let path = Path::new("/run/custom config/rsdm.toml");
-    let properties = launch_properties(&fixture.runtime, "anchor.service", &fixture.request, &fixture.app, Some(path)).await.unwrap();
+    let properties = launch_properties(&fixture.manager, &fixture.runtime, "anchor.service", &fixture.request, &fixture.app, Some(path)).await.unwrap();
     let value = properties.into_iter().find(|(name, _)| *name == "ExecStopEx").unwrap().1;
     let commands: Vec<(String, Vec<String>, Vec<String>)> = zbus::zvariant::OwnedValue::try_from(value).unwrap().try_into().unwrap();
     let (executable, argv, flags) = &commands[0];
@@ -43,7 +82,7 @@ async fn the_original_command_runs_after_origin_capture_with_literal_arguments()
     let mut fixture = Fixture::new(Mode::Accepted).await;
     fixture.request.argv.extend(["$HOME".into(), "".into(), "two words".into()]);
     let path = Path::new("/run/custom config/rsdm.toml");
-    let properties = launch_properties(&fixture.runtime, "anchor.service", &fixture.request, &fixture.app, Some(path)).await.unwrap();
+    let properties = launch_properties(&fixture.manager, &fixture.runtime, "anchor.service", &fixture.request, &fixture.app, Some(path)).await.unwrap();
     let value = properties.into_iter().find(|(name, _)| *name == "ExecStartEx").unwrap().1;
     let commands: Vec<(String, Vec<String>, Vec<String>)> = zbus::zvariant::OwnedValue::try_from(value).unwrap().try_into().unwrap();
     let (executable, argv, flags) = &commands[0];

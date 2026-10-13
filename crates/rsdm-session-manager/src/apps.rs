@@ -57,7 +57,7 @@ pub(super) async fn launch(
     manager: &UserManager, runtime: &Runtime, anchor: &str, request: &LaunchRequest, mut app: AppRecord,
     config_path: Option<&Path>,
 ) -> Result<String, SessionError> {
-    let properties = match launch_properties(runtime, anchor, request, &app, config_path).await {
+    let properties = match launch_properties(manager, runtime, anchor, request, &app, config_path).await {
         Ok(properties) => properties,
         Err(error) => return Err(rollback_launch(manager, runtime, &app, error).await),
     };
@@ -94,7 +94,7 @@ pub(super) async fn launch(
 }
 
 async fn launch_properties(
-    runtime: &Runtime, anchor: &str, request: &LaunchRequest, app: &AppRecord,
+    manager: &UserManager, runtime: &Runtime, anchor: &str, request: &LaunchRequest, app: &AppRecord,
     config_path: Option<&Path>,
 ) -> Result<UnitProperties, SessionError> {
     let mut environment = request.environment.clone();
@@ -102,7 +102,11 @@ async fn launch_properties(
     environment.push((GENERATION_ENV.into(), runtime.generation.clone()));
     let records = runtime.clone();
     let record = blocking(move || records.session()).await?;
-    if record.provider == "partial" {
+    let partial = if record.provider == "partial" { true } else {
+        let (_, lifecycle) = super::coordinator_status::lifecycle_capabilities(manager, &record).await;
+        lifecycle.state != "available"
+    };
+    if partial {
         for (name, value) in &record.exported_environment {
             if environment.iter().any(|(existing, _)| existing == name)
                 && !matches!(name.as_str(), "SESSION_MANAGER" | "ICEAUTHORITY" | "RSDM_SESSION_GENERATION" | "XDG_SESSION_ID")
@@ -112,7 +116,7 @@ async fn launch_properties(
         }
     }
     let mut properties = app_properties(&request.argv, &environment, Path::new(&request.directory), Some(anchor)).await?;
-    if record.provider == "partial" {
+    if partial {
         properties.retain(|(name, _)| !matches!(*name, "PartOf" | "After" | "Requisite"));
     }
     let executable = blocking(|| Ok(std::env::current_exe()?)).await?.to_string_lossy().into_owned();
