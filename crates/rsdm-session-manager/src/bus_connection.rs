@@ -133,19 +133,22 @@ impl Transport {
         if state.references.remove(unit).is_some() { state.revision += 1; }
     }
 
-    pub async fn update_activation(&self, pairs: &[(String, String)]) -> zbus::Result<()> {
+    pub async fn update_activation(&self, pairs: &[(String, String)], authorize: impl Future<Output = zbus::Result<()>>) -> zbus::Result<()> {
         let deadline = Instant::now() + Duration::from_secs(5);
         let _guard = self.acquire_connection_guard(deadline).await?;
-        {
-            let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
-            state.activation_environment.extend(pairs.iter().cloned());
-            state.revision += 1;
-        }
         let connection = self.connection();
         let values: BTreeMap<&str, &str> = pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
         tokio::select! {
             biased;
-            result = self.request(activation::update(&connection, values)) => result,
+            result = self.request(async {
+                authorize.await?;
+                {
+                    let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+                    state.activation_environment.extend(pairs.iter().cloned());
+                    state.revision += 1;
+                }
+                activation::update(&connection, values).await
+            }) => result,
             _ = tokio::time::sleep_until(deadline.into()) => {
                 Err(zbus::fdo::Error::TimedOut("activation environment update timed out".into()).into())
             },

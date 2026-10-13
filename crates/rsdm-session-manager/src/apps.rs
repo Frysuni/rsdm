@@ -258,6 +258,7 @@ pub(super) async fn finish(manager: &UserManager, runtime: &Runtime, app: &AppRe
         }
         app = current;
         if super::processes::verify_invocation(manager, &app).await? {
+            let manager = manager.with_owner(&app.unit, &app.invocation_id);
             manager.stop(&app.unit, Duration::from_secs(10)).await?;
             manager.unref(&app.unit).await?;
         }

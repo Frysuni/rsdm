@@ -216,6 +216,13 @@ async fn finish(
     for app in super::runtime::blocking(move || records.apps()).await? {
         if let Err(error) = apps::finish(&cleanup_manager, runtime, &app).await { failure.get_or_insert(error); }
     }
+    let manager = match &record.compositor_unit {
+        Some(unit) => manager.with_owner(unit, &record.compositor_invocation),
+        None => manager.clone(),
+    };
+    if let Some(unit) = &record.compositor_unit {
+        cleanup_manager = cleanup_manager.with_owner(unit, &record.compositor_invocation);
+    }
     if !provider.logout_command.is_empty() {
         if let Err(error) = run_logout_command(&cleanup_manager, record, provider, &directory).await { failure.get_or_insert(error); }
     }
@@ -226,8 +233,8 @@ async fn finish(
     }
     if let Err(error) = cleanup_manager.stop(&record.anchor_unit, Duration::from_secs(15)).await { failure.get_or_insert(error); }
     let _ = cleanup_manager.unref(&record.anchor_unit).await;
-    if let Err(error) = process.stop(manager, provider, &runtime.generation).await { failure.get_or_insert(error); }
-    if let Err(error) = env::clear_owned(manager, &record.exported_environment).await { failure.get_or_insert(error); }
+    if let Err(error) = process.stop(&manager, provider, &runtime.generation).await { failure.get_or_insert(error); }
+    if let Err(error) = env::clear_owned(&manager, &record.exported_environment).await { failure.get_or_insert(error); }
     let records = runtime.clone();
     if let Err(error) = super::runtime::blocking(move || records.reap_closed_app_locks()).await { failure.get_or_insert(error); }
     match failure { Some(error) => Err(error), None => Ok(()) }

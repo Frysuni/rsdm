@@ -15,6 +15,9 @@ mod transport;
 #[path = "bus_activation.rs"]
 mod activation;
 
+#[path = "bus_ownership.rs"]
+mod ownership;
+
 const DESTINATION: &str = "org.freedesktop.systemd1";
 const MANAGER_PATH: &str = "/org/freedesktop/systemd1";
 const MANAGER_INTERFACE: &str = "org.freedesktop.systemd1.Manager";
@@ -26,6 +29,7 @@ pub(super) struct UserManager {
     transport: transport::Transport,
     pub(super) deadline: Deadline,
     pub(super) actions: super::action_gate::ActionGate,
+    owner: Option<ownership::UnitOwner>,
 }
 
 impl UserManager {
@@ -48,7 +52,7 @@ impl UserManager {
         let setup = async {
             let connection = connection.await?;
             validate_connection(&connection).await?;
-            Ok(Self { transport: transport::Transport::new(connection), deadline: deadline.clone(), actions: Default::default() })
+            Ok(Self { transport: transport::Transport::new(connection), deadline: deadline.clone(), actions: Default::default(), owner: None })
         };
         deadline.bound(async {
             tokio::select! {
@@ -68,7 +72,7 @@ impl UserManager {
 
     #[cfg(test)]
     pub(super) fn with_connection(connection: Connection) -> Self {
-        Self { transport: transport::Transport::new(connection), deadline: Deadline::default(), actions: Default::default() }
+        Self { transport: transport::Transport::new(connection), deadline: Deadline::default(), actions: Default::default(), owner: None }
     }
 
     pub(super) fn connection(&self) -> Connection {
@@ -84,8 +88,8 @@ impl UserManager {
         // off the caller's stack instead of growing every enclosing future.
         self.actions.guard(self.deadline.bound(Box::pin(self.transport.request(async {
             self.actions.check_generation_async().await.map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
-            // The deadline can change while this request waits for a slot.
-            self.deadline.remaining(Duration::MAX)?;
+            // Ownership and the deadline can change while waiting for a slot.
+            self.check_owner().await?;
             operation.await
         })))).await.map_err(|error| zbus::Error::from(zbus::fdo::Error::Failed(error.to_string())))?
     }
@@ -177,7 +181,7 @@ impl UserManager {
     }
 
     pub(super) async fn update_activation(&self, pairs: &[(String, String)]) -> Result<(), SessionError> {
-        self.actions.guard(self.deadline.bound(self.transport.update_activation(pairs))).await?.map_err(Into::into)
+        self.actions.guard(self.deadline.bound(self.transport.update_activation(pairs, self.check_owner()))).await?.map_err(Into::into)
     }
 
     pub(super) async fn read<T, F, Fut>(&self, query: F) -> Result<T, SessionError>

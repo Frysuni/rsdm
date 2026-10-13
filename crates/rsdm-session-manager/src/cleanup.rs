@@ -103,6 +103,14 @@ async fn recover_infrastructure(
         failure.get_or_insert(error);
         return;
     }
+    let manager = match &record.compositor_unit {
+        Some(unit) => manager.with_owner(unit, &record.compositor_invocation),
+        None => manager.clone(),
+    };
+    let mut cleanup_manager = cleanup_manager.clone();
+    if let Some(unit) = &record.compositor_unit {
+        cleanup_manager = cleanup_manager.with_owner(unit, &record.compositor_invocation);
+    }
 
     let owns_environment = match cleanup_manager.environment().await {
         Ok(environment) => environment.contains(&format!("{GENERATION_ENV}={}", runtime.generation)),
@@ -116,7 +124,7 @@ async fn recover_infrastructure(
     if let Err(error) = cleanup_manager.stop(&record.anchor_unit, Duration::from_secs(15)).await { failure.get_or_insert(error); }
     let _ = cleanup_manager.unref(&record.anchor_unit).await;
     if let Some(unit) = record.compositor_unit.clone() {
-        if let Err(error) = super::processes::stop_invocation(manager, &unit, &record.compositor_invocation).await { failure.get_or_insert(error); }
+        if let Err(error) = super::processes::stop_invocation(&manager, &unit, &record.compositor_invocation).await { failure.get_or_insert(error); }
         if record.provider == "managed" { let _ = manager.unref(&unit).await; }
     }
     if owns_environment {

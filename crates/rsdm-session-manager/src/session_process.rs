@@ -99,12 +99,15 @@ impl SessionProcess {
                     self.invocation = super::processes::generation_invocation(manager, unit, generation).await?.unwrap_or_default();
                 }
                 super::processes::stop_invocation(manager, unit, &self.invocation).await?;
-                if provider.kind == ProviderKind::Managed { manager.unref(unit).await?; }
+                if provider.kind == ProviderKind::Managed { manager.with_owner(unit, &self.invocation).unref(unit).await?; }
                 Ok(())
             }.await;
             if let Err(error) = result { failure = Some(error); }
         }
         if let Some(child) = &self.child {
+            if let Some(unit) = &self.unit {
+                super::processes::verify_unit_invocation(manager, unit, &self.invocation).await?;
+            }
             let mut child = manager.actions.guard(child.lock()).await?;
             if let Err(error) = stop_launcher(&mut child, &manager.deadline, manager.actions.clone()).await {
                 failure.get_or_insert(error);

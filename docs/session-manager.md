@@ -105,8 +105,11 @@ is still active and remains unchanged through the query. A missing, stopped or
 reused invocation also reports `partial`; a failed or timed-out query reports
 unknown lifecycle capability with its reason. These probes only read state.
 When a compositor unit is recorded, logout and recovery verify its invocation
-before stopping shared graphical targets or the session anchor. An unverified
-or replaced invocation leaves that infrastructure untouched.
+before stopping shared graphical targets or the session anchor, and recheck it
+inside each request slot before sending teardown commands. This also guards
+reference release and environment cleanup. An unverified or replaced invocation
+leaves that infrastructure untouched. Application cleanup likewise rechecks
+its own invocation before sending StopUnit or releasing its reference.
 
 Preparation results include the application InvocationID, transaction, selected
 method, dispatch state, `clean`/`forced`/`cancelled`/`unknown` result and escalation
