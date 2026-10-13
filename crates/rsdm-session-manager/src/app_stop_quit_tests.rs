@@ -134,7 +134,7 @@ async fn attached_sessions_reject_missing_foreign_or_replaced_coordinator_owners
 #[tokio::test]
 async fn cancellation_during_window_discovery_prevents_term_fallback() {
     let control = Arc::new(ShutdownControl::default());
-    control.xsmp_units.set(Vec::new()).unwrap();
+    *control.xsmp_units.lock().unwrap() = Some(Vec::new());
     let fixture = Fixture::new(Some(control.clone())).await;
     fixture.save("managed", None);
     let socket = fixture.directory.join("sway.sock");

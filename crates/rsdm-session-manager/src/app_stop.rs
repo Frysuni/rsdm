@@ -1,7 +1,7 @@
 //! Application shutdown, shared by preflight and the ExecStop hook.
 
 use std::{
-    sync::{Arc, OnceLock, atomic::{AtomicBool, Ordering}},
+    sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}},
     time::Duration,
 };
 
@@ -26,7 +26,7 @@ pub(super) struct ShutdownControl {
     pub noncancelable: AtomicBool,
     pub hard_deadline: Deadline,
     pub recovery: AtomicBool,
-    xsmp_units: OnceLock<Vec<String>>,
+    xsmp_units: Mutex<Option<Vec<String>>>,
     pub(super) transaction_id: Option<String>,
 }
 
@@ -51,16 +51,7 @@ pub(super) use crate::app_result::Outcome as AppOutcome;
 pub(super) async fn prepare_apps(
     manager: &UserManager, runtime: &Runtime, apps: Vec<AppRecord>, control: Arc<ShutdownControl>,
 ) -> Result<Vec<String>, SessionError> {
-    let phase_manager = preparation_manager(manager, &control)?;
-    for app in &apps {
-        crate::app_result::begin(runtime, app, control.transaction_id.as_deref(), &phase_manager.deadline).await?;
-    }
-    let selected = prepare_xsmp(
-        &phase_manager, runtime, &apps.iter().map(|app| app.unit.clone()).collect::<Vec<_>>(), &control,
-    ).await?;
-    // Keep one protocol selection for the batch. Reissuing Prepare from each
-    // app worker could start a new save after the server already cancelled it.
-    let _ = control.xsmp_units.set(selected);
+    begin_batch(manager, runtime, &apps, &control).await?;
 
     let mut workers = tokio::task::JoinSet::new();
     for app in apps {
@@ -90,10 +81,29 @@ pub(super) async fn prepare_apps(
         }
     }
 
-    if let Some(error) = failure {
-        return Err(error);
-    }
+    if let Some(error) = failure { return Err(error); }
     Ok(forced)
+}
+
+async fn begin_batch(manager: &UserManager, runtime: &Runtime, apps: &[AppRecord], control: &ShutdownControl) -> Result<(), SessionError> {
+    let phase_manager = preparation_manager(manager, control)?;
+    for app in apps {
+        crate::app_result::begin(runtime, app, control.transaction_id.as_deref(), &phase_manager.deadline).await?;
+    }
+    let selected = prepare_xsmp(
+        &phase_manager, runtime, &apps.iter().map(|app| app.unit.clone()).collect::<Vec<_>>(), control,
+    ).await?;
+    // Keep one protocol selection for the batch. Reissuing Prepare from each
+    // app worker could start a new save after the server already cancelled it.
+    {
+        let mut selection = control.xsmp_units.lock().unwrap();
+        let units = selection.get_or_insert_with(Vec::new);
+        units.extend(selected);
+        units.sort();
+        units.dedup();
+    }
+
+    Ok(())
 }
 
 pub(super) async fn prepare_app(

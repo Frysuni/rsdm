@@ -134,13 +134,13 @@ class Session(dbus.service.Object):
     @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="ss", out_signature="v")
     def Get(self, interface, name):
         assert interface == SESSION
-        if name in ["User", "Id"]:
+        if name in ["User", "Id", "Type"]:
             return self.properties.Get(interface, name)
         raise dbus.exceptions.DBusException("unknown property")
 
     @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="s", out_signature="a{sv}")
     def GetAll(self, interface):
-        return {name: self.Get(interface, name) for name in ["User", "Id"]}
+        return {name: self.Get(interface, name) for name in ["User", "Id", "Type"]}
 
 
 DBusGMainLoop(set_as_default=True)

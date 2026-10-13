@@ -334,6 +334,14 @@ keeps observing the lifecycle. Native API rejection leaves the compositor alive
 and returns an error. A failed or uncertain native dispatch never starts generic
 preparation or a second power request as a fallback.
 
+An authoritative logind shutdown during native preflight or dispatch prepares
+ordinary `auto` apps left for desktop dialogs within the existing shortened
+budget. Earlier explicit preparation results and XSMP selections are retained;
+persisted dispatch prevents another close. A late native or power reply cannot
+clear that budget or resume ordinary operation. If logind revokes shutdown before
+infrastructure stop, further forced preparation is cancelled, including while a
+native reply is pending. The desktop still owns any native request already accepted.
+
 Before delegation, RSDM resolves the current unique bus owner and authenticates
 its UID, broker-provided ProcessFD and logind session. It rechecks that owner and
 login membership immediately before dispatch

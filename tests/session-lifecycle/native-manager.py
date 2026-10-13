@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 import dbus
 import dbus.service
@@ -45,6 +46,12 @@ class Manager(dbus.service.Object):
             )
         with (RUNTIME / "native-requests").open("a") as report:
             report.write(action + "\n")
+        if (RUNTIME / "native-reply-hold").exists():
+            deadline = time.monotonic() + 10
+            while not (RUNTIME / "native-reply-release").exists():
+                if time.monotonic() >= deadline:
+                    raise dbus.exceptions.DBusException("test native reply was not released", name="org.freedesktop.DBus.Error.TimedOut")
+                time.sleep(0.01)
 
     @dbus.service.method(GNOME, in_signature="", out_signature="b")
     def IsSessionRunning(self):

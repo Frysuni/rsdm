@@ -45,12 +45,16 @@ impl Coordinator {
     }
 
     async fn system_shutdown_cancelled(&mut self) -> Result<(), SessionError> {
-        if self.lifecycle.phase != SessionPhase::Preparing || self.action != "external-shutdown" {
+        let Some(control) = &self.shutdown else { return Ok(()); };
+        let native_pending = self.lifecycle.phase == SessionPhase::StoppingSession
+            && (self.provider.native_desktop() || self.provider.kind == super::provider::ProviderKind::Attached)
+            && (self.process.is_some() || self.provider.kind == super::provider::ProviderKind::Attached)
+            && control.noncancelable.load(Ordering::SeqCst);
+        if !native_pending && (self.lifecycle.phase != SessionPhase::Preparing || self.action != "external-shutdown") {
             return Ok(());
         }
-        let Some(control) = &self.shutdown else { return Ok(()); };
         // A caller cannot cancel an external shutdown. Logind itself can revoke
-        // it while application preparation still precedes infrastructure stop.
+        // it before infrastructure stop, including while native dispatch waits.
         control.noncancelable.store(false, Ordering::SeqCst);
         control.cancelled.store(true, Ordering::SeqCst);
         control.hard_deadline.set(0);

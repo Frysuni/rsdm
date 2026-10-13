@@ -27,10 +27,12 @@ in pkgs.testers.runNixOSTest {
     users.groups.alice = {};
     security.polkit.enable = true;
     security.pam.services.login.startSession = true;
-    environment.systemPackages = [ rsdm pkgs.coreutils pkgs.util-linux ];
+    environment.systemPackages = [ rsdm pkgs.coreutils pkgs.util-linux pkgs.dbus ];
     environment.etc."rsdm.toml".text = "";
   };
   testScript = ''
+    import tomllib
+
     start_all()
     machine.wait_for_unit("multi-user.target")
     machine.succeed("loginctl enable-linger alice")
@@ -102,5 +104,43 @@ in pkgs.testers.runNixOSTest {
         machine.succeed("test -e " + runtime + "/display-alive")
         machine.succeed(user + "systemctl --user stop rsdm-session-manager rsdm-test-unscoped-native")
         machine.succeed("systemctl stop rsdm-test-foreign-login")
+
+    with subtest("logind during a native reply prepares remaining auto apps and preserves the external WM"):
+        machine.succeed("rm -f " + runtime + "/native-* " + runtime + "/display-alive")
+        machine.succeed(user + "dbus-daemon --session --fork --nopidfile --address=unix:path=" + runtime + "/native-power-bus")
+        machine.succeed(user + "systemd-run --user --unit=rsdm-test-native-power --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtime + "/native-power-bus -- ${python}/bin/python3 ${./power-manager.py}")
+        machine.wait_for_file(runtime + "/power-manager-ready")
+        power = user + "busctl --address=unix:path=" + runtime + "/native-power-bus call org.freedesktop.login1 /org/freedesktop/login1 org.rsdm.TestPower "
+        native_control = control + "DBUS_SYSTEM_BUS_ADDRESS=unix:path=" + runtime + "/native-power-bus "
+        machine.succeed("systemd-run --unit=rsdm-test-native-attached" + settings + " --property=TTYPath=/dev/tty1 --setenv=DBUS_SYSTEM_BUS_ADDRESS=unix:path=" + runtime + "/native-power-bus -- ${native} GNOME")
+        machine.wait_for_file(runtime + "/native-manager-ready")
+        wm = machine.succeed("systemctl show rsdm-test-native-attached -p MainPID -p InvocationID")
+        environment = machine.succeed(user + "systemctl --user show-environment")
+        machine.succeed(native_control + "rsdm session attach")
+        assert "DBUS_SYSTEM_BUS_ADDRESS=unix:path=" + runtime + "/native-power-bus" in machine.succeed(user + "systemctl --user show rsdm-session-manager.service -p Environment --value")
+        generation = machine.succeed(native_control + "rsdm session status").split("generation ")[1].split(")")[0]
+        record_path = runtime + "/rsdm/sessions/" + generation + "/session.toml"
+        machine.succeed(native_control + "rsdm app --shutdown-timeout 1 -- ${autoApplication}")
+        machine.wait_for_file(runtime + "/native-auto-ready")
+        machine.succeed("touch " + runtime + "/native-reply-hold")
+        machine.succeed(native_control + "sh -c 'rsdm session stop > /run/user/1000/native-stop-result 2>&1 &'")
+        machine.wait_for_file(runtime + "/native-requests")
+        original_budget = tomllib.loads(machine.succeed("cat " + record_path))["shutdown_deadline_usec"]
+        machine.succeed(power + "Prepare b true")
+        machine.wait_until_succeeds("test \"$(sed -n 's/^shutdown_deadline_usec = //p' " + record_path + ")\" -lt " + str(original_budget))
+        budget = tomllib.loads(machine.succeed("cat " + record_path))["shutdown_deadline_usec"]
+        machine.succeed("touch " + runtime + "/native-reply-release")
+        machine.wait_for_file(runtime + "/native-auto-term")
+        machine.wait_until_fails(user + "busctl --user list | grep org.rsdm.Session1")
+        machine.wait_until_succeeds(power + "ReleasedGuards | grep '^u 1$'")
+        closed = tomllib.loads(machine.succeed("cat " + record_path))
+        assert closed["phase"] == "closed" and closed["shutdown_transaction"]["result"] == "prepared", closed
+        assert closed["shutdown_deadline_usec"] == budget and closed["shutdown_transaction"]["deadline_usec"] == budget
+        assert machine.succeed("cat " + runtime + "/native-requests") == "logout\n"
+        assert machine.succeed("systemctl show rsdm-test-native-attached -p MainPID -p InvocationID") == wm
+        assert machine.succeed(user + "systemctl --user show-environment") == environment
+        machine.succeed("test -e " + runtime + "/display-alive")
+        machine.fail("test -e " + runtime + "/power-requests")
+        machine.succeed("systemctl stop rsdm-test-native-attached")
   '';
 }

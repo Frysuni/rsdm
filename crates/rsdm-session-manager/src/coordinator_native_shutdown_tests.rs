@@ -4,6 +4,9 @@ use super::*;
 use crate::{app_result::Outcome, coordinator_preparation::prepare_applications,
     status::Capability};
 
+#[path = "coordinator_native_force_tests.rs"]
+mod force;
+
 #[derive(Debug, zbus_macros::DBusError)]
 #[zbus(prefix = "org.freedesktop.systemd1")]
 enum ManagerError { NoSuchUnit(String) }

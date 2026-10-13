@@ -35,8 +35,10 @@ impl Coordinator {
 
     pub(super) async fn attached_ready(&mut self, result: Result<Option<Scoped>, SessionError>, native: Option<Capability>) -> Result<(), SessionError> {
         if self.resume_if_cancelled().await? { return Ok(()); }
-        if self.action == "external-shutdown" { return self.begin_finish().await; }
         let native_preparation = native.as_ref().is_some_and(|capability| capability.state == "available");
+        if self.action == "external-shutdown" {
+            return if native_preparation { self.prepare_native_remainder().await } else { self.begin_finish().await };
+        }
         let unavailable_result = if native_preparation { "failed" } else { "prepared" };
         let unavailable_reason = if native_preparation {
             "native logout ownership changed before delegation; auto applications were left to the desktop"

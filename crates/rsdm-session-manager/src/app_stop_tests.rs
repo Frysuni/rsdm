@@ -6,6 +6,10 @@ use std::{
 };
 
 use super::*;
+
+#[cfg(feature = "xsmp")]
+#[path = "app_stop_batch_tests.rs"]
+mod batch;
 use rsdm_core::domain::ShutdownPolicy;
 use zbus::zvariant::OwnedObjectPath;
 
@@ -89,7 +93,7 @@ async fn waiting_for_an_app_does_not_hold_its_record_lease() {
     let manager = fixture.manager.clone();
     let unit = fixture.app.unit.clone();
     let control = Arc::new(ShutdownControl::default());
-    control.xsmp_units.set(vec![unit.clone()]).unwrap();
+    *control.xsmp_units.lock().unwrap() = Some(vec![unit.clone()]);
     let worker_control = control.clone();
     let worker = tokio::spawn(async move {
         prepare_app(&manager, &runtime, &unit, &worker_control).await
@@ -118,7 +122,7 @@ async fn waiting_for_an_app_does_not_hold_its_record_lease() {
 async fn resuming_a_deadline_without_dispatch_intent_keeps_the_budget_and_claims_quit() {
     let fixture = Fixture::new().await;
     let control = ShutdownControl::default();
-    control.xsmp_units.set(vec![fixture.app.unit.clone()]).unwrap();
+    *control.xsmp_units.lock().unwrap() = Some(vec![fixture.app.unit.clone()]);
     let (prepared, claimed) = claim_preparation(
         &fixture.runtime, &fixture.app.unit, &control, &Deadline::default(),
     ).await.unwrap();
@@ -160,7 +164,7 @@ async fn later_applications_are_prepared_while_the_first_four_still_run() {
     }
     let control = Arc::new(ShutdownControl::default());
     control.recovery.store(true, Ordering::SeqCst);
-    control.xsmp_units.set(apps.iter().map(|app| app.unit.clone()).collect()).unwrap();
+    *control.xsmp_units.lock().unwrap() = Some(apps.iter().map(|app| app.unit.clone()).collect());
     let manager = fixture.manager.clone();
     let runtime = fixture.runtime.clone();
     let worker_control = control.clone();

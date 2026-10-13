@@ -15,8 +15,9 @@ pub(super) async fn request_quit(manager: &UserManager, runtime: &Runtime, app: 
         return request_command(manager, runtime, app, control).await;
     }
     if app.policy.method != ShutdownMethod::Term {
-        let selected = match control.xsmp_units.get() {
-            Some(selected) => selected.clone(),
+        let selection = control.xsmp_units.lock().unwrap().clone();
+        let selected = match selection {
+            Some(selected) => selected,
             None => prepare_xsmp(manager, runtime, std::slice::from_ref(&app.unit), control).await?,
         };
         if selected.contains(&app.unit) {

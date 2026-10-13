@@ -78,7 +78,11 @@ impl Coordinator {
     pub async fn prepared(&mut self, result: Result<Vec<String>, SessionError>, native: Option<Capability>) -> Result<(), SessionError> {
         let control = self.shutdown.as_ref().expect("shutdown control");
         match result {
-            Ok(forced) => self.forced_units = forced,
+            Ok(forced) => {
+                self.forced_units.extend(forced);
+                self.forced_units.sort();
+                self.forced_units.dedup();
+            }
             Err(error) => {
                 tracing::error!(%error, "application preflight failed");
                 if !control.noncancelable.load(Ordering::SeqCst) {
@@ -88,7 +92,12 @@ impl Coordinator {
             }
         }
         if self.resume_if_cancelled().await? { return Ok(()); }
+        let forced = self.shutdown.as_ref().expect("shutdown control").noncancelable.load(Ordering::SeqCst);
         let native_available = native.as_ref().is_some_and(|capability| capability.state == "available");
+        if native_available && forced {
+            return self.prepare_native_remainder().await;
+        }
+        if forced { return self.begin_finish().await; }
         if self.provider.native_desktop() && self.action == "logout" && !native_available {
             let reason = native.as_ref().map_or("Native logout was not verified.", |capability| capability.reason.as_str());
             return self.resume("prepared", &format!("registered applications prepared; native logout unavailable: {reason}")).await;
@@ -97,16 +106,7 @@ impl Coordinator {
             return self.begin_native_shutdown().await;
         }
         if matches!(self.action.as_str(), "reboot" | "poweroff") {
-            self.lifecycle.phase = SessionPhase::StoppingSession;
-            let action = self.action.clone();
-            let events = self.events.clone();
-            self.workers += 1;
-            let manager = self.manager.clone();
-            tokio::spawn(async move {
-                let result = manager.actions.guard(manager.deadline.bound(rsdm_system::logind::request_direct(&action))).await
-                    .and_then(|result| result.map_err(SessionError::from));
-                let _ = events.send(Work::PowerRequested(result, native));
-            });
+            self.begin_power_request(native);
             return Ok(());
         }
         if self.provider.kind == super::provider::ProviderKind::Attached && self.action == "logout" {
@@ -116,7 +116,23 @@ impl Coordinator {
         self.begin_finish().await
     }
 
+    fn begin_power_request(&mut self, native: Option<Capability>) {
+        self.lifecycle.phase = SessionPhase::StoppingSession;
+        let action = self.action.clone();
+        let events = self.events.clone();
+        self.workers += 1;
+        let manager = self.manager.clone();
+        tokio::spawn(async move {
+            let result = manager.actions.guard(manager.deadline.bound(rsdm_system::logind::request_direct(&action))).await
+                .and_then(|result| result.map_err(SessionError::from));
+            let _ = events.send(Work::PowerRequested(result, native));
+        });
+    }
+
     pub async fn delegated(&mut self, result: Result<(), SessionError>) -> Result<(), SessionError> {
+        if self.shutdown.as_ref().is_some_and(|control| control.noncancelable.load(Ordering::SeqCst)) {
+            return self.prepare_native_remainder().await;
+        }
         if self.action == "external-shutdown" { return self.begin_finish().await; }
         match result {
             Ok(()) => self.resume("delegated", "native desktop manager owns its shutdown dialogs and completion").await,
@@ -129,7 +145,8 @@ impl Coordinator {
             Ok(()) if native.as_ref().is_some_and(|capability| capability.state != "available") =>
                 self.retain_session("logind accepted the power request").await,
             Ok(()) => self.begin_finish().await,
-            Err(error) if self.action == "external-shutdown" => {
+            Err(error) if self.action == "external-shutdown"
+                || self.shutdown.as_ref().is_some_and(|control| control.noncancelable.load(Ordering::SeqCst)) => {
                 tracing::warn!(%error, "power request failed while external shutdown is in progress");
                 self.begin_finish().await
             }
