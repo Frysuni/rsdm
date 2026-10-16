@@ -8,6 +8,8 @@ use std::{
 
 #[path = "support/terminal.rs"]
 mod terminal_output;
+#[path = "support/status.rs"]
+mod status;
 use terminal_output::{assert_only_styles, terminal};
 
 static SEQUENCE: AtomicUsize = AtomicUsize::new(0);

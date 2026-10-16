@@ -1,4 +1,10 @@
-use std::{path::Path, process::Command};
+use std::{
+    io::{self, Read},
+    os::{fd::OwnedFd, unix::net::UnixStream},
+    path::Path,
+    process::{Command, Stdio},
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use rsdm_infra::config::load_config;
@@ -34,10 +40,26 @@ pub fn run(path: &Path) -> Result<()> {
 }
 
 fn user_unit_state(unit: &str) -> String {
-    let output = Command::new("systemctl").args(["--user", "is-active", unit]).output();
-    let Ok(output) = output else { return "unavailable".to_string(); };
-    let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let Ok(state) = query_user_unit_state(unit) else { return "unavailable".to_string(); };
     if state.is_empty() { "unknown".to_string() } else { state }
+}
+
+fn query_user_unit_state(unit: &str) -> io::Result<String> {
+    let (reader, writer) = UnixStream::pair()?;
+    reader.set_nonblocking(true)?;
+    let mut command = Command::new("systemctl");
+    command.args(["--user", "is-active", unit])
+        .stdin(Stdio::null()).stdout(OwnedFd::from(writer)).stderr(Stdio::null());
+    rsdm_infra::unix::run_command_until(&mut command, Instant::now() + Duration::from_secs(5))?;
+    drop(command);
+
+    // ActiveState is a short scalar. Inherited stdout must not hold the report
+    // open after systemctl exits, and unexpected output must stay bounded.
+    let mut bytes = Vec::new();
+    if let Err(error) = reader.take(256).read_to_end(&mut bytes) {
+        if error.kind() != io::ErrorKind::WouldBlock { return Err(error); }
+    }
+    Ok(String::from_utf8_lossy(&bytes).trim().to_string())
 }
 
 const fn enabled(value: bool) -> &'static str {
