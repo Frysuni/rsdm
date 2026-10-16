@@ -24,7 +24,7 @@ pub async fn discover_system_getty(tty_path: &str) -> Option<Vec<String>> {
         .method_timeout(Duration::from_secs(5));
     let connection = tokio::time::timeout(Duration::from_secs(5), builder.build()).await.ok()?.ok()?;
     for unit in [format!("getty@{tty}.service"), "getty@.service".to_string()] {
-        let Some(argv) = query_exec_start(&connection, &unit, tty).await else {
+        let Some(argv) = query_exec_start(&connection, &unit).await else {
             continue;
         };
         if !argv.is_empty() {
@@ -35,7 +35,7 @@ pub async fn discover_system_getty(tty_path: &str) -> Option<Vec<String>> {
     None
 }
 
-async fn query_exec_start(connection: &Connection, unit: &str, tty: &str) -> Option<Vec<String>> {
+async fn query_exec_start(connection: &Connection, unit: &str) -> Option<Vec<String>> {
     let manager = Proxy::new(
         connection,
         "org.freedesktop.systemd1",
@@ -52,15 +52,9 @@ async fn query_exec_start(connection: &Connection, unit: &str, tty: &str) -> Opt
     )
     .await.ok()?;
     let commands: Vec<ExecCommand> = service.get_property("ExecStart").await.ok()?;
-    commands.into_iter().next().map(|(_, argv, _, _, _, _, _, _, _, _)| resolve_argv(&argv, tty))
-}
-
-fn resolve_argv(argv: &[String], tty: &str) -> Vec<String> {
-    argv.iter().map(|arg| substitute_specifiers(arg, tty)).collect()
-}
-
-fn substitute_specifiers(value: &str, tty: &str) -> String {
-    value.replace("%I", tty).replace("%%", "%")
+    // systemd already expanded unit specifiers while loading the command.
+    // Percent signs remaining in these arguments are literal data.
+    commands.into_iter().next().map(|(_, argv, ..)| argv)
 }
 
 #[cfg(test)]
@@ -86,7 +80,7 @@ mod tests {
     impl Getty {
         #[zbus(property)]
         fn exec_start(&self) -> Vec<SystemdExecStart> {
-            let argv = ["/sbin/agetty", "-o", "-p -- \\u", "", "tty3", "%"]
+            let argv = ["/sbin/agetty", "-o", "-p -- \\u", "", "tty3", "%", "%I", "%%"]
                 .into_iter().map(str::to_string).collect();
             vec![("/sbin/agetty".into(), argv, false, 1, 2, 3, 4, 1234, 1, 0)]
         }
@@ -105,27 +99,7 @@ mod tests {
         let _server = server.unwrap();
         let client = client.unwrap();
 
-        let argv = query_exec_start(&client, "getty@tty3.service", "tty3").await.unwrap();
-        assert_eq!(argv, ["/sbin/agetty", "-o", "-p -- \\u", "", "tty3", "%"]);
-    }
-
-    #[test]
-    fn substitutes_template_instance_without_retokenizing_argv() {
-        let argv = vec![
-            "/sbin/agetty".to_string(),
-            "-o".to_string(),
-            "-p -- \\u".to_string(),
-            "%I".to_string(),
-        ];
-        assert_eq!(
-            resolve_argv(&argv, "tty3"),
-            vec!["/sbin/agetty", "-o", "-p -- \\u", "tty3"]
-        );
-    }
-
-    #[test]
-    fn preserves_typed_empty_and_percent_arguments() {
-        let argv = vec!["agetty".to_string(), String::new(), "%%".to_string()];
-        assert_eq!(resolve_argv(&argv, "tty1"), vec!["agetty", "", "%"]);
+        let argv = query_exec_start(&client, "getty@tty3.service").await.unwrap();
+        assert_eq!(argv, ["/sbin/agetty", "-o", "-p -- \\u", "", "tty3", "%", "%I", "%%"]);
     }
 }
