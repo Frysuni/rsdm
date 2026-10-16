@@ -19,6 +19,9 @@ let
     echo "$$" > "$XDG_RUNTIME_DIR/dm-app-ready"
     while :; do sleep 1; done
   '';
+  fallbackGetty = pkgs.writeShellScript "test-fallback-getty" ''
+    printf '%s\n' "$@" > /tmp/rsdm-fallback-arguments
+  '';
 in
 pkgs.testers.runNixOSTest {
   name = "rsdm-dm-lifecycle";
@@ -46,6 +49,28 @@ pkgs.testers.runNixOSTest {
     environment.etc."sway/config".text = ''
       output * bg #ff00ff solid_color
       exec ${rsdm}/bin/rsdm session finalize SWAYSOCK
+    '';
+    systemd.services."getty@tty63" = {
+      overrideStrategy = "asDropin";
+      serviceConfig = {
+        Type = "oneshot";
+        Restart = "no";
+        RemainAfterExit = true;
+        ExecStart = [ "" "${fallbackGetty} \"quoted value\" \"\" %%I %%%% %I" ];
+      };
+    };
+    environment.etc."rsdm-fallback.toml".text = ''
+      [session_manager]
+      enabled = false
+      [dm]
+      session_dirs = ["/run/rsdm-empty-sessions"]
+      [dm.tty]
+      path = "/dev/tty63"
+      [dm.fallback]
+      enabled = true
+      command = []
+      [security]
+      deny_root = false
     '';
     specialisation.updated.configuration.environment.etc."rsdm-switch-probe".text = "updated";
   };
@@ -144,5 +169,16 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds("journalctl --no-pager -u rsdm | grep 'display manager initialized' | test $(wc -l) -ge 2")
         machine.wait_for_unit("rsdm.service")
         machine.fail("journalctl --no-pager -b | grep 'session recovery exited with'")
+
+    with subtest("TTY fallback preserves the arguments executed by systemd"):
+        machine.succeed("mkdir /run/rsdm-empty-sessions")
+        machine.succeed("systemctl start getty@tty63.service")
+        expected = machine.succeed("cat /tmp/rsdm-fallback-arguments")
+        assert expected == "quoted value\n\n%I\n%%\ntty63\n"
+        machine.succeed("rm /tmp/rsdm-fallback-arguments")
+        machine.succeed("systemd-run --unit=rsdm-test-fallback --collect -- ${rsdm}/bin/rsdm --config /etc/rsdm-fallback.toml dm")
+        machine.wait_for_file("/tmp/rsdm-fallback-arguments")
+        machine.wait_until_fails("systemctl is-active --quiet rsdm-test-fallback.service")
+        assert machine.succeed("cat /tmp/rsdm-fallback-arguments") == expected
   '';
 }
