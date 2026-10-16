@@ -54,7 +54,7 @@ impl SessionDiscoverer for DesktopSessionDiscoverer {
                 if !seen_ids.insert(id) {
                     continue;
                 }
-                let Some(session) = parse_session_file(&path)? else {
+                let Some(session) = parse_session_file(&path) else {
                     continue;
                 };
                 tracing::debug!(
@@ -99,16 +99,16 @@ fn desktop_files(dir: &Path) -> Result<Vec<PathBuf>, SessionDiscoveryError> {
     Ok(files)
 }
 
-fn parse_session_file(path: &Path) -> Result<Option<Session>, SessionDiscoveryError> {
+fn parse_session_file(path: &Path) -> Option<Session> {
     let Ok(text) = fs::read_to_string(path) else {
         tracing::debug!(path = %path.display(), "failed to read desktop session file; skipping");
-        return Ok(None);
+        return None;
     };
     let entry = match parse_desktop_entry(&text) {
         Ok(entry) => entry,
         Err(error) => {
             tracing::debug!(path = %path.display(), %error, "failed to parse desktop session file; skipping");
-            return Ok(None);
+            return None;
         }
     };
     if let Some(try_exec) = &entry.try_exec
@@ -119,14 +119,14 @@ fn parse_session_file(path: &Path) -> Result<Option<Session>, SessionDiscoveryEr
             %try_exec,
             "desktop session TryExec is unavailable; skipping"
         );
-        return Ok(None);
+        return None;
     }
     let Some(id) = session_id(path) else {
         tracing::debug!(path = %path.display(), "desktop session file has no valid id; skipping");
-        return Ok(None);
+        return None;
     };
 
-    Ok(entry.to_session(&id, &path.display().to_string()))
+    entry.to_session(&id, &path.display().to_string())
 }
 
 fn session_id(path: &Path) -> Option<String> {
