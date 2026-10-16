@@ -121,7 +121,7 @@ fn decode_payload(payload: &[u8]) -> io::Result<Frame> {
     let (&tag, mut rest) = payload
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "empty authentication frame"))?;
-    match tag {
+    let frame = match tag {
         1 => Ok(Frame::Start {
             username: take_text(&mut rest, MAX_USERNAME_BYTES, "username")?,
             service: take_text(&mut rest, MAX_SERVICE_BYTES, "PAM service")?,
@@ -145,13 +145,9 @@ fn decode_payload(payload: &[u8]) -> io::Result<Frame> {
                 1 => Some(take_text(&mut rest, MAX_PASSWORD_BYTES, "PAM answer")?),
                 _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid PAM answer flag")),
             };
-            ensure_empty(rest)?;
             Ok(Frame::Answer(answer))
         }
-        4 => {
-            ensure_empty(rest)?;
-            Ok(Frame::Cancel)
-        }
+        4 => Ok(Frame::Cancel),
         5 => {
             let (&success, tail) = rest
                 .split_first()
@@ -163,7 +159,9 @@ fn decode_payload(payload: &[u8]) -> io::Result<Frame> {
             Ok(Frame::Finished { success: success == 1, message: take_text(&mut rest, MAX_TEXT_BYTES, "authentication result")? })
         }
         _ => Err(io::Error::new(io::ErrorKind::InvalidData, "unknown authentication frame")),
-    }
+    }?;
+    ensure_empty(rest)?;
+    Ok(frame)
 }
 
 fn put_text(payload: &mut Vec<u8>, text: &str) -> io::Result<()> {
@@ -185,10 +183,12 @@ fn take_text(rest: &mut &[u8], maximum: usize, name: &str) -> io::Result<String>
         return Err(io::Error::new(io::ErrorKind::InvalidData, format!("invalid {name} length")));
     }
     let text = std::str::from_utf8(&rest[..length])
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, format!("invalid {name}")))?
-        .to_string();
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, format!("invalid {name}")))?;
+    if text.as_bytes().contains(&0) {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("invalid {name}")));
+    }
     *rest = &rest[length..];
-    Ok(text)
+    Ok(text.to_string())
 }
 
 fn validate_text(text: &str, maximum: usize, name: &str) -> io::Result<()> {
@@ -222,32 +222,5 @@ fn parse_style(style: u8) -> io::Result<AuthMessageStyle> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn start_frame_round_trips_with_bounded_secret() {
-        let secret = PasswordSecret::new("correct horse battery staple");
-        let encoded = encode_start("alice", "login", &secret).unwrap();
-        let mut stream = &encoded[..];
-        assert!(matches!(read_frame(&mut stream), Ok(Frame::Start { username, service, password }) if username == "alice" && service == "login" && password == "correct horse battery staple"));
-    }
-
-    #[test]
-    fn malformed_frame_is_rejected_before_allocation() {
-        let mut bytes = (u32::MAX).to_be_bytes().to_vec();
-        bytes.extend_from_slice(&[1, 2, 3]);
-        assert!(read_frame(&mut &bytes[..]).is_err());
-    }
-
-    #[test]
-    fn partial_frames_wait_for_more_bytes() {
-        let mut encoded = Vec::new();
-        write_frame(&mut encoded, &Frame::Cancel).unwrap();
-        let split = encoded.len() - 1;
-        let mut buffer = encoded[..split].to_vec();
-        assert!(take_frames(&mut buffer).unwrap().is_empty());
-        buffer.push(encoded[split]);
-        assert!(matches!(take_frames(&mut buffer).unwrap().as_slice(), [Frame::Cancel]));
-    }
-}
+#[path = "auth_protocol_tests.rs"]
+mod tests;
