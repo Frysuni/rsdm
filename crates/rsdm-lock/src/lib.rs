@@ -1,7 +1,9 @@
 //! Wayland session locker using the shared rsdm UI.
 
 mod auth;
+mod auth_exchange;
 mod auth_helper;
+mod auth_process;
 mod auth_protocol;
 mod model;
 mod render;
