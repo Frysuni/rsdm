@@ -21,7 +21,7 @@ pub(super) fn read_exact(fd: c_int, buffer: &mut [u8]) -> io::Result<()> {
 pub(super) fn read_exact_until(fd: c_int, buffer: &mut [u8], deadline: Instant) -> io::Result<()> {
     let mut filled = 0;
     while filled < buffer.len() {
-        wait_for_data_until(fd, deadline)?;
+        wait_for_ready(fd, libc::POLLIN, Some(deadline))?;
         // SAFETY: the unfilled tail is a valid writable slice.
         let read = unsafe {
             libc::read(fd, buffer[filled..].as_mut_ptr().cast(), buffer.len() - filled)
@@ -37,24 +37,24 @@ pub(super) fn read_exact_until(fd: c_int, buffer: &mut [u8], deadline: Instant) 
     Ok(())
 }
 
-fn wait_for_data_until(fd: c_int, deadline: Instant) -> io::Result<()> {
-    let mut poll = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+fn wait_for_ready(fd: c_int, events: libc::c_short, deadline: Option<Instant>) -> io::Result<()> {
+    let mut poll = libc::pollfd { fd, events, revents: 0 };
     loop {
         if super::shutdown::terminate_requested() {
             return Err(io::ErrorKind::Interrupted.into());
         }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
+        let remaining = deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
+        if remaining.is_some_and(|remaining| remaining.is_zero()) {
             return Err(io::ErrorKind::TimedOut.into());
         }
-        let timeout = remaining.as_millis().min(200) as libc::c_int;
+        let timeout = remaining.map_or(200, |remaining| remaining.as_millis().min(200) as libc::c_int);
         // SAFETY: poll references one initialized entry; the timeout avoids a
         // lost SIGTERM immediately before the blocking call starts.
         let result = unsafe { libc::poll(&mut poll, 1, timeout.max(1)) };
         if result > 0 {
             return Ok(());
         }
-        if result == 0 && Instant::now() >= deadline {
+        if result == 0 && deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             return Err(io::ErrorKind::TimedOut.into());
         }
         if result < 0 && io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
@@ -64,17 +64,30 @@ fn wait_for_data_until(fd: c_int, deadline: Instant) -> io::Result<()> {
 }
 
 pub(super) fn write_frame(fd: c_int, bytes: &[u8]) -> io::Result<()> {
+    write_bytes(fd, bytes, None)
+}
+
+pub(super) fn write_frame_until(fd: c_int, bytes: &[u8], deadline: Instant) -> io::Result<()> {
+    write_bytes(fd, bytes, Some(deadline))
+}
+
+fn write_bytes(fd: c_int, bytes: &[u8], deadline: Option<Instant>) -> io::Result<()> {
     let mut written = 0;
     while written < bytes.len() {
+        wait_for_ready(fd, libc::POLLOUT, deadline)?;
+        // Session-leader writers are nonblocking, so a partial write cannot
+        // escape the readiness check's deadline or termination handling.
         // SAFETY: bytes is a valid readable slice until write returns.
         let wrote = unsafe {
             libc::write(fd, bytes[written..].as_ptr().cast(), bytes.len() - written)
         };
         if wrote > 0 {
             written += wrote as usize;
+        } else if wrote == 0 {
+            return Err(io::ErrorKind::WriteZero.into());
         } else {
             let error = io::Error::last_os_error();
-            if wrote < 0 && error.kind() == io::ErrorKind::Interrupted {
+            if matches!(error.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock) {
                 continue;
             }
             return Err(error);
@@ -82,3 +95,7 @@ pub(super) fn write_frame(fd: c_int, bytes: &[u8]) -> io::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "session_pipe_tests.rs"]
+mod tests;

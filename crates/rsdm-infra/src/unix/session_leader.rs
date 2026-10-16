@@ -233,12 +233,21 @@ fn terminate(pid: libc::pid_t) {
 }
 
 /// `pipe2(O_CLOEXEC)` as `(read, write)`. O_CLOEXEC keeps both handshake pipes
-/// from leaking into the compositor the child execs further down.
+/// from leaking into the compositor the child execs further down. Writers are
+/// nonblocking so session_pipe can enforce cancellation and deadlines.
 fn pipe() -> Option<(c_int, c_int)> {
     let mut fds: [c_int; 2] = [0; 2];
     // SAFETY: pipe2 fills a valid two-element array.
     if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
         tracing::error!(error = %io::Error::last_os_error(), "pipe2 for the session leader failed");
+        return None;
+    }
+    // SAFETY: the new write endpoint is owned here and has no other mutable
+    // status flags. Readers remain blocking for the terminal-release gate.
+    if unsafe { libc::fcntl(fds[1], libc::F_SETFL, libc::O_NONBLOCK) } < 0 {
+        tracing::error!(error = %io::Error::last_os_error(), "could not make session leader pipe writes nonblocking");
+        // SAFETY: both new descriptors are still owned here.
+        unsafe { libc::close(fds[0]); libc::close(fds[1]); }
         return None;
     }
     Some((fds[0], fds[1]))

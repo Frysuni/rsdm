@@ -12,7 +12,7 @@ use rsdm_core::{
 };
 use zeroize::Zeroizing;
 
-use super::session_pipe::{read_exact, read_exact_until, read_frame, read_frame_until, write_frame};
+use super::session_pipe::{read_exact, read_exact_until, read_frame, read_frame_until, write_frame, write_frame_until};
 
 const SECRET_TAG: u8 = 8;
 const VISIBLE_TAG: u8 = 9;
@@ -37,7 +37,7 @@ impl AuthConversation for LeaderConversation {
             AuthMessageStyle::Info => INFO_TAG,
             AuthMessageStyle::Error => ERROR_TAG,
         };
-        send_text(self.report.as_raw_fd(), tag, message.text.as_bytes()).map_err(conversation_error)?;
+        send_text(self.report.as_raw_fd(), tag, message.text.as_bytes(), None).map_err(conversation_error)?;
         if matches!(message.style, AuthMessageStyle::Info | AuthMessageStyle::Error) {
             return Ok(None);
         }
@@ -54,7 +54,7 @@ impl AuthConversation for LeaderConversation {
 
     fn account_name(&mut self, username: &str) -> Result<(), AuthError> {
         validate_account(username).map_err(conversation_error)?;
-        send_text(self.report.as_raw_fd(), ACCOUNT_TAG, username.as_bytes()).map_err(conversation_error)?;
+        send_text(self.report.as_raw_fd(), ACCOUNT_TAG, username.as_bytes(), None).map_err(conversation_error)?;
         match read_frame(self.reply.as_raw_fd()) {
             Some([ACCOUNT_ACCEPTED_TAG, 0, 0, 0, 0]) => Ok(()),
             _ => Err(AuthError::AccountDenied),
@@ -96,7 +96,7 @@ pub(super) fn read_auth_report(
         };
         if matches!(style, AuthMessageStyle::Secret | AuthMessageStyle::Visible) {
             cancelled |= !matches!(&answer, Ok(Some(_)));
-            send_answer(reply_fd, answer).ok()?;
+            send_answer(reply_fd, answer, deadline).ok()?;
         } else if answer.is_err() && !cancelled {
             return None;
         }
@@ -116,7 +116,7 @@ fn receive_account(
     // let an accepted mapping undo conversation cancellation.
     *cancelled |= conversation.account_name(username).is_err();
     let tag = if *cancelled { CANCEL_TAG } else { ACCOUNT_ACCEPTED_TAG };
-    write_frame(reply_fd, &[tag, 0, 0, 0, 0])
+    write_frame_until(reply_fd, &[tag, 0, 0, 0, 0], deadline)
 }
 
 fn validate_account(username: &str) -> io::Result<()> {
@@ -126,20 +126,26 @@ fn validate_account(username: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn send_answer(fd: i32, answer: Result<Option<PasswordSecret>, AuthError>) -> io::Result<()> {
+fn send_answer(fd: i32, answer: Result<Option<PasswordSecret>, AuthError>, deadline: Instant) -> io::Result<()> {
     match answer {
-        Ok(Some(answer)) => send_text(fd, ANSWER_TAG, answer.expose_secret().as_bytes()),
-        _ => write_frame(fd, &[CANCEL_TAG, 0, 0, 0, 0]),
+        Ok(Some(answer)) => send_text(fd, ANSWER_TAG, answer.expose_secret().as_bytes(), Some(deadline)),
+        _ => write_frame_until(fd, &[CANCEL_TAG, 0, 0, 0, 0], deadline),
     }
 }
 
-fn send_text(fd: i32, tag: u8, text: &[u8]) -> io::Result<()> {
+fn send_text(fd: i32, tag: u8, text: &[u8], deadline: Option<Instant>) -> io::Result<()> {
     if text.len() > MAX_PASSWORD_BYTES {
         return Err(io::ErrorKind::InvalidData.into());
     }
     let length = (text.len() as u32).to_le_bytes();
-    write_frame(fd, &[tag, length[0], length[1], length[2], length[3]])?;
-    write_frame(fd, text)
+    let header = [tag, length[0], length[1], length[2], length[3]];
+    for bytes in [header.as_slice(), text] {
+        match deadline {
+            Some(deadline) => write_frame_until(fd, bytes, deadline)?,
+            None => write_frame(fd, bytes)?,
+        }
+    }
+    Ok(())
 }
 
 fn read_text(fd: i32, frame: [u8; 5]) -> io::Result<Zeroizing<Vec<u8>>> {
@@ -167,132 +173,5 @@ fn conversation_error(error: io::Error) -> AuthError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::{os::unix::net::UnixStream, time::Duration};
-
-    fn deadline() -> Instant {
-        Instant::now() + Duration::from_secs(1)
-    }
-
-    #[derive(Debug)]
-    struct Cancel;
-
-    impl AuthConversation for Cancel {
-        fn respond(&mut self, _: AuthMessage) -> Result<Option<PasswordSecret>, AuthError> {
-            Err(AuthError::InvalidCredentials)
-        }
-    }
-
-    #[test]
-    fn cancelled_conversation_cannot_authorize_a_session() {
-        let (report, child_report) = UnixStream::pair().unwrap();
-        let (reply, child_reply) = UnixStream::pair().unwrap();
-        send_text(child_report.as_raw_fd(), SECRET_TAG, b"OTP:").unwrap();
-        write_frame(child_report.as_raw_fd(), &[super::super::session_report::AUTHORIZED_TAG, 0, 0, 0, 0]).unwrap();
-        assert_eq!(read_auth_report(report.as_raw_fd(), reply.as_raw_fd(), &mut Cancel, deadline()),
-            Some(super::super::session_report::LeaderReport::AuthFailed.encode()));
-        assert_eq!(read_frame(child_reply.as_raw_fd()).unwrap(), [CANCEL_TAG, 0, 0, 0, 0]);
-    }
-
-    #[test]
-    fn oversized_messages_are_rejected_before_reading_or_writing() {
-        assert_eq!(send_text(-1, SECRET_TAG, &vec![0; MAX_PASSWORD_BYTES + 1]).unwrap_err().kind(), io::ErrorKind::InvalidData);
-        let length = (MAX_PASSWORD_BYTES as u32 + 1).to_le_bytes();
-        let frame = [ANSWER_TAG, length[0], length[1], length[2], length[3]];
-        assert_eq!(read_text(-1, frame).unwrap_err().kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn authorization_wait_expires_without_a_child_frame() {
-        let (report, _child_report) = UnixStream::pair().unwrap();
-        let (reply, _child_reply) = UnixStream::pair().unwrap();
-        let started = Instant::now();
-        assert!(read_auth_report(
-            report.as_raw_fd(),
-            reply.as_raw_fd(),
-            &mut Cancel,
-            started + Duration::from_millis(20),
-        ).is_none());
-        assert!(started.elapsed() < Duration::from_secs(1));
-    }
-
-    #[derive(Debug, Default)]
-    struct AccountConversation {
-        accounts: Vec<String>,
-        denied: bool,
-    }
-
-    impl AuthConversation for AccountConversation {
-        fn respond(&mut self, _: AuthMessage) -> Result<Option<PasswordSecret>, AuthError> {
-            Err(AuthError::InvalidCredentials)
-        }
-
-        fn account_name(&mut self, username: &str) -> Result<(), AuthError> {
-            self.accounts.push(username.to_string());
-            if self.denied { return Err(AuthError::AccountDenied); }
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn canonical_account_is_acknowledged_before_session_authorization() {
-        for denied in [false, true] {
-            let (report, child_report) = UnixStream::pair().unwrap();
-            let (reply, child_reply) = UnixStream::pair().unwrap();
-            let child = std::thread::spawn(move || {
-                let mut conversation = LeaderConversation { report: child_report.into(), reply: child_reply.into() };
-                let result = conversation.account_name("alice");
-                assert_eq!(result.is_err(), denied);
-                // Even a malformed child cannot bypass a denied account by
-                // claiming authorization after the parent rejected its name.
-                write_frame(conversation.report.as_raw_fd(), &[super::super::session_report::AUTHORIZED_TAG, 0, 0, 0, 0]).unwrap();
-            });
-            let mut conversation = AccountConversation { denied, ..Default::default() };
-            let result = read_auth_report(report.as_raw_fd(), reply.as_raw_fd(), &mut conversation, deadline()).unwrap();
-            child.join().unwrap();
-            assert_eq!(conversation.accounts, ["alice"]);
-            let expected = if denied { super::super::session_report::LeaderReport::AuthFailed.encode() }
-                else { [super::super::session_report::AUTHORIZED_TAG, 0, 0, 0, 0] };
-            assert_eq!(result, expected);
-        }
-    }
-
-    #[test]
-    fn account_mapping_after_cancellation_does_not_allow_a_session() {
-        let (report, child_report) = UnixStream::pair().unwrap();
-        let (reply, child_reply) = UnixStream::pair().unwrap();
-        send_text(child_report.as_raw_fd(), SECRET_TAG, b"OTP:").unwrap();
-        send_text(child_report.as_raw_fd(), ACCOUNT_TAG, b"alice").unwrap();
-        write_frame(child_report.as_raw_fd(), &[super::super::session_report::AUTHORIZED_TAG, 0, 0, 0, 0]).unwrap();
-        let mut conversation = AccountConversation::default();
-        assert_eq!(read_auth_report(report.as_raw_fd(), reply.as_raw_fd(), &mut conversation, deadline()),
-            Some(super::super::session_report::LeaderReport::AuthFailed.encode()));
-        assert_eq!(conversation.accounts, ["alice"]);
-        for _ in 0..2 { assert_eq!(read_frame(child_reply.as_raw_fd()).unwrap(), [CANCEL_TAG, 0, 0, 0, 0]); }
-    }
-
-    #[test]
-    fn invalid_account_reports_are_rejected() {
-        for username in [String::new(), "a\0b".into(), "a".repeat(MAX_USERNAME_BYTES + 1)] {
-            assert_eq!(validate_account(&username).unwrap_err().kind(), io::ErrorKind::InvalidData);
-        }
-        let length = (MAX_USERNAME_BYTES as u32 + 1).to_le_bytes();
-        let frame = [ACCOUNT_TAG, length[0], length[1], length[2], length[3]];
-        let error = receive_account(-1, -1, frame, &mut AccountConversation::default(), &mut false, deadline()).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn failed_authentication_reports_its_mapped_account() {
-        let (report, child_report) = UnixStream::pair().unwrap();
-        let (reply, child_reply) = UnixStream::pair().unwrap();
-        send_text(child_report.as_raw_fd(), ACCOUNT_TAG, b"alice").unwrap();
-        let failure = super::super::session_report::LeaderReport::AuthFailed.encode();
-        write_frame(child_report.as_raw_fd(), &failure).unwrap();
-        let mut conversation = AccountConversation::default();
-        assert_eq!(read_auth_report(report.as_raw_fd(), reply.as_raw_fd(), &mut conversation, deadline()), Some(failure));
-        assert_eq!(conversation.accounts, ["alice"]);
-        assert_eq!(read_frame(child_reply.as_raw_fd()).unwrap(), [ACCOUNT_ACCEPTED_TAG, 0, 0, 0, 0]);
-    }
-}
+#[path = "session_conversation_tests.rs"]
+mod tests;
