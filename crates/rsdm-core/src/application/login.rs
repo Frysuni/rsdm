@@ -23,23 +23,11 @@ pub struct LoginUseCase<'a> {
 
 impl LoginUseCase<'_> {
     pub fn execute(&self, mut request: LoginRequest<'_>) -> Result<LoginResult, LoginError> {
-        let authenticated = AuthenticateUser {
-            auth: self.auth,
-            resolver: self.resolver,
-            limiter: self.limiter,
-            audit: self.audit,
-        }
-        .execute(request.auth_request());
+        let authenticated = self.authenticate(request.auth_request());
         request.password.zeroize();
         let mut authenticated = authenticated?;
 
-        let started = StartUserSession {
-            resolver: self.resolver,
-            launcher: self.launcher,
-            audit: self.audit,
-            gate: self.gate,
-        }
-        .execute(&authenticated, &request);
+        let started = self.start_session(&authenticated, &request);
 
         let mut running = None;
         let mut launched_user = None;
@@ -54,7 +42,7 @@ impl LoginUseCase<'_> {
             }
             Err(error) => Err(error),
         };
-        let close_result = ReturnToGreeterAfterSessionExit.execute(&mut authenticated);
+        let close_result = authenticated.pam_session.close().map_err(LoginError::from);
         self.audit_cleanup(launched_user.as_ref(), request.session, &cleanup_result, &close_result);
         // The shutdown inhibitor belongs to the running handle, including on
         // wait/cleanup errors. Release it only after PAM has closed.
@@ -90,17 +78,8 @@ impl LoginUseCase<'_> {
         };
         self.audit.session_cleanup_finished(user, session, error.as_deref());
     }
-}
 
-struct AuthenticateUser<'a> {
-    auth: &'a dyn AuthProvider,
-    resolver: &'a dyn UserResolver,
-    limiter: &'a dyn LoginAttemptLimiter,
-    audit: &'a dyn AuditLogger,
-}
-
-impl AuthenticateUser<'_> {
-    fn execute(&self, request: AuthRequest<'_>) -> Result<AuthenticatedSession, LoginError> {
+    fn authenticate(&self, request: AuthRequest<'_>) -> Result<AuthenticatedSession, LoginError> {
         let limiter_username = self.resolver.canonical_username(request.username)
             .unwrap_or_else(|_| request.username.to_string());
         self.limiter.check_allowed(&limiter_username)?;
@@ -118,17 +97,8 @@ impl AuthenticateUser<'_> {
             }
         }
     }
-}
 
-struct StartUserSession<'a> {
-    resolver: &'a dyn UserResolver,
-    launcher: &'a dyn SessionLauncher,
-    audit: &'a dyn AuditLogger,
-    gate: Option<&'a dyn SessionGate>,
-}
-
-impl StartUserSession<'_> {
-    fn execute(
+    fn start_session(
         &self,
         authenticated: &AuthenticatedSession,
         request: &LoginRequest<'_>,
@@ -149,15 +119,6 @@ impl StartUserSession<'_> {
         })?;
         self.audit.session_started(&user, request.session);
         Ok((running, user))
-    }
-}
-
-struct ReturnToGreeterAfterSessionExit;
-
-impl ReturnToGreeterAfterSessionExit {
-    fn execute(&self, authenticated: &mut AuthenticatedSession) -> Result<(), LoginError> {
-        authenticated.pam_session.close()?;
-        Ok(())
     }
 }
 
@@ -206,11 +167,7 @@ pub enum LoginError {
     RateLimited(#[from] LoginAttemptLimitError),
 }
 
-trait AuditReason {
-    fn audit_reason(&self) -> &'static str;
-}
-
-impl AuditReason for AuthError {
+impl AuthError {
     fn audit_reason(&self) -> &'static str {
         match self {
             AuthError::InvalidCredentials => "invalid-credentials",
