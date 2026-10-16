@@ -53,3 +53,27 @@ fn helper_can_accept_an_empty_password_and_reset_prior_failures() {
     limiter.record_failure("alice");
     assert!(limiter.check_allowed("alice").is_ok());
 }
+
+#[test]
+fn exited_helper_output_is_drained_before_deciding_the_result() {
+    let (parent, mut peer) = UnixStream::pair().unwrap();
+    let mut child = Command::new("true").spawn().unwrap();
+    child.wait().unwrap();
+    auth_protocol::write_frame(&mut peer, &Frame::Message(AuthMessage {
+        style: rsdm_core::ports::AuthMessageStyle::Info,
+        text: "x".repeat(12 * 1024),
+    })).unwrap();
+    auth_protocol::write_frame(&mut peer, &Frame::Finished {
+        success: true, message: String::new(),
+    }).unwrap();
+    let limiter = Arc::new(MemoryLoginAttemptLimiter::new(1, Duration::from_secs(60)));
+    let (_responses_tx, responses) = mpsc::sync_channel(1);
+    let (events, events_rx) = mpsc::sync_channel(1);
+    let outcome = run_helper(
+        child, parent, "alice".into(), "test".into(), PasswordSecret::new(""),
+        responses, Arc::new(AtomicBool::new(false)), limiter, events,
+    );
+    assert_eq!(outcome, Attempt::Unlocked);
+    assert!(matches!(events_rx.try_recv(), Ok(AuthEvent::Message(message))
+        if message.text.len() == 12 * 1024));
+}

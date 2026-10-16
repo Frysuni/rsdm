@@ -231,9 +231,8 @@ fn run_helper(
             }
             Err(_) => break,
         }
-        if child.try_wait().ok().flatten().is_some() {
-            break;
-        }
+        // An exited helper may still have unread frames in the socket. Only
+        // the protocol result or EOF ends the exchange, not process status.
         std::thread::sleep(Duration::from_millis(20));
     }
     let _ = child.kill();
