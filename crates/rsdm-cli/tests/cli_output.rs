@@ -223,3 +223,21 @@ fn runtime_diagnostics_share_the_palette_and_preserve_fields() {
     assert!(!output.stderr.contains(&0x1b));
     assert!(String::from_utf8(output.stderr).unwrap().contains("logging initialized"));
 }
+
+#[test]
+fn damaged_lock_preferences_do_not_disable_other_components() {
+    let cli = CliTest::new();
+    let directory = cli.root.join(".config/rsdm");
+    fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("lock.toml");
+    for text in ["invalid = [", "[lock]\nsize = 0\n"] {
+        fs::write(&path, text).unwrap();
+        for (args, code) in [(&["status"][..], 0), (&["validate-config"][..], 0), (&["dm"][..], 78), (&["idle"][..], 0)] {
+            let output = cli.pipe(args);
+            assert_eq!(output.status.code(), Some(code), "{args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        let lock = cli.pipe(&["lock"]);
+        assert!(!lock.status.success());
+        assert!(String::from_utf8_lossy(&lock.stderr).contains(path.to_str().unwrap()));
+    }
+}

@@ -147,7 +147,9 @@ Save settings writes only the persistent lock-menu visual fields (not Hints) to
 `$XDG_CONFIG_HOME/rsdm/lock.toml`, or `$HOME/.config/rsdm/lock.toml` when
 `XDG_CONFIG_HOME` is unset. The file is private to the user and replaced
 atomically; the system DM, PAM, and security configuration stays in the system
-file. The overlay is applied on the next configuration load.
+file. The overlay is applied on the next Lock start. Other commands and session
+policy monitoring read only the administrative configuration, so damaged Lock
+preferences cannot block DM, Idle, or session control.
 
 ## Logging (`[logging]`)
 

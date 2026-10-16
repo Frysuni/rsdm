@@ -11,7 +11,7 @@ use std::os::unix::fs::PermissionsExt;
 use rsdm_core::domain::{DesignConfig, SecondaryOutput};
 use thiserror::Error;
 
-use super::{LockRuntimeDesign, LockRuntimeFile, LockRuntimeSettings, lock_runtime_path};
+use super::lock::{LockRuntimeDesign, LockRuntimeFile, LockRuntimeSettings, lock_runtime_path};
 
 /// Persist the visual settings exposed by the lock menu in the user's config
 /// directory. The system DM configuration is never rewritten by this path.
@@ -162,7 +162,7 @@ mod tests {
                 },
             },
         };
-        super::super::apply_lock_runtime_settings(&mut config, overlay);
+        super::super::lock::apply_lock_runtime_settings(&mut config, overlay);
         assert!(!config.lock.enable);
         assert_eq!(config.lock.pam_service, "admin-policy");
         assert_eq!(config.lock.size, Some(2));
@@ -180,7 +180,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        super::super::apply_lock_runtime_settings(&mut config, overlay);
+        super::super::lock::apply_lock_runtime_settings(&mut config, overlay);
         assert_eq!(config.lock.size, None);
     }
 }

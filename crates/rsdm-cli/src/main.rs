@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use rsdm_core::domain::{AppConfig, FallbackConfig, SecurityConfig};
 use rsdm_infra::{
-    config::{DEFAULT_CONFIG_PATH, load_config},
+    config::{DEFAULT_CONFIG_PATH, load_config, load_lock_config},
     unix::exec_fallback,
 };
 use tracing::{error, info};
@@ -166,7 +166,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
 }
 
 fn run_lock(path: &Path) -> Result<()> {
-    let config = load_config(path)?;
+    let config = load_lock_config(path)?;
     rsdm_lock::run(&config, path).context("running the lock screen")
 }
 
