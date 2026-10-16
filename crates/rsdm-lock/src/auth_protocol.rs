@@ -1,4 +1,5 @@
 use std::io::{self, Read, Write};
+use zeroize::{Zeroize, Zeroizing};
 
 use rsdm_core::ports::{AuthMessage, AuthMessageStyle, MAX_PASSWORD_BYTES, MAX_USERNAME_BYTES};
 use rsdm_core::domain::PasswordSecret;
@@ -12,27 +13,22 @@ pub(crate) enum Frame {
     Start {
         username: String,
         service: String,
-        password: String,
+        password: PasswordSecret,
     },
     Message(AuthMessage),
-    Answer(Option<String>),
+    Answer(Option<PasswordSecret>),
     Cancel,
     Finished { success: bool, message: String },
 }
 
-pub(crate) fn encode_start(username: &str, service: &str, password: &PasswordSecret) -> io::Result<Vec<u8>> {
-    let mut bytes = Vec::new();
+pub(crate) fn encode_start(username: &str, service: &str, password: PasswordSecret) -> io::Result<Zeroizing<Vec<u8>>> {
+    let mut bytes = Zeroizing::new(Vec::new());
     let frame = Frame::Start {
         username: username.to_string(),
         service: service.to_string(),
-        password: password.expose_secret().to_string(),
+        password,
     };
-    let payload = encode_payload(&frame)?;
-    if payload.len() > MAX_FRAME_BYTES {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "authentication frame too large"));
-    }
-    bytes.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-    bytes.extend_from_slice(&payload);
+    write_frame(&mut *bytes, &frame)?;
     Ok(bytes)
 }
 
@@ -52,7 +48,7 @@ pub(crate) fn read_frame(stream: &mut impl Read) -> io::Result<Frame> {
     if length > MAX_FRAME_BYTES {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "authentication frame too large"));
     }
-    let mut payload = vec![0; length];
+    let mut payload = Zeroizing::new(vec![0; length]);
     stream.read_exact(&mut payload)?;
     decode_payload(&payload)
 }
@@ -70,24 +66,25 @@ pub(crate) fn take_frames(buffer: &mut Vec<u8>) -> io::Result<Vec<Frame>> {
         if buffer.len() < 4 + length {
             break;
         }
-        let payload = buffer[4..4 + length].to_vec();
+        let frame = decode_payload(&buffer[4..4 + length]);
+        buffer[..4 + length].zeroize();
         buffer.drain(..4 + length);
-        frames.push(decode_payload(&payload)?);
+        frames.push(frame?);
     }
     Ok(frames)
 }
 
-fn encode_payload(frame: &Frame) -> io::Result<Vec<u8>> {
-    let mut payload = Vec::new();
+fn encode_payload(frame: &Frame) -> io::Result<Zeroizing<Vec<u8>>> {
+    let mut payload = Zeroizing::new(Vec::new());
     match frame {
         Frame::Start { username, service, password } => {
             validate_text(username, MAX_USERNAME_BYTES, "username")?;
             validate_text(service, MAX_SERVICE_BYTES, "PAM service")?;
-            validate_text(password, MAX_PASSWORD_BYTES, "password")?;
+            validate_text(password.expose_secret(), MAX_PASSWORD_BYTES, "password")?;
             payload.push(1);
             put_text(&mut payload, username)?;
             put_text(&mut payload, service)?;
-            put_text(&mut payload, password)?;
+            put_text(&mut payload, password.expose_secret())?;
         }
         Frame::Message(message) => {
             validate_text(&message.text, MAX_TEXT_BYTES, "PAM message")?;
@@ -99,9 +96,9 @@ fn encode_payload(frame: &Frame) -> io::Result<Vec<u8>> {
             payload.push(3);
             match answer {
                 Some(answer) => {
-                    validate_text(answer, MAX_PASSWORD_BYTES, "PAM answer")?;
+                    validate_text(answer.expose_secret(), MAX_PASSWORD_BYTES, "PAM answer")?;
                     payload.push(1);
-                    put_text(&mut payload, answer)?;
+                    put_text(&mut payload, answer.expose_secret())?;
                 }
                 None => payload.push(0),
             }
@@ -125,7 +122,7 @@ fn decode_payload(payload: &[u8]) -> io::Result<Frame> {
         1 => Ok(Frame::Start {
             username: take_text(&mut rest, MAX_USERNAME_BYTES, "username")?,
             service: take_text(&mut rest, MAX_SERVICE_BYTES, "PAM service")?,
-            password: take_text(&mut rest, MAX_PASSWORD_BYTES, "password")?,
+            password: take_text(&mut rest, MAX_PASSWORD_BYTES, "password")?.into(),
         }),
         2 => {
             let (&style, tail) = rest
@@ -142,7 +139,7 @@ fn decode_payload(payload: &[u8]) -> io::Result<Frame> {
             rest = tail;
             let answer = match present {
                 0 => None,
-                1 => Some(take_text(&mut rest, MAX_PASSWORD_BYTES, "PAM answer")?),
+                1 => Some(take_text(&mut rest, MAX_PASSWORD_BYTES, "PAM answer")?.into()),
                 _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid PAM answer flag")),
             };
             Ok(Frame::Answer(answer))

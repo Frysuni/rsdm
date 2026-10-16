@@ -19,7 +19,7 @@ impl AuthConversation for HelperConversation {
             return Ok(None);
         }
         match auth_protocol::read_frame(&mut self.stream).map_err(|_| AuthError::InvalidCredentials)? {
-            Frame::Answer(answer) => Ok(answer.map(PasswordSecret::new)),
+            Frame::Answer(answer) => Ok(answer),
             Frame::Cancel => Err(AuthError::InvalidCredentials),
             _ => Err(AuthError::InvalidCredentials),
         }
@@ -45,10 +45,11 @@ fn run_inner(fd: RawFd) -> io::Result<()> {
     let verifier = PamCredentialVerifier;
     let result = verifier.verify(VerifyRequest {
         username: &username,
-        password: &PasswordSecret::new(password),
+        password: &password,
         pam_service: &service,
         conversation: Some(Box::new(HelperConversation { stream: stream.try_clone()? })),
     });
+    drop(password);
     let (success, message) = match result {
         Ok(()) => (true, String::new()),
         Err(error) => (false, error.to_string()),

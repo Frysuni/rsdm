@@ -10,7 +10,7 @@ fn closed_helper_connection_terminates_the_process_and_limits_retries() {
     let fixture = std::thread::spawn(move || {
         let start = auth_protocol::read_frame(&mut peer).unwrap();
         assert!(matches!(start, Frame::Start { username, service, password }
-            if username == "alice" && service == "test" && password.is_empty()));
+            if username == "alice" && service == "test" && password.expose_secret().is_empty()));
         // A helper can close its connection while remaining alive in PAM
         // teardown. EOF must not turn into an unbounded process wait.
     });
@@ -41,7 +41,7 @@ fn helper_result_does_not_wait_for_process_exit_and_resets_prior_failures() {
     let pid = child.id();
     let fixture = std::thread::spawn(move || {
         let start = auth_protocol::read_frame(&mut peer).unwrap();
-        assert!(matches!(start, Frame::Start { password, .. } if password.is_empty()));
+        assert!(matches!(start, Frame::Start { password, .. } if password.expose_secret().is_empty()));
         auth_protocol::write_frame(&mut peer, &Frame::Finished {
             success: true, message: String::new(),
         }).unwrap();

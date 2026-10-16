@@ -26,12 +26,11 @@ pub(super) struct Exchange {
 impl Exchange {
     pub fn run(&mut self, username: &str, service: &str, password: PasswordSecret) -> io::Result<bool> {
         self.stream.set_nonblocking(true)?;
-        let start = Zeroizing::new(auth_protocol::encode_start(username, service, &password)?);
+        let start = auth_protocol::encode_start(username, service, password)?;
         self.write_all(&start)?;
         drop(start);
-        drop(password);
 
-        let mut buffer = Vec::new();
+        let mut buffer = Zeroizing::new(Vec::new());
         loop {
             check_active(&self.cancel, self.deadline)?;
             self.send_response()?;
@@ -73,7 +72,7 @@ impl Exchange {
             Err(mpsc::TryRecvError::Empty) => return Ok(()),
         };
         let mut bytes = Zeroizing::new(Vec::new());
-        auth_protocol::write_frame(&mut *bytes, &Frame::Answer(Some(response.expose_secret().to_string())))?;
+        auth_protocol::write_frame(&mut *bytes, &Frame::Answer(Some(response)))?;
         self.write_all(&bytes)
     }
 

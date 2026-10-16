@@ -3,9 +3,9 @@ use super::*;
 #[test]
 fn start_frame_round_trips_with_bounded_secret() {
     let secret = PasswordSecret::new("correct horse battery staple");
-    let encoded = encode_start("alice", "login", &secret).unwrap();
+    let encoded = encode_start("alice", "login", secret).unwrap();
     let mut stream = &encoded[..];
-    assert!(matches!(read_frame(&mut stream), Ok(Frame::Start { username, service, password }) if username == "alice" && service == "login" && password == "correct horse battery staple"));
+    assert!(matches!(read_frame(&mut stream), Ok(Frame::Start { username, service, password }) if username == "alice" && service == "login" && password.expose_secret() == "correct horse battery staple"));
 }
 
 #[test]
@@ -28,9 +28,9 @@ fn partial_frames_wait_for_more_bytes() {
 
 fn frames() -> [Frame; 6] {
     [
-        Frame::Start { username: "alice".into(), service: "login".into(), password: "secret".into() },
+        Frame::Start { username: "alice".into(), service: "login".into(), password: PasswordSecret::new("secret") },
         Frame::Message(AuthMessage { style: AuthMessageStyle::Secret, text: "Password:".into() }),
-        Frame::Answer(Some("secret".into())),
+        Frame::Answer(Some(PasswordSecret::new("secret"))),
         Frame::Answer(None),
         Frame::Cancel,
         Frame::Finished { success: true, message: "accepted".into() },
@@ -75,4 +75,20 @@ fn adjacent_frames_remain_separate_and_preserve_order() {
         Frame::Answer(None), Frame::Cancel, Frame::Finished { success: true, .. },
     ]));
     assert!(bytes.is_empty());
+}
+
+#[test]
+fn credential_frames_redact_debug_output_without_changing_wire_bytes() {
+    let frame = Frame::Answer(Some(PasswordSecret::new("private-value")));
+    assert!(!format!("{frame:?}").contains("private-value"));
+    let mut bytes = Vec::new();
+    write_frame(&mut bytes, &frame).unwrap();
+    assert_eq!(&bytes, b"\0\0\0\x13\x03\x01\0\0\0\x0dprivate-value");
+    let decoded = read_frame(&mut &bytes[..]).unwrap();
+    assert!(!format!("{decoded:?}").contains("private-value"));
+    assert!(matches!(decoded, Frame::Answer(Some(password)) if password.expose_secret() == "private-value"));
+
+    let start = encode_start("alice", "test", PasswordSecret::new("private-value")).unwrap();
+    let decoded = read_frame(&mut &start[..]).unwrap();
+    assert!(!format!("{decoded:?}").contains("private-value"));
 }

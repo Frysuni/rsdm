@@ -97,7 +97,7 @@ fn successive_prompts_receive_their_own_answers() {
         assert!(matches!(auth_protocol::read_frame(&mut peer).unwrap(), Frame::Start { .. }));
         for (style, answer) in [(AuthMessageStyle::Secret, "password"), (AuthMessageStyle::Visible, "otp")] {
             auth_protocol::write_frame(&mut peer, &Frame::Message(AuthMessage { style, text: answer.into() })).unwrap();
-            assert!(matches!(auth_protocol::read_frame(&mut peer).unwrap(), Frame::Answer(Some(value)) if value == answer));
+            assert!(matches!(auth_protocol::read_frame(&mut peer).unwrap(), Frame::Answer(Some(value)) if value.expose_secret() == answer));
         }
         auth_protocol::write_frame(&mut peer, &Frame::Finished { success: true, message: String::new() }).unwrap();
     });
