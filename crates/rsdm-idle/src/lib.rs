@@ -104,7 +104,7 @@ pub fn run(config: &IdleConfig, config_path: &Path) -> Result<()> {
 
 impl IdleApp {
     fn retry_lock_if_needed(&self) {
-        if !self.retry_requested.swap(false, Ordering::AcqRel) {
+        if !take_retry_request(&self.lock_active, &self.retry_requested) {
             return;
         }
         if self.all_seats_idle() {
@@ -129,6 +129,7 @@ impl IdleApp {
             tracing::debug!("idle lock cycle is already running");
             return;
         }
+        self.retry_requested.store(false, Ordering::Release);
 
         let config = self.config.clone();
         let config_path = self.config_path.clone();
@@ -144,6 +145,12 @@ impl IdleApp {
             tracing::error!(%error, "failed to start idle lock worker");
         }
     }
+}
+
+fn take_retry_request(active: &AtomicBool, retry_requested: &AtomicBool) -> bool {
+    // A failing worker publishes its retry before releasing the active slot.
+    // Consuming it earlier would let start_lock_cycle reject and lose it.
+    !active.load(Ordering::Acquire) && retry_requested.swap(false, Ordering::AcqRel)
 }
 
 struct ResetActive(Arc<AtomicBool>);
@@ -259,5 +266,16 @@ mod tests {
             let _guard = ResetActive(Arc::clone(&active));
         }
         assert!(!active.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn retry_waits_for_the_failed_worker_to_release_its_slot() {
+        let active = Arc::new(AtomicBool::new(true));
+        let retry = AtomicBool::new(true);
+        let worker = ResetActive(Arc::clone(&active));
+        assert!(!take_retry_request(&active, &retry));
+        drop(worker);
+        assert!(take_retry_request(&active, &retry));
+        assert!(!take_retry_request(&active, &retry));
     }
 }
