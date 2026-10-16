@@ -7,13 +7,13 @@ mod auth_process;
 mod auth_protocol;
 mod model;
 mod render;
-mod util;
 mod wayland;
 
 use std::path::Path;
 
 use anyhow::Context;
 use rsdm_core::domain::{AppConfig, Rgb};
+use rsdm_infra::unix::current_username;
 use rsdm_ui::{Design, LockScene, Menu, Surface, banner};
 
 use crate::{
@@ -111,7 +111,7 @@ pub fn preview_png(
         model.push(ch);
     }
     model.set_error("Incorrect password");
-    let username = util::current_username().unwrap_or_else(|| "user".to_string());
+    let username = current_username().unwrap_or_else(|| "user".to_string());
     let clock = design.show_clock.then(banner::clock_text);
     let hostname = design.show_hostname.then(banner::hostname);
     let scene = LockScene {

@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use rsdm_core::domain::{AppConfig, SecondaryOutput};
-use rsdm_infra::security::MemoryLoginAttemptLimiter;
+use rsdm_infra::{security::MemoryLoginAttemptLimiter, unix::current_username};
 use rsdm_ui::{Design, LockMenuSettings, LockPending, Menu};
 use smithay_client_toolkit::{
     compositor::CompositorState,
@@ -33,7 +33,7 @@ use wayland_protocols::wp::{
     viewporter::client::{wp_viewport::WpViewport, wp_viewporter::WpViewporter},
 };
 
-use crate::{model::LockModel, render::Wallpaper, util};
+use crate::{model::LockModel, render::Wallpaper};
 
 mod authentication;
 mod buffers;
@@ -275,7 +275,7 @@ fn build_context(config: &AppConfig, config_path: &Path) -> Result<LockContext> 
         .wallpaper
         .as_deref()
         .and_then(load_wallpaper);
-    let username = util::current_username().context("could not determine the current lock user")?;
+    let username = current_username().context("could not determine the current lock user")?;
 
     Ok(LockContext {
         font: crate::render::Font::load(&config.dm.tty.path),
