@@ -13,8 +13,7 @@ use std::{
 use rsdm_core::{
     domain::PasswordSecret,
     ports::{
-        AuthConversation, AuthError, AuthMessage, CredentialVerifier,
-        LoginAttemptLimiter, VerifyRequest,
+        AuthError, AuthMessage, LoginAttemptLimiter,
     },
 };
 use rsdm_infra::security::MemoryLoginAttemptLimiter;
@@ -23,14 +22,6 @@ use crate::auth_protocol::{self, Frame};
 
 const AUTH_TIMEOUT: Duration = Duration::from_secs(90);
 
-#[cfg_attr(not(test), allow(dead_code))]
-pub struct Authenticator<'a> {
-    pub verifier: &'a dyn CredentialVerifier,
-    pub limiter: &'a dyn LoginAttemptLimiter,
-    pub username: &'a str,
-    pub pam_service: &'a str,
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum Attempt {
     Unlocked,
@@ -38,51 +29,6 @@ pub enum Attempt {
     Failed(String),
     /// Too many recent failures.
     RateLimited(String),
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-impl Authenticator<'_> {
-    pub fn attempt(
-        &self,
-        password: &PasswordSecret,
-        conversation: Box<dyn AuthConversation>,
-    ) -> Attempt {
-        if self.limiter.check_allowed(self.username).is_err() {
-            tracing::warn!(
-                username = self.username,
-                "lock screen authentication rate limited"
-            );
-            return Attempt::RateLimited("Too many attempts - wait a moment".to_string());
-        }
-        tracing::info!(
-            username = self.username,
-            pam_service = self.pam_service,
-            "lock screen authentication submitted"
-        );
-        match self.verifier.verify(VerifyRequest {
-            username: self.username,
-            password,
-            pam_service: self.pam_service,
-            conversation: Some(conversation),
-        }) {
-            Ok(()) => {
-                self.limiter.record_success(self.username);
-                tracing::info!(
-                    username = self.username,
-                    "lock screen authentication succeeded"
-                );
-                Attempt::Unlocked
-            }
-            Err(_) => {
-                self.limiter.record_failure(self.username);
-                tracing::warn!(
-                    username = self.username,
-                    "lock screen authentication failed"
-                );
-                Attempt::Failed("Authentication failed".to_string())
-            }
-        }
-    }
 }
 
 pub enum AuthEvent {
@@ -290,6 +236,7 @@ fn run_helper(
         }
         std::thread::sleep(Duration::from_millis(20));
     }
+    let _ = child.kill();
     let _ = child.wait();
     limiter.record_failure(&username);
     Attempt::Failed("Authentication failed".to_string())
