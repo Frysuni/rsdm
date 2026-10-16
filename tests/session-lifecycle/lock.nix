@@ -10,8 +10,14 @@ pkgs.testers.runNixOSTest {
   nodes.machine = { ... }: {
     virtualisation.memorySize = 2048;
     virtualisation.qemu.options = [ "-vga none -device virtio-gpu-pci" ];
-    users.users.alice = { isNormalUser = true; uid = 1000; group = "alice"; };
+    users.users.alice = {
+      isNormalUser = true;
+      uid = 1000;
+      group = "alice";
+      password = "test-password";
+    };
     users.groups.alice = {};
+    security.pam.services.rsdm-lock = {};
     services.getty.autologinUser = "alice";
     programs.sway.enable = true;
     environment.systemPackages = [ rsdm pkgs.dbus ];
@@ -71,6 +77,24 @@ pkgs.testers.runNixOSTest {
     machine.screenshot("desktop-after-emergency-unlock")
     unlocked = Image.open(machine.out_dir / "desktop-after-emergency-unlock.png").convert("RGB")
     assert unlocked.getpixel((unlocked.width // 2, unlocked.height // 2)) == (255, 0, 255)
+
+    with subtest("PAM rejects a wrong password and unlocks with the correct password"):
+        machine.succeed(user + "systemd-run --user --unit=rsdm-test-auth-lock --collect --setenv=WAYLAND_DISPLAY=wayland-1 -- rsdm lock")
+        machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: pid '")
+        before = machine.succeed(user + "rsdm status | grep 'active lock: pid '")
+        machine.send_chars("wrong-password")
+        machine.send_key("ret")
+        machine.wait_until_succeeds("journalctl --no-pager -b | grep 'pam_unix(rsdm-lock:auth): authentication failure'")
+        machine.wait_until_fails("pgrep -u alice -f 'rsdm lock-auth-helper'")
+        assert machine.succeed(user + "rsdm status | grep 'active lock: pid '") == before
+        machine.sleep(1)
+        machine.send_chars("test-password")
+        machine.send_key("ret")
+        machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: none '")
+        machine.wait_until_fails(user + "systemctl --user is-active --quiet rsdm-test-auth-lock.service")
+        machine.screenshot("desktop-after-pam-unlock")
+        unlocked = Image.open(machine.out_dir / "desktop-after-pam-unlock.png").convert("RGB")
+        assert unlocked.getpixel((unlocked.width // 2, unlocked.height // 2)) == (255, 0, 255)
 
     with subtest("disabled SM with a stale generation still sends Lock power requests to logind"):
         machine.succeed("printf '[session_manager]\\nenabled = false\\n[lock]\\nenable = true\\n' > /run/rsdm-lock-disabled.toml")
