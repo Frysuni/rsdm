@@ -2,6 +2,13 @@
 
 let
   python = pkgs.python3.withPackages (packages: [ packages.dbus-python packages.pygobject3 ]);
+  flakyLocker = pkgs.writeShellScript "test-idle-locker" ''
+    if [ ! -e "$XDG_RUNTIME_DIR/rsdm-idle-first-attempt" ]; then
+      touch "$XDG_RUNTIME_DIR/rsdm-idle-first-attempt"
+      exit 1
+    fi
+    exec ${rsdm}/bin/rsdm lock
+  '';
 in
 pkgs.testers.runNixOSTest {
   name = "rsdm-lock-power";
@@ -26,6 +33,14 @@ pkgs.testers.runNixOSTest {
       output * bg #ff00ff solid_color
     '';
     environment.etc."rsdm.toml".text = "[lock]\nenable = true\n";
+    environment.etc."rsdm-idle-retry.toml".text = ''
+      [idle]
+      enable = true
+      timeout = 1
+      lock_command = ["${flakyLocker}"]
+      [lock]
+      enable = true
+    '';
     programs.bash.loginShellInit = ''
       if [ "$(tty)" = /dev/tty1 ]; then
         sway > /tmp/rsdm-sway.log 2>&1
@@ -95,6 +110,22 @@ pkgs.testers.runNixOSTest {
         machine.screenshot("desktop-after-pam-unlock")
         unlocked = Image.open(machine.out_dir / "desktop-after-pam-unlock.png").convert("RGB")
         assert unlocked.getpixel((unlocked.width // 2, unlocked.height // 2)) == (255, 0, 255)
+
+    with subtest("Idle retries a failed locker without another activity transition"):
+        # Send no input after monitor startup: recovery must use the pending
+        # retry rather than a second transition from activity to inactivity.
+        machine.send_key("spc")
+        machine.succeed(user + "systemd-run --user --unit=rsdm-test-idle --collect --setenv=WAYLAND_DISPLAY=wayland-1 -- rsdm --config /etc/rsdm-idle-retry.toml idle")
+        machine.wait_until_succeeds(user + "journalctl --user --no-pager -u rsdm-test-idle | grep 'idle monitoring started'")
+        machine.wait_for_file("/run/user/1000/rsdm-idle-first-attempt")
+        machine.wait_until_succeeds(user + "journalctl --user --no-pager -u rsdm-test-idle | grep 'idle locker failed'")
+        machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: pid '")
+        before = machine.succeed(user + "rsdm status | grep 'active lock: pid '")
+        machine.succeed(user + "systemctl --user stop rsdm-test-idle.service")
+        assert machine.succeed(user + "rsdm status | grep 'active lock: pid '") == before
+        machine.send_chars("test-password")
+        machine.send_key("ret")
+        machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: none '")
 
     with subtest("disabled SM with a stale generation still sends Lock power requests to logind"):
         machine.succeed("printf '[session_manager]\\nenabled = false\\n[lock]\\nenable = true\\n' > /run/rsdm-lock-disabled.toml")
