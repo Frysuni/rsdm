@@ -11,7 +11,9 @@ use zbus::{
     zvariant::OwnedObjectPath,
 };
 
-type ExecCommand = (String, Vec<String>, bool, u64, u64, i32, u32);
+// Executable, argv, ignore-errors, start/exit realtime and monotonic timestamps,
+// PID, exit code and exit status: systemd's a(sasbttttuii) property.
+type ExecCommand = (String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32);
 
 /// Resolve the console login systemd runs on `tty_path`, or `None` when it
 /// cannot be determined. The result is a ready-to-exec argv.
@@ -50,7 +52,7 @@ async fn query_exec_start(connection: &Connection, unit: &str, tty: &str) -> Opt
     )
     .await.ok()?;
     let commands: Vec<ExecCommand> = service.get_property("ExecStart").await.ok()?;
-    commands.into_iter().next().map(|(_, argv, _, _, _, _, _)| resolve_argv(&argv, tty))
+    commands.into_iter().next().map(|(_, argv, _, _, _, _, _, _, _, _)| resolve_argv(&argv, tty))
 }
 
 fn resolve_argv(argv: &[String], tty: &str) -> Vec<String> {
@@ -77,18 +79,22 @@ mod tests {
 
     struct Getty;
 
+    // systemd's published ExecStart wire format, independent of the client.
+    type SystemdExecStart = (String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32);
+
     #[zbus::interface(name = "org.freedesktop.systemd1.Service")]
     impl Getty {
         #[zbus(property)]
-        fn exec_start(&self) -> Vec<ExecCommand> {
-            let argv = ["/sbin/agetty", "-o", "-p -- \\u", "", "%I", "%%"]
+        fn exec_start(&self) -> Vec<SystemdExecStart> {
+            let argv = ["/sbin/agetty", "-o", "-p -- \\u", "", "tty3", "%"]
                 .into_iter().map(str::to_string).collect();
-            vec![("/sbin/agetty".into(), argv, false, 0, 0, 0, 0)]
+            vec![("/sbin/agetty".into(), argv, false, 1, 2, 3, 4, 1234, 1, 0)]
         }
     }
 
     #[tokio::test]
     async fn reads_typed_exec_start_without_retokenizing_arguments() {
+        assert_eq!(<Vec<SystemdExecStart> as zbus::zvariant::Type>::SIGNATURE.to_string(), "a(sasbttttuii)");
         let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
         let server = Builder::unix_stream(server_socket).p2p()
             .server(zbus::Guid::generate()).unwrap()
