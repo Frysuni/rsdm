@@ -4,7 +4,7 @@ use std::{
     os::unix::process::CommandExt,
     os::fd::AsRawFd,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Child, Command},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -169,35 +169,11 @@ fn run_lock_cycle(
 ) {
     let _reset = ResetActive(active);
 
-    let built_in = config.lock_command.is_empty();
-    let argv = if built_in {
-        match std::env::current_exe() {
-            Ok(executable) => vec![
-                executable.into_os_string(),
-                "lock".into(),
-                "--config".into(),
-                config_path.into_os_string(),
-            ],
-            Err(error) => {
-                tracing::error!(%error, "cannot resolve rsdm executable for idle lock");
-                retry_requested.store(true, Ordering::Release);
-                return;
-            }
-        }
-    } else {
-        config.lock_command.iter().map(Into::into).collect()
+    let Some((mut child, scope)) = spawn_locker(&config, config_path) else {
+        retry_requested.store(true, Ordering::Release);
+        return;
     };
-    let (mut command, scope) = lock_command(&argv);
-
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            tracing::error!(%error, command = ?config.lock_command, "failed to start idle locker");
-            retry_requested.store(true, Ordering::Release);
-            return;
-        }
-    };
-    let ready = if built_in {
+    let ready = if config.lock_command.is_empty() {
         readiness::wait_until_ready(&mut child, scope.as_deref())
     } else {
         // A custom locker has no rsdm readiness handshake. Starting it is the
@@ -224,10 +200,41 @@ fn run_lock_cycle(
     };
 
     let result = child.wait();
+    if !result.as_ref().is_ok_and(|status| status.success()) {
+        retry_requested.store(true, Ordering::Release);
+    }
+
     // The locker has already exited; hook completion must not keep the idle
     // cycle marked active and block a later lock attempt.
     drop(_reset);
     hooks::finish_lock_cycle(result, lock_confirmed, &config.on_unlock);
+}
+
+fn spawn_locker(config: &IdleConfig, config_path: PathBuf) -> Option<(Child, Option<String>)> {
+    let argv = if config.lock_command.is_empty() {
+        match std::env::current_exe() {
+            Ok(executable) => vec![
+                executable.into_os_string(),
+                "lock".into(),
+                "--config".into(),
+                config_path.into_os_string(),
+            ],
+            Err(error) => {
+                tracing::error!(%error, "cannot resolve rsdm executable for idle lock");
+                return None;
+            }
+        }
+    } else {
+        config.lock_command.iter().map(Into::into).collect()
+    };
+    let (mut command, scope) = lock_command(&argv);
+    match command.spawn() {
+        Ok(child) => Some((child, scope)),
+        Err(error) => {
+            tracing::error!(%error, command = ?config.lock_command, "failed to start idle locker");
+            None
+        }
+    }
 }
 
 /// A service-managed idle monitor places its locker in a distinct transient
@@ -256,26 +263,5 @@ fn lock_command(argv: &[std::ffi::OsString]) -> (Command, Option<String>) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lock_worker_guard_resets_activity() {
-        let active = Arc::new(AtomicBool::new(true));
-        {
-            let _guard = ResetActive(Arc::clone(&active));
-        }
-        assert!(!active.load(Ordering::Acquire));
-    }
-
-    #[test]
-    fn retry_waits_for_the_failed_worker_to_release_its_slot() {
-        let active = Arc::new(AtomicBool::new(true));
-        let retry = AtomicBool::new(true);
-        let worker = ResetActive(Arc::clone(&active));
-        assert!(!take_retry_request(&active, &retry));
-        drop(worker);
-        assert!(take_retry_request(&active, &retry));
-        assert!(!take_retry_request(&active, &retry));
-    }
-}
+#[path = "lock_cycle_tests.rs"]
+mod tests;

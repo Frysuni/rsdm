@@ -43,6 +43,8 @@ on_unlock = [["notify-send", "rsdm unlocked"]]
 
 The daemon never unlocks on pointer movement or resume. Activity only resets
 the next idle timeout; authentication still belongs to `rsdm lock`.
+If the locker cannot start or exits abnormally, the daemon retries while all
+monitored seats remain idle.
 
 ## Starting the daemon
 
