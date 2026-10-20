@@ -93,16 +93,19 @@ pkgs.testers.runNixOSTest {
     unlocked = Image.open(machine.out_dir / "desktop-after-emergency-unlock.png").convert("RGB")
     assert unlocked.getpixel((unlocked.width // 2, unlocked.height // 2)) == (255, 0, 255)
 
-    with subtest("PAM rejects a wrong password and unlocks with the correct password"):
-        machine.succeed(user + "systemd-run --user --unit=rsdm-test-auth-lock --collect --setenv=WAYLAND_DISPLAY=wayland-1 -- rsdm lock")
+    with subtest("PAM rejects a wrong password and unlocks after executable replacement"):
+        machine.succeed("install -Dm755 ${rsdm}/bin/rsdm /run/test-lock/rsdm")
+        machine.succeed(user + "systemd-run --user --unit=rsdm-test-auth-lock --collect --setenv=WAYLAND_DISPLAY=wayland-1 -- /run/test-lock/rsdm lock")
         machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: pid '")
         before = machine.succeed(user + "rsdm status | grep 'active lock: pid '")
         machine.send_chars("wrong-password")
         machine.send_key("ret")
         machine.wait_until_succeeds("journalctl --no-pager -b | grep 'pam_unix(rsdm-lock:auth): authentication failure'")
-        machine.wait_until_fails("pgrep -u alice -f 'rsdm lock-auth-helper'")
+        machine.wait_until_fails("pgrep -u alice -f ' lock-auth-helper --fd '")
         assert machine.succeed(user + "rsdm status | grep 'active lock: pid '") == before
         machine.sleep(1)
+        machine.succeed("install -m755 ${rsdm}/bin/rsdm /run/test-lock/rsdm.next; mv -f /run/test-lock/rsdm.next /run/test-lock/rsdm")
+        machine.succeed(user + "sh -c 'readlink /proc/$(systemctl --user show rsdm-test-auth-lock -p MainPID --value)/exe' | grep -F '(deleted)'")
         machine.send_chars("test-password")
         machine.send_key("ret")
         machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: none '")

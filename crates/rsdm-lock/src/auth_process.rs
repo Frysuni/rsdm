@@ -18,7 +18,7 @@ impl HelperProcess {
         let (stream, child_stream) = UnixStream::pair()?;
         let child_fd = OwnedFd::from(child_stream);
         let fd = child_fd.as_raw_fd();
-        let mut command = Command::new(std::env::current_exe()?);
+        let mut command = Command::new("/proc/self/exe");
         command.args(["lock-auth-helper", "--fd", &fd.to_string()]).env_clear();
         // SAFETY: only async-signal-safe calls run before exec; the socket is
         // owned here and kept alive until spawn has completed.
