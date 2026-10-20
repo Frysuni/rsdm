@@ -100,6 +100,7 @@ title_font = "ANSI Shadow" # optional | string | default: "ANSI Shadow" | values
 show_clock = true # optional | bool | default: true | values: true, false
 show_hostname = true # optional | bool | default: true | values: true, false
 password_mode = "hidden" # optional | string | default: "hidden" | values: hidden, asterisks
+# Greeter menu changes last only for the current instance.
 menu = true # optional | bool | default: true | values: true, false
 # These wallpaper fields are accepted here because both fronts share the same
 # design schema, but the TTY Greeter ignores them.
@@ -133,6 +134,7 @@ title_font = "ANSI Shadow" # optional | string | default: "ANSI Shadow" | values
 show_clock = true # optional | bool | default: true | values: true, false
 show_hostname = true # optional | bool | default: true | values: true, false
 password_mode = "hidden" # optional | string | default: "hidden" | values: hidden, asterisks
+# Lock menu changes apply live; Save settings writes personal visual preferences.
 menu = true # optional | bool | default: true | values: true, false
 # Wallpaper is a base layer under the optional animated background.
 # wallpaper = "/etc/rsdm-wallpaper.png" # optional | string or unset | default: unset | values: absolute PNG or JPEG paths

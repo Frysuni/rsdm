@@ -5,7 +5,8 @@ pub const DEFAULT_TITLE_FONT: &str = "ANSI Shadow";
 /// The look of one front (the greeter or the locker). It is the SAME type for
 /// both, so `dm.design` and `lock.design` carry identical fields and can be
 /// configured independently. The runtime switcher (the F1 menu) edits a live
-/// copy of this; nothing is persisted.
+/// copy of this. Lock can save its visual settings to the user's config;
+/// Greeter changes last only for the current instance.
 ///
 /// The wallpaper fields (`wallpaper`, `wallpaper_dim`, `background_opacity`) are
 /// honored only by the framebuffer locker; the TTY greeter has no wallpaper and
@@ -33,7 +34,8 @@ pub struct DesignConfig {
     pub show_hostname: bool,
     pub password_mode: PasswordRendering,
     /// Whether the runtime design switcher (F1) is available on this front.
-    /// Changes made through it apply live but are never persisted.
+    /// Changes apply live. Lock offers an explicit Save settings action;
+    /// Greeter changes remain in memory.
     pub menu: bool,
     /// Locker only: optional background image (PNG/JPEG, absolute path). The base
     /// layer of the lock screen; an animated background draws over it. The
