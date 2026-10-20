@@ -83,6 +83,7 @@ session = true # optional | bool | default: true | values: true, false
 # Console login uses the system login PAM policy and its own attempt limits.
 enabled = true # optional | bool | default: true | values: true, false
 # Empty auto-detects the system getty; set argv only to override that behavior.
+# Explicit argv are literal; auto-detection honors systemd variable expansion.
 command = [] # optional | array<string> | default: [] | values: executable followed by arguments
 
 [dm.design]

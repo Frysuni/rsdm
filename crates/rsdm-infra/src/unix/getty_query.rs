@@ -14,6 +14,7 @@ use zbus::{
 // Executable, argv, ignore-errors, start/exit realtime and monotonic timestamps,
 // PID, exit code and exit status: systemd's a(sasbttttuii) property.
 type ExecCommand = (String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32);
+type ExecCommandEx = (String, Vec<String>, Vec<String>, u64, u64, u64, u64, u32, i32, i32);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GettyCommand {
@@ -59,7 +60,16 @@ async fn query_exec_start(connection: &Connection, unit: &str) -> Option<GettyCo
     let commands: Vec<ExecCommand> = service.get_property("ExecStart").await.ok()?;
     // systemd already expanded unit specifiers while loading the command.
     // Percent signs remaining in these arguments are literal data.
-    commands.into_iter().next().map(|(executable, argv, ..)| GettyCommand { executable, argv })
+    let (executable, argv, ..) = commands.into_iter().next()?;
+    if !argv.iter().any(|argument| argument.contains('$')) { return Some(GettyCommand { executable, argv }); }
+
+    let commands: Vec<ExecCommandEx> = service.get_property("ExecStartEx").await.ok()?;
+    let (executable, argv, flags, ..) = commands.into_iter().next()?;
+    let argv = if flags.iter().any(|flag| flag == "no-env-expand") { argv } else {
+        let environment = super::getty_environment::load(&manager, &service).await?;
+        super::getty_expansion::expand(&argv, &environment)
+    };
+    Some(GettyCommand { executable, argv })
 }
 
 #[cfg(test)]
@@ -74,32 +84,51 @@ mod tests {
             assert_eq!(unit, "getty@tty3.service");
             OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/getty").unwrap()
         }
+
+        #[zbus(property)]
+        fn environment(&self) -> Vec<String> { vec!["GLOBAL=manager".into()] }
     }
 
-    struct Getty(&'static str);
+    struct Getty(&'static str, bool);
 
     // systemd's published ExecStart wire format, independent of the client.
     type SystemdExecStart = (String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32);
+    type SystemdExecStartEx = (String, Vec<String>, Vec<String>, u64, u64, u64, u64, u32, i32, i32);
 
     #[zbus::interface(name = "org.freedesktop.systemd1.Service")]
     impl Getty {
         #[zbus(property)]
         fn exec_start(&self) -> Vec<SystemdExecStart> {
-            let argv = [self.0, "-o", "-p -- \\u", "", "tty3", "%", "%I", "%%"]
+            let argv = [self.0, "-o", "-p -- \\u", "", "tty3", "%", "%I", "%%",
+                "$TERM", "${VALUE}", "${GLOBAL}", "$$TERM", "$MISSING"]
                 .into_iter().map(str::to_string).collect();
             vec![("/sbin/agetty".into(), argv, false, 1, 2, 3, 4, 1234, 1, 0)]
         }
+
+        #[zbus(property)]
+        fn exec_start_ex(&self) -> Vec<SystemdExecStartEx> {
+            self.exec_start().into_iter().map(|(program, argv, _, a, b, c, d, pid, code, status)| {
+                let flags = if self.1 { vec!["no-env-expand".into()] } else { Vec::new() };
+                (program, argv, flags, a, b, c, d, pid, code, status)
+            }).collect()
+        }
+
+        #[zbus(property)]
+        fn environment(&self) -> Vec<String> { vec!["VALUE=two words".into()] }
+
+        #[zbus(property)]
+        fn environment_files(&self) -> Vec<(String, bool)> { Vec::new() }
     }
 
     #[tokio::test]
     async fn reads_typed_exec_start_without_retokenizing_arguments() {
         assert_eq!(<Vec<SystemdExecStart> as zbus::Type>::SIGNATURE.to_string(), "a(sasbttttuii)");
-        for argv0 in ["/sbin/agetty", "custom-getty"] {
+        for (argv0, no_expansion) in [("/sbin/agetty", false), ("custom-getty", false), ("custom-getty", true)] {
             let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
             let server = Builder::unix_stream(server_socket.into_std().unwrap()).p2p()
                 .server(zbus::Guid::generate())
                 .serve_at("/org/freedesktop/systemd1", Manager)
-                .serve_at("/org/freedesktop/systemd1/unit/getty", Getty(argv0));
+                .serve_at("/org/freedesktop/systemd1/unit/getty", Getty(argv0, no_expansion));
             let client = Builder::unix_stream(client_socket.into_std().unwrap()).p2p();
             let (server, client) = tokio::join!(server.build(), client.build());
             let _server = server.unwrap();
@@ -107,7 +136,10 @@ mod tests {
 
             let command = query_exec_start(&client, "getty@tty3.service").await.unwrap();
             assert_eq!(command.executable, "/sbin/agetty");
-            assert_eq!(command.argv, [argv0, "-o", "-p -- \\u", "", "tty3", "%", "%I", "%%"]);
+            let mut expected = vec![argv0, "-o", "-p -- \\u", "", "tty3", "%", "%I", "%%"];
+            expected.extend(if no_expansion { vec!["$TERM", "${VALUE}", "${GLOBAL}", "$$TERM", "$MISSING"] }
+                else { vec!["linux", "two words", "manager", "$TERM"] });
+            assert_eq!(command.argv, expected);
         }
     }
 }

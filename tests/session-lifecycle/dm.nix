@@ -228,6 +228,35 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_fails("systemctl is-active --quiet rsdm-test-fallback.service")
         assert machine.succeed("cat /tmp/rsdm-fallback-arguments") == expected
 
+    with subtest("TTY fallback expands the configured getty environment like systemd"):
+        machine.succeed("mkdir -p /run/systemd/system/getty@tty63.service.d")
+        values = "SINGLE=two words\nLIST=one 'two three'\nUNICODE=Русский\n"
+        machine.succeed("printf %s " + shlex.quote(values) + " > /run/getty-test.env")
+        braced = "$" + "{SINGLE}"
+        unicode = "$" + "{UNICODE}"
+        variants = [
+            ("terminal", "$TERM", ["linux"]),
+            ("file-and-literal", braced + " $$TERM $MISSING", ["two words", "$TERM"]),
+            ("quoted-split", "$LIST " + unicode, ["one", "two three", "Русский"]),
+            ("no-expansion", braced + " $TERM $$TERM", [braced, "$TERM", "$$TERM"]),
+        ]
+        for number, (label, arguments, expected_arguments) in enumerate(variants):
+            prefix = ":@" if label == "no-expansion" else "@"
+            config = "[Service]\nEnvironment=SINGLE=unit-value\nEnvironmentFile=-/run/missing-getty-file\nEnvironmentFile=/run/getty-test.env\nExecStart=\nExecStart=" + prefix + "${fallbackGetty} rsdm-custom-getty " + arguments + "\n"
+            machine.succeed("printf %s " + shlex.quote(config) + " > /run/systemd/system/getty@tty63.service.d/probe.conf")
+            machine.succeed("systemctl daemon-reload")
+            machine.succeed("systemctl restart getty@tty63.service")
+            expected = machine.succeed("cat /tmp/rsdm-fallback-arguments")
+            assert expected == "rsdm-custom-getty\n" + "\n".join(expected_arguments) + "\n", (label, expected)
+            machine.succeed("rm /tmp/rsdm-fallback-arguments")
+            unit = "rsdm-test-fallback-" + str(number)
+            machine.succeed("systemd-run --unit=" + unit + " --collect -- ${rsdm}/bin/rsdm --config /etc/rsdm-fallback.toml dm")
+            machine.wait_for_file("/tmp/rsdm-fallback-arguments")
+            machine.wait_until_fails("systemctl is-active --quiet " + unit + ".service")
+            actual = machine.succeed("cat /tmp/rsdm-fallback-arguments")
+            machine.succeed("rm /tmp/rsdm-fallback-arguments")
+            assert actual == expected, (label, expected, actual)
+
     with subtest("closing Greeter restores a configured disabled status policy"):
         machine.succeed("mkdir -p /run/systemd/system.conf.d")
         machine.succeed("printf '[Manager]\\nShowStatus=no\\n' > /run/systemd/system.conf.d/rsdm-test.conf")

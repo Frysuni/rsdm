@@ -139,6 +139,11 @@ command = ["agetty", "--noclear", "tty1", "linux"]
 must match `[dm.tty]`. rsdm will not run the fallback onto a VT that is already
 contended.
 
+With an empty `command`, the detected getty's arguments use systemd variable
+expansion, including values from `Environment=` and `EnvironmentFile=`. The `:`
+prefix keeps arguments literal. An explicit `dm.fallback.command` array is always
+literal and never invokes a shell for expansion.
+
 Fallback requires a successfully loaded configuration. A missing, invalid, or
 incompatible config causes DM to exit; it never substitutes a default VT or
 enables fallback in place of the administrator's policy.
