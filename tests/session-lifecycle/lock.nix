@@ -41,6 +41,13 @@ pkgs.testers.runNixOSTest {
       [lock]
       enable = true
     '';
+    environment.etc."rsdm-idle-update.toml".text = ''
+      [idle]
+      enable = true
+      timeout = 3
+      [lock]
+      enable = true
+    '';
     programs.bash.loginShellInit = ''
       if [ "$(tty)" = /dev/tty1 ]; then
         sway > /tmp/rsdm-sway.log 2>&1
@@ -126,6 +133,22 @@ pkgs.testers.runNixOSTest {
         before = machine.succeed(user + "rsdm status | grep 'active lock: pid '")
         machine.succeed(user + "systemctl --user stop rsdm-test-idle.service")
         assert machine.succeed(user + "rsdm status | grep 'active lock: pid '") == before
+        machine.send_chars("test-password")
+        machine.send_key("ret")
+        machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: none '")
+
+    with subtest("Idle starts its default locker after executable replacement"):
+        machine.send_key("spc")
+        machine.succeed("install -Dm755 ${rsdm}/bin/rsdm /run/test-idle/rsdm")
+        machine.succeed(user + "systemd-run --user --unit=rsdm-test-idle-update --collect --setenv=WAYLAND_DISPLAY=wayland-1 -- /run/test-idle/rsdm --config /etc/rsdm-idle-update.toml idle")
+        machine.wait_until_succeeds(user + "journalctl --user --no-pager -u rsdm-test-idle-update | grep 'idle monitoring started'")
+        machine.succeed("install -m755 ${rsdm}/bin/rsdm /run/test-idle/rsdm.next; mv -f /run/test-idle/rsdm.next /run/test-idle/rsdm")
+        machine.succeed(user + "sh -c 'readlink /proc/$(systemctl --user show rsdm-test-idle-update -p MainPID --value)/exe' | grep -F '(deleted)'")
+        machine.send_key("spc")
+        machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: pid '", timeout=12)
+        machine.wait_until_succeeds(user + "journalctl --user --no-pager -u rsdm-test-idle-update | grep 'idle locker is active'")
+        machine.succeed(user + "systemctl --user stop rsdm-test-idle-update.service")
+        machine.succeed(user + "rsdm status | grep 'active lock: pid '")
         machine.send_chars("test-password")
         machine.send_key("ret")
         machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: none '")

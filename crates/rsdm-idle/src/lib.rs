@@ -212,18 +212,13 @@ fn run_lock_cycle(
 
 fn spawn_locker(config: &IdleConfig, config_path: PathBuf) -> Option<(Child, Option<String>)> {
     let argv = if config.lock_command.is_empty() {
-        match std::env::current_exe() {
-            Ok(executable) => vec![
-                executable.into_os_string(),
-                "lock".into(),
-                "--config".into(),
-                config_path.into_os_string(),
-            ],
-            Err(error) => {
-                tracing::error!(%error, "cannot resolve rsdm executable for idle lock");
-                return None;
-            }
-        }
+        // An explicit PID keeps the running inode reachable through systemd-run.
+        vec![
+            format!("/proc/{}/exe", std::process::id()).into(),
+            "lock".into(),
+            "--config".into(),
+            config_path.into_os_string(),
+        ]
     } else {
         config.lock_command.iter().map(Into::into).collect()
     };
