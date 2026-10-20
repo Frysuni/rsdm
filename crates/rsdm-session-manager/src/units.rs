@@ -1,6 +1,6 @@
 //! Transient service definitions and executable lookup in the caller's PATH.
 
-use std::{os::unix::fs::PermissionsExt, path::{Path, PathBuf}};
+use std::{ffi::CString, path::{Path, PathBuf}};
 
 use zbus::Variant;
 
@@ -111,7 +111,10 @@ fn resolve_executable(program: &str, environment: &[(String, String)], directory
         }).collect()
     };
     for candidate in candidates {
-        if candidate.metadata().is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0) {
+        if !candidate.metadata().is_ok_and(|metadata| metadata.is_file()) { continue; }
+        let Ok(path) = CString::new(candidate.as_os_str().as_encoded_bytes()) else { continue; };
+        // SAFETY: path is NUL-terminated; effective credentials match the user service.
+        if unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), libc::X_OK, libc::AT_EACCESS) } == 0 {
             return Ok(candidate);
         }
     }

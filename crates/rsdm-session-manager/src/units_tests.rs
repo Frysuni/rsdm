@@ -1,4 +1,4 @@
-use std::{fs, sync::atomic::{AtomicUsize, Ordering}};
+use std::{fs, os::unix::fs::PermissionsExt, sync::atomic::{AtomicUsize, Ordering}};
 
 use zbus::OwnedVariant;
 
@@ -52,6 +52,23 @@ fn relative_search_paths_are_resolved_against_the_callers_directory() {
     let programs = Programs::new();
     let environment = vec![("PATH".into(), ".".into())];
     assert_eq!(resolve_executable("example", &environment, &programs.0).unwrap(), programs.0.join(".").join("example"));
+}
+
+#[test]
+fn executable_lookup_skips_path_entries_the_current_user_cannot_execute() {
+    let programs = Programs::new();
+    let first = programs.0.join("first");
+    fs::create_dir(&first).unwrap();
+    let denied = first.join("example");
+    fs::write(&denied, "#!/bin/sh\nexit 7\n").unwrap();
+    fs::set_permissions(&denied, fs::Permissions::from_mode(0o041)).unwrap();
+    let path = std::env::join_paths([&first, &programs.0]).unwrap();
+    let environment = vec![("PATH".into(), path.to_str().unwrap().to_string())];
+    let expected = std::process::Command::new("example").env("PATH", &path).status().unwrap();
+
+    let executable = resolve_executable("example", &environment, &programs.0).unwrap();
+    let actual = std::process::Command::new(executable).status();
+    assert_eq!(actual.as_ref().ok().and_then(|status| status.code()), expected.code());
 }
 
 #[tokio::test]
