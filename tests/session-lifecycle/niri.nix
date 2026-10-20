@@ -81,6 +81,8 @@ pkgs.testers.runNixOSTest {
         machine.succeed(session + "rsdm session status | grep 'RSDM XSMP: available'")
 
     with subtest("real compositor scopes and independent user services can launch applications"):
+        machine.succeed(session + "niri msg action spawn -- ${rsdm}/bin/rsdm app -- ${launchProbe} immediate")
+        machine.wait_for_file("/run/user/1000/launch-probe-immediate")
         machine.succeed(session + "niri msg action spawn -- ${scopedLaunch}")
         machine.wait_for_file("/run/user/1000/launch-caller-exit")
         assert "/app.slice/app-niri-" in machine.succeed("cat /run/user/1000/launch-caller-group")
@@ -89,7 +91,7 @@ pkgs.testers.runNixOSTest {
         machine.wait_for_file("/run/user/1000/launch-probe-scope")
         machine.succeed(user + "systemd-run --user --wait --pipe --collect --unit=desktop-launch-probe ${rsdm}/bin/rsdm app -- ${launchProbe} service")
         machine.wait_for_file("/run/user/1000/launch-probe-service")
-        for kind in ["scope", "service"]:
+        for kind in ["immediate", "scope", "service"]:
             assert machine.succeed("cat /run/user/1000/launch-probe-" + kind).strip() == values["RSDM_SESSION_GENERATION"]
 
   '' + windows.testScript + ''
