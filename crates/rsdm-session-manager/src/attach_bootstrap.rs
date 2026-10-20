@@ -66,7 +66,7 @@ pub(super) async fn receive() -> Result<Snapshot, SessionError> {
 async fn verify_login(caller: &Caller, identity: &SessionIdentity) -> Result<(), SessionError> {
     let system = zbus::connection::Builder::system()?.method_timeout(Duration::from_secs(5)).build().await?;
     let manager = zbus::Proxy::new(&system, "org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager").await?;
-    let path: zbus::zvariant::OwnedObjectPath = manager.call("GetSessionByPID", &(caller.pid,)).await?;
+    let path = super::identity::login_or_display_path(&manager, caller.pid, identity.uid).await?;
     let session = zbus::Proxy::new(&system, "org.freedesktop.login1", &path, "org.freedesktop.login1.Session").await?;
     let (uid, _): (u32, zbus::zvariant::OwnedObjectPath) = session.get_property("User").await?;
     let id: String = session.get_property("Id").await?;
@@ -74,7 +74,11 @@ async fn verify_login(caller: &Caller, identity: &SessionIdentity) -> Result<(),
     if uid != identity.uid || id != identity.login_session_id || !matches!(kind.as_str(), "wayland" | "x11") {
         return Err(SessionError::State("attach requester has no matching graphical logind session".into()));
     }
-    if manager.call::<_, _, zbus::zvariant::OwnedObjectPath>("GetSessionByPID", &(caller.pid,)).await? != path {
+    if !caller.belongs_to_login(&system, identity).await? {
+        let user = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await?;
+        super::control_handshake::user_unit(&user, caller).await?;
+    }
+    if super::identity::login_or_display_path(&manager, caller.pid, identity.uid).await? != path {
         return Err(SessionError::State("attach requester's logind session changed during verification".into()));
     }
     caller.check_alive()

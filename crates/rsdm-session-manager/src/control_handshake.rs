@@ -71,7 +71,7 @@ async fn registered_process(connection: &Connection, caller: &Caller, runtime: &
     Ok(())
 }
 
-async fn user_unit(connection: &Connection, caller: &Caller) -> Result<(String, Vec<u8>), SessionError> {
+pub(super) async fn user_unit(connection: &Connection, caller: &Caller) -> Result<(String, Vec<u8>), SessionError> {
     let manager = zbus::Proxy::new(connection, "org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager").await?;
     let path: OwnedObjectPath = manager.call("GetUnitByPID", &(caller.pid,)).await?;
     let unit = zbus::proxy::Builder::<zbus::Proxy<'_>>::new(connection)

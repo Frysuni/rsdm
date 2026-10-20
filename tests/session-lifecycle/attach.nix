@@ -58,7 +58,7 @@ in pkgs.testers.runNixOSTest {
     wm = machine.succeed("systemctl show rsdm-test-external-session -p MainPID -p InvocationID")
     with subtest("attach owns an independent service and no graphical targets"):
         try:
-            machine.succeed(control + "rsdm session attach")
+            machine.succeed(user + "systemd-run --user --wait --pipe --collect --unit=desktop-first-attach rsdm session attach")
         except Exception:
             print(machine.succeed(user + "journalctl --user --no-pager -u rsdm-session-manager -n 60"))
             raise

@@ -78,7 +78,8 @@ async fn verified_login_session(
             &connection, "org.freedesktop.login1", "/org/freedesktop/login1",
             "org.freedesktop.login1.Manager",
         ).await?;
-        let id = login_session_for_process(&manager, std::process::id(), uid).await?;
+        let path = login_or_display_path(&manager, std::process::id(), uid).await?;
+        let id = session_id(&manager, path, uid).await?;
         if session_hint.is_some_and(|hint| hint != id) {
             return Err(SessionError::State("logind session hint does not match the current process".into()));
         }
@@ -90,6 +91,32 @@ async fn verified_login_session(
 
 pub(super) async fn login_session_for_process(manager: &zbus::Proxy<'_>, pid: u32, uid: u32) -> Result<String, SessionError> {
     let path: OwnedObjectPath = manager.call("GetSessionByPID", &(pid,)).await?;
+    session_id(manager, path, uid).await
+}
+
+pub(super) async fn login_or_display_path(manager: &zbus::Proxy<'_>, pid: u32, uid: u32) -> Result<OwnedObjectPath, SessionError> {
+    match manager.call("GetSessionByPID", &(pid,)).await {
+        Ok(path) => Ok(path),
+        Err(error) => {
+            if !matches!(&error, zbus::Error::MethodError(name, _, _) if name.as_str() == "org.freedesktop.login1.NoSessionForPID") {
+                return Err(error.into());
+            }
+            let (id, path) = primary_display(manager, uid).await?;
+            if id.is_empty() { return Err(error.into()); }
+            Ok(path)
+        }
+    }
+}
+
+pub(super) async fn primary_display(manager: &zbus::Proxy<'_>, uid: u32) -> Result<(String, OwnedObjectPath), SessionError> {
+    let path: OwnedObjectPath = manager.call("GetUser", &(uid,)).await?;
+    let user = zbus::proxy::Builder::<zbus::Proxy<'_>>::new(manager.connection())
+        .destination("org.freedesktop.login1")?.path(path)?
+        .interface("org.freedesktop.login1.User")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+    Ok(user.get_property("Display").await?)
+}
+
+async fn session_id(manager: &zbus::Proxy<'_>, path: OwnedObjectPath, uid: u32) -> Result<String, SessionError> {
     let session = zbus::Proxy::new(
         manager.connection(), "org.freedesktop.login1", path, "org.freedesktop.login1.Session",
     ).await?;
