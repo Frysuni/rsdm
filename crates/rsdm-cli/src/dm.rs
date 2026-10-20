@@ -175,10 +175,12 @@ fn session_wrapper(config: &AppConfig, config_path: &Path) -> Result<Vec<String>
     let executable = std::env::current_exe().context("resolving the session manager binary")?;
     // The session child changes to the user's home before invoking this wrapper.
     let config_path = std::path::absolute(config_path).context("resolving the configuration path")?;
+    let executable = executable.to_str().context("session manager executable path is not valid UTF-8")?;
+    let config_path = config_path.to_str().context("configuration path is not valid UTF-8")?;
     Ok(vec![
-        executable.to_string_lossy().into_owned(),
+        executable.to_string(),
         "--config".to_string(),
-        config_path.to_string_lossy().into_owned(),
+        config_path.to_string(),
         "session".to_string(),
         "start".to_string(),
         "--".to_string(),
@@ -240,6 +242,16 @@ mod tests {
         assert_eq!(wrapper[1], "--config");
         assert_eq!(Path::new(&wrapper[2]), std::path::absolute(path).unwrap());
         assert_eq!(&wrapper[3..], &["session", "start", "--"]);
+    }
+
+    #[test]
+    fn session_wrapper_rejects_config_paths_that_cannot_be_passed_without_changes() {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let config = AppConfig::default();
+        let path = PathBuf::from(OsString::from_vec(b"config-\xff.toml".to_vec()));
+        assert!(session_wrapper(&config, &path).is_err());
+        assert!(session_wrapper(&config, Path::new("config-\u{fffd}.toml")).is_ok());
     }
 
     #[test]
