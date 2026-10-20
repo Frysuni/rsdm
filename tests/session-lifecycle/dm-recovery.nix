@@ -32,7 +32,10 @@ pkgs.testers.runNixOSTest {
     programs.sway.enable = true;
     security.polkit.enable = true;
     services.rsdm = { enable = true; package = rsdm; keyring = "none"; };
-    systemd.services.rsdm.serviceConfig.ExecStart = lib.mkForce "${rsdm}/bin/rsdm --config /etc/rsdm-custom.toml dm";
+    systemd.services.rsdm.serviceConfig = {
+      ExecStartPre = [ "${pkgs.coreutils}/bin/install -Dm755 ${rsdm}/bin/rsdm /run/test-dm/bin/rsdm" ];
+      ExecStart = lib.mkForce "/run/test-dm/bin/rsdm --config /etc/rsdm-custom.toml dm";
+    };
     environment.etc."rsdm.toml".source = lib.mkForce (pkgs.writeText "default-disabled.toml" ''
       [session_manager]
       enabled = false
@@ -67,13 +70,15 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_unit("rsdm.service")
     machine.wait_until_succeeds("journalctl --no-pager -u rsdm | grep 'display manager initialized'")
     machine.succeed("loginctl enable-linger alice")
+    machine.succeed("cp /etc/rsdm-custom.toml /run/rsdm-wrapped.toml")
     user = "runuser -u alice -- env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
     client = "${controller} published alice ${rsdm}/bin/rsdm --config /etc/rsdm-session.toml "
-    for scenario in ["wrapped desktop", "explicit session start"]:
+    for count, scenario in enumerate(["wrapped desktop", "explicit session start", "replaced executable"], 1):
         with subtest(scenario):
-            if scenario == "explicit session start":
-                machine.succeed("systemctl stop rsdm; cp --remove-destination /etc/rsdm-explicit.toml /etc/rsdm-custom.toml; systemctl start rsdm")
-                machine.wait_until_succeeds("journalctl --no-pager -u rsdm | grep 'display manager initialized' | test $(wc -l) -ge 2")
+            if count > 1:
+                source = "/etc/rsdm-explicit.toml" if scenario == "explicit session start" else "/run/rsdm-wrapped.toml"
+                machine.succeed("systemctl stop rsdm; cp --remove-destination " + source + " /etc/rsdm-custom.toml; systemctl start rsdm")
+                machine.wait_until_succeeds("journalctl --no-pager -u rsdm | grep 'display manager initialized' | test $(wc -l) -ge " + str(count))
             machine.succeed("rm -f /tmp/custom-app-ready /tmp/custom-app-saved")
             machine.send_key("ctrl-alt-f1")
             machine.send_chars("alice")
@@ -87,12 +92,14 @@ pkgs.testers.runNixOSTest {
             pid = machine.succeed(user + "systemctl --user show --property=MainPID --value " + compositor).strip()
             coordinator = machine.succeed("pgrep -u alice -f 'rsdm --config /etc/rsdm-(custom|session).toml session start'").strip()
             assert coordinator.isdigit(), coordinator
+            if scenario == "replaced executable":
+                machine.succeed("install -m755 ${rsdm}/bin/rsdm /run/test-dm/bin/rsdm.next; mv -f /run/test-dm/bin/rsdm.next /run/test-dm/bin/rsdm")
+                machine.succeed("readlink /proc/$(systemctl show rsdm -p MainPID --value)/exe | grep -F '(deleted)'")
             machine.succeed("kill -KILL " + coordinator)
-            count = 1 if scenario == "wrapped desktop" else 2
             machine.wait_until_succeeds("journalctl --no-pager -b | grep 'pam_unix(rsdm:session): session closed for user alice' | test $(wc -l) -ge " + str(count))
             machine.fail("kill -0 " + pid)
             machine.succeed("test -e /tmp/custom-app-saved")
             machine.wait_until_tty_matches("1", "Password", timeout=15)
-            machine.fail("journalctl --no-pager -b | grep 'session recovery exited with'")
+            machine.fail("journalctl --no-pager -b | grep -E 'session recovery (failed|exited with)'")
   '';
 }
