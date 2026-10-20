@@ -37,7 +37,9 @@ impl Drop for Descriptor {
 
 pub(super) async fn wait(descriptors: &[RawFd]) -> io::Result<usize> {
     let registrations = descriptors.iter().map(|fd| {
-        AsyncFd::with_interest(Descriptor::duplicate(*fd)?, Interest::READABLE)
+        let descriptor = Descriptor::duplicate(*fd)?;
+        // SAFETY: Descriptor owns the FD and exposes that same live FD until drop.
+        unsafe { AsyncFd::register_with_interest(descriptor, Interest::READABLE) }.map_err(io::Error::from)
     }).collect::<io::Result<Vec<_>>>()?;
     std::future::poll_fn(|context| {
         for (index, descriptor) in registrations.iter().enumerate() {

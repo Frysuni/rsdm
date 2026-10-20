@@ -9,7 +9,7 @@ sudo apt install cargo rustc gcc pkg-config libpam0g-dev libwayland-dev \
 cargo build --release --locked -p rsdm
 ```
 
-rsdm requires Rust 1.88 or newer. On an older supported Ubuntu release whose
+rsdm requires Rust 1.89 or newer. On an older supported Ubuntu release whose
 archive Rust is older, install a current Rust toolchain with rustup and keep the
 same system development packages.
 

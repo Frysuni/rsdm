@@ -164,7 +164,7 @@ nix develop          # dev shell with the toolchain + deps
 cargo build --release -p rsdm
 ```
 
-Dependencies: Rust (edition 2024, >= 1.88), `pam`, `wayland`, `libxkbcommon`,
+Dependencies: Rust (edition 2024, >= 1.89), `pam`, `wayland`, `libxkbcommon`,
 `pkg-config`, `libSM` and `libICE` (for XSMP, enabled by default).
 
 ## Runtime
