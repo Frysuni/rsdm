@@ -49,7 +49,8 @@ async fn query_exec_start(connection: &Connection, unit: &str) -> Option<GettyCo
         "org.freedesktop.systemd1.Manager",
     )
     .await.ok()?;
-    let path: OwnedObjectPath = manager.call("GetUnit", &(unit,)).await.ok()?;
+    // An unused getty may exist only on disk; loading metadata does not start it.
+    let path: OwnedObjectPath = manager.call("LoadUnit", &(unit,)).await.ok()?;
     let service = Proxy::new(
         connection,
         "org.freedesktop.systemd1",
@@ -80,7 +81,7 @@ mod tests {
 
     #[zbus::interface(name = "org.freedesktop.systemd1.Manager")]
     impl Manager {
-        fn get_unit(&self, unit: &str) -> OwnedObjectPath {
+        fn load_unit(&self, unit: &str) -> OwnedObjectPath {
             assert_eq!(unit, "getty@tty3.service");
             OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/getty").unwrap()
         }

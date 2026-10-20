@@ -217,15 +217,18 @@ pkgs.testers.runNixOSTest {
         machine.wait_for_unit("rsdm.service")
         machine.fail("journalctl --no-pager -b | grep 'session recovery exited with'")
 
-    with subtest("TTY fallback preserves the arguments executed by systemd"):
+    with subtest("TTY fallback discovers an unused getty and preserves systemd arguments"):
         machine.succeed("mkdir /run/rsdm-empty-sessions")
-        machine.succeed("systemctl start getty@tty63.service")
-        expected = machine.succeed("cat /tmp/rsdm-fallback-arguments")
-        assert expected == "rsdm-custom-getty\nquoted value\n\n%I\n%%\ntty63\n"
-        machine.succeed("rm /tmp/rsdm-fallback-arguments")
+        machine.fail("busctl call org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager GetUnit s getty@tty63.service")
+        expected = "rsdm-custom-getty\nquoted value\n\n%I\n%%\ntty63\n"
         machine.succeed("systemd-run --unit=rsdm-test-fallback --collect -- ${rsdm}/bin/rsdm --config /etc/rsdm-fallback.toml dm")
         machine.wait_for_file("/tmp/rsdm-fallback-arguments")
         machine.wait_until_fails("systemctl is-active --quiet rsdm-test-fallback.service")
+        assert machine.succeed("cat /tmp/rsdm-fallback-arguments") == expected
+        machine.fail("systemctl is-active --quiet getty@tty63.service")
+        assert machine.succeed("systemctl show getty@tty63.service -p ExecMainStartTimestampMonotonic --value").strip() == "0"
+        machine.succeed("rm /tmp/rsdm-fallback-arguments")
+        machine.succeed("systemctl start getty@tty63.service")
         assert machine.succeed("cat /tmp/rsdm-fallback-arguments") == expected
 
     with subtest("TTY fallback expands the configured getty environment like systemd"):
