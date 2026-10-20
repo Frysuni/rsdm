@@ -63,10 +63,7 @@ impl App {
         match result {
             Ok(()) => {
                 self.ctx.design_config = design;
-                self.menu.set_notice(
-                    format!("Saved to {}", self.ctx.config_path.display()),
-                    false,
-                );
+                self.menu.set_notice("Personal lock settings saved".to_string(), false);
             }
             Err(error) => {
                 tracing::error!(%error, "could not save runtime lock settings");
