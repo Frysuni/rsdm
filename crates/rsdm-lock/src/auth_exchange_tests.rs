@@ -47,6 +47,7 @@ fn socket_backpressure_is_bounded_and_partial_writes_preserve_bytes() {
         let timeout = if peer_reads { Duration::from_secs(2) } else { Duration::from_millis(50) };
         let before = Instant::now();
         let mut exchange = Exchange {
+            credentials_sent: false,
             stream, responses, events, cancel: Arc::new(AtomicBool::new(false)), deadline: before + timeout,
         };
         let bytes = vec![42; 1024 * 1024];
@@ -79,6 +80,7 @@ fn cancelled_exchange_does_not_write_credentials() {
     let (_responses_tx, responses) = mpsc::sync_channel(1);
     let (events, _events_rx) = mpsc::sync_channel(1);
     let mut exchange = Exchange {
+        credentials_sent: false,
         stream, responses, events, cancel: Arc::new(AtomicBool::new(true)),
         deadline: Instant::now() + Duration::from_secs(1),
     };
@@ -113,6 +115,7 @@ fn successive_prompts_receive_their_own_answers() {
         assert!(events_rx.recv_timeout(Duration::from_secs(2)).is_err());
     });
     let mut exchange = Exchange {
+        credentials_sent: false,
         stream, responses, events, cancel: Arc::new(AtomicBool::new(false)),
         deadline: Instant::now() + Duration::from_secs(2),
     };

@@ -25,6 +25,19 @@ pkgs.testers.runNixOSTest {
     };
     users.groups.alice = {};
     security.pam.services.rsdm-lock = {};
+    security.pam.services.rsdm-lock-cancel-test.text = ''
+      auth optional ${pkgs.linux-pam}/lib/security/pam_faildelay.so delay=30000000
+      auth required ${pkgs.linux-pam}/lib/security/pam_unix.so
+      account required ${pkgs.linux-pam}/lib/security/pam_unix.so
+    '';
+    environment.etc."rsdm-lock-cancel.toml".text = ''
+      [lock]
+      enable = true
+      pam_service = "rsdm-lock-cancel-test"
+      [security]
+      max_failed_attempts = 1
+      failure_delay_ms = 60000
+    '';
     services.getty.autologinUser = "alice";
     programs.sway.enable = true;
     environment.systemPackages = [ rsdm pkgs.dbus ];
@@ -120,6 +133,29 @@ pkgs.testers.runNixOSTest {
         machine.screenshot("desktop-after-pam-unlock")
         unlocked = Image.open(machine.out_dir / "desktop-after-pam-unlock.png").convert("RGB")
         assert unlocked.getpixel((unlocked.width // 2, unlocked.height // 2)) == (255, 0, 255)
+
+    with subtest("Cancelling a submitted password cannot bypass the attempt limit"):
+        helper = "pgrep -u alice -f ' lock-auth-helper --fd '"
+        machine.succeed(user + "systemd-run --user --unit=rsdm-test-cancel-lock --collect --setenv=WAYLAND_DISPLAY=wayland-1 -- ${rsdm}/bin/rsdm --config /etc/rsdm-lock-cancel.toml lock")
+        machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: pid '")
+        machine.send_chars("cancelled-wrong-password")
+        machine.send_key("ret")
+        machine.wait_until_succeeds("journalctl --no-pager -b | grep -F 'pam_unix(rsdm-lock-cancel-test:auth): authentication failure'")
+        machine.succeed(helper)
+        machine.send_key("esc")
+        machine.wait_until_fails(helper)
+        machine.sleep(1)
+        machine.send_chars("another-wrong-password")
+        machine.send_key("ret")
+        machine.sleep(1)
+        try:
+            machine.fail(helper)
+            machine.succeed("journalctl --no-pager -b | grep -F 'pam_unix(rsdm-lock-cancel-test:auth): authentication failure' | test $(wc -l) -eq 1")
+        except Exception:
+            print(machine.succeed(user + "journalctl --user --no-pager -u rsdm-test-cancel-lock"))
+            raise
+        machine.succeed("rsdm unlock --uid 1000")
+        machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: none '")
 
     with subtest("Idle retries a failed locker without another activity transition"):
         # Send no input after monitor startup: recovery must use the pending

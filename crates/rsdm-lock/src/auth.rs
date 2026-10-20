@@ -70,7 +70,9 @@ pub fn start_authentication(
     let deadline = Instant::now() + AUTH_TIMEOUT;
     let (helper, stream) = HelperProcess::spawn(deadline)?;
     std::thread::Builder::new().name("rsdm-lock-auth".to_string()).spawn(move || {
-        let mut exchange = Exchange { stream, responses: responses_rx, events: events_tx, cancel, deadline };
+        let mut exchange = Exchange {
+            stream, responses: responses_rx, events: events_tx, cancel, deadline, credentials_sent: false,
+        };
         let outcome = run_helper(helper, &mut exchange, &username, &pam_service, password, &limiter);
         let _ = send_event(&exchange.events, AuthEvent::Finished(outcome), &exchange.cancel, deadline);
     })?;
@@ -93,6 +95,8 @@ fn run_helper(
             Attempt::Unlocked
         }
         Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+            // PAM can already have rejected the password while delaying its result.
+            if exchange.credentials_sent { limiter.record_failure(username); }
             Attempt::Failed("Authentication cancelled".to_string())
         }
         result => {

@@ -21,6 +21,7 @@ fn closed_helper_connection_terminates_the_process_and_limits_retries() {
     let deadline = before + Duration::from_secs(1);
     let helper = HelperProcess { child: Some(child), deadline };
     let mut exchange = Exchange {
+        credentials_sent: false,
         stream: parent, responses, events, cancel: Arc::new(AtomicBool::new(false)), deadline,
     };
     let outcome = run_helper(helper, &mut exchange, "alice", "test", PasswordSecret::new(""), &limiter);
@@ -54,6 +55,7 @@ fn helper_result_does_not_wait_for_process_exit_and_resets_prior_failures() {
     let deadline = before + Duration::from_secs(1);
     let helper = HelperProcess { child: Some(child), deadline };
     let mut exchange = Exchange {
+        credentials_sent: false,
         stream: parent, responses, events, cancel: Arc::new(AtomicBool::new(false)), deadline,
     };
     let outcome = run_helper(helper, &mut exchange, "alice", "test", PasswordSecret::new(""), &limiter);
@@ -83,6 +85,7 @@ fn exited_helper_output_is_drained_before_deciding_the_result() {
     let deadline = Instant::now() + Duration::from_secs(1);
     let helper = HelperProcess { child: Some(child), deadline };
     let mut exchange = Exchange {
+        credentials_sent: false,
         stream: parent, responses, events, cancel: Arc::new(AtomicBool::new(false)), deadline,
     };
     let outcome = run_helper(helper, &mut exchange, "alice", "test", PasswordSecret::new(""), &limiter);
@@ -102,6 +105,7 @@ fn a_stalled_helper_times_out_and_is_terminated() {
     let deadline = before + Duration::from_millis(100);
     let helper = HelperProcess { child: Some(child), deadline };
     let mut exchange = Exchange {
+        credentials_sent: false,
         stream: parent, responses, events, cancel: Arc::new(AtomicBool::new(false)), deadline,
     };
     let outcome = run_helper(helper, &mut exchange, "alice", "test", PasswordSecret::new(""), &limiter);
@@ -123,7 +127,7 @@ fn dropping_a_job_cancels_its_worker_without_consuming_a_rate_limit_attempt() {
     };
     let deadline = Instant::now() + Duration::from_secs(1);
     let helper = HelperProcess { child: Some(child), deadline };
-    let mut exchange = Exchange { stream: parent, responses, events: events_tx, cancel, deadline };
+    let mut exchange = Exchange { credentials_sent: false, stream: parent, responses, events: events_tx, cancel, deadline };
     drop(job);
     let outcome = run_helper(helper, &mut exchange, "alice", "test", PasswordSecret::new(""), &limiter);
     assert_eq!(outcome, Attempt::Failed("Authentication cancelled".into()));
@@ -144,10 +148,39 @@ fn a_stalled_ui_cannot_bypass_the_deadline_with_a_queued_success() {
     let deadline = before + Duration::from_millis(50);
     let helper = HelperProcess { child: Some(child), deadline };
     let mut exchange = Exchange {
+        credentials_sent: false,
         stream: parent, responses, events, cancel: Arc::new(AtomicBool::new(false)), deadline,
     };
     let outcome = run_helper(helper, &mut exchange, "alice", "test", PasswordSecret::new(""), &limiter);
     assert_eq!(outcome, Attempt::Failed("Authentication timed out".into()));
     assert!(before.elapsed() < Duration::from_secs(1));
+    assert!(limiter.check_allowed("alice").is_err());
+}
+
+#[test]
+fn cancelling_a_submitted_password_still_limits_retries() {
+    let (parent, mut peer) = UnixStream::pair().unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    let child = Command::new("sleep").arg("30").spawn().unwrap();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let peer_cancel = Arc::clone(&cancel);
+    let (completed, wait) = mpsc::channel();
+    let fixture = std::thread::spawn(move || {
+        assert!(matches!(auth_protocol::read_frame(&mut peer).unwrap(),
+            Frame::Start { password, .. } if password.expose_secret() == "wrong"));
+        peer_cancel.store(true, Ordering::Release);
+        wait.recv_timeout(Duration::from_secs(2)).unwrap();
+    });
+    let limiter = MemoryLoginAttemptLimiter::new(1, Duration::from_secs(60));
+    let (_responses_tx, responses) = mpsc::sync_channel(1);
+    let (events, _events_rx) = mpsc::sync_channel(1);
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let helper = HelperProcess { child: Some(child), deadline };
+    let mut exchange = Exchange { credentials_sent: false, stream: parent, responses, events, cancel, deadline };
+
+    let outcome = run_helper(helper, &mut exchange, "alice", "test", PasswordSecret::new("wrong"), &limiter);
+    completed.send(()).unwrap();
+    fixture.join().unwrap();
+    assert_eq!(outcome, Attempt::Failed("Authentication cancelled".into()));
     assert!(limiter.check_allowed("alice").is_err());
 }

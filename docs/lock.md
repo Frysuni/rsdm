@@ -159,6 +159,9 @@ Enter starts PAM authentication even with an empty password field, allowing
 configured fingerprint or token modules to run. PAM decides whether the attempt
 succeeds, and failed attempts remain rate limited.
 
+Cancelling after credentials have been sent to PAM also counts toward the retry
+limit. Cancelling before submission does not consume an attempt.
+
 ## Preview without a compositor
 
 Render the locker look to a PNG (handy for tuning themes/wallpaper):

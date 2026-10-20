@@ -21,6 +21,7 @@ pub(super) struct Exchange {
     pub events: mpsc::SyncSender<AuthEvent>,
     pub cancel: Arc<AtomicBool>,
     pub deadline: Instant,
+    pub credentials_sent: bool,
 }
 
 impl Exchange {
@@ -28,6 +29,7 @@ impl Exchange {
         self.stream.set_nonblocking(true)?;
         let start = auth_protocol::encode_start(username, service, password)?;
         self.write_all(&start)?;
+        self.credentials_sent = true;
         drop(start);
 
         let mut buffer = Zeroizing::new(Vec::new());
