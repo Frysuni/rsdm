@@ -67,6 +67,13 @@ pkgs.testers.runNixOSTest {
       Exec=/run/rsdm_noexec/true
       TryExec=/run/rsdm_noexec/true
     '';
+    environment.etc."rsdm-test-sessions/unavailable-spaced.desktop".text = ''
+      [Desktop Entry]
+      Type=Application
+      Name=Unavailable spaced filename
+      Exec=${pkgs.coreutils}/bin/true
+      TryExec=${pkgs.coreutils}/bin/true\s
+    '';
     environment.etc."sway/config".text = ''
       output * bg #ff00ff solid_color
       exec ${rsdm}/bin/rsdm session finalize SWAYSOCK
@@ -103,8 +110,9 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_unit("rsdm.service")
     machine.wait_until_succeeds("journalctl --no-pager -u rsdm | grep 'display manager initialized'")
     machine.wait_for_unit("multi-user.target")
-    with subtest("Greeter excludes TryExec programs on a noexec filesystem"):
+    with subtest("Greeter excludes unavailable TryExec programs"):
         machine.succeed("${pkgs.coreutils}/bin/true")
+        machine.fail("test -e '${pkgs.coreutils}/bin/true '")
         status, diagnostic = machine.execute("/run/rsdm_noexec/true")
         assert status == 126, diagnostic
         machine.succeed("journalctl --no-pager -u rsdm | grep 'desktop session discovery complete count=1'")

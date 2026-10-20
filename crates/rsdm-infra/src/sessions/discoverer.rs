@@ -136,7 +136,7 @@ fn session_id(path: &Path) -> Option<String> {
 }
 
 fn try_exec_available(value: &str) -> bool {
-    let value = value.trim();
+    // Decoded whitespace may belong to the filename.
     if value.is_empty() {
         return false;
     }
@@ -184,6 +184,27 @@ mod tests {
             let executable = Command::new(&program).status().is_ok_and(|status| status.success());
             assert_eq!(try_exec_available(program.to_str().unwrap()), executable, "mode {mode:o}");
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn try_exec_preserves_escaped_spaces_in_the_executable_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = env::temp_dir().join(format!("rsdm-try-exec-spaces-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let program = root.join("program");
+        fs::write(&program, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(root.join("test.desktop"), format!(
+            "[Desktop Entry]\nType=Application\nName=Test\nExec=\"{} \"\nTryExec={}\\s\n",
+            program.display(), program.display(),
+        )).unwrap();
+        let discoverer = DesktopSessionDiscoverer::new([root.clone()]);
+        assert!(discoverer.discover().unwrap().is_empty());
+        fs::rename(&program, root.join("program ")).unwrap();
+        assert_eq!(discoverer.discover().unwrap().len(), 1);
         fs::remove_dir_all(root).unwrap();
     }
 
