@@ -14,6 +14,7 @@ from gi.repository import GLib
 RUNTIME = Path(os.environ["XDG_RUNTIME_DIR"])
 MANAGER = "org.freedesktop.login1.Manager"
 SESSION = "org.freedesktop.login1.Session"
+USER = "org.freedesktop.login1.User"
 
 
 class Manager(dbus.service.Object):
@@ -21,6 +22,7 @@ class Manager(dbus.service.Object):
         self.bus = bus
         self.login_bus = dbus.SystemBus()
         self.sessions = {}
+        self.users = {}
         self.name = dbus.service.BusName("org.freedesktop.login1", bus)
         self.preparing = False
         self.guards = []
@@ -37,6 +39,20 @@ class Manager(dbus.service.Object):
         if path not in self.sessions:
             actual = self.login_bus.get_object("org.freedesktop.login1", path)
             self.sessions[path] = Session(self.bus, path, actual)
+        return path
+
+    @dbus.service.method(MANAGER, in_signature="u", out_signature="o")
+    def GetUser(self, uid):
+        manager = dbus.Interface(self.login_bus.get_object("org.freedesktop.login1", "/org/freedesktop/login1"), MANAGER)
+        path = manager.GetUser(uid)
+        actual = self.login_bus.get_object("org.freedesktop.login1", path)
+        if path not in self.users:
+            self.users[path] = User(self.bus, path, actual)
+        properties = dbus.Interface(actual, "org.freedesktop.DBus.Properties")
+        session_id, session_path = properties.Get(USER, "Display")
+        if session_id and session_path not in self.sessions:
+            session = self.login_bus.get_object("org.freedesktop.login1", session_path)
+            self.sessions[session_path] = Session(self.bus, session_path, session)
         return path
 
     @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="ss", out_signature="v")
@@ -141,6 +157,23 @@ class Session(dbus.service.Object):
     @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="s", out_signature="a{sv}")
     def GetAll(self, interface):
         return {name: self.Get(interface, name) for name in ["User", "Id", "Type"]}
+
+
+class User(dbus.service.Object):
+    def __init__(self, bus, path, actual):
+        self.properties = dbus.Interface(actual, "org.freedesktop.DBus.Properties")
+        super().__init__(bus, path)
+
+    @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="ss", out_signature="v")
+    def Get(self, interface, name):
+        assert interface == USER
+        if name == "Display":
+            return self.properties.Get(interface, name)
+        raise dbus.exceptions.DBusException("unknown property")
+
+    @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="s", out_signature="a{sv}")
+    def GetAll(self, interface):
+        return {"Display": self.Get(interface, "Display")}
 
 
 DBusGMainLoop(set_as_default=True)
