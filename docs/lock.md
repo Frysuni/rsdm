@@ -93,10 +93,11 @@ fractionally scaled outputs (for example niri `scale 1.5`) it follows
 `fractional-scale-v1` and `viewporter`, preserving the TTY-like density and crisp
 pixel glyphs instead of asking the compositor to enlarge a logical-size buffer.
 
-Automatic sizing targets roughly 68 text rows, comparable to a typical TTY
-(`size = 2` on a 1080p physical buffer). Set `[lock].size` from `1` through `12`
-to force an exact integer bitmap zoom. Both size and the secondary-output policy
-can be previewed immediately through `F1`.
+With `[lock].size` omitted, Lock uses the Greeter console font's native physical
+pixel dimensions, the same as `size = 1`, independently of output resolution and
+desktop scaling. Set `size` from `1` through `12` to multiply both glyph
+dimensions by that integer. Both size and the secondary-output policy can be
+previewed immediately through `F1`.
 
 ## Look
 
