@@ -98,6 +98,8 @@ impl Session {
 
 #[path = "support/client_handshake.rs"]
 mod client_handshake;
+#[path = "support/recovery_config.rs"]
+mod recovery_config;
 
 #[path = "support/attach_disable.rs"]
 mod attach_disable;

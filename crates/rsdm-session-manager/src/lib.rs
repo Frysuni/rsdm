@@ -89,6 +89,7 @@ use rsdm_core::domain::{SessionManagerConfig, SessionManagerUpdate, ShutdownPoli
 use thiserror::Error;
 
 pub use client::{cancel, generation, is_running, status, status_details, stop};
+pub use cleanup::recovery_config_path;
 pub use control::{SessionStatus, StopOutcome};
 pub use status::{Capability, PreparationStatus, SessionStatusDetails};
 pub use provider::StartOptions;

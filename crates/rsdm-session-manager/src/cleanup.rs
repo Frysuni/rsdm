@@ -10,6 +10,19 @@ use super::{
     runtime::{Runtime, SessionRecord}, units,
 };
 
+/// Resolve recovery policy from the validated generation record as its owner.
+pub async fn recovery_config_path(generation: &str) -> Result<Option<std::path::PathBuf>, SessionError> {
+    let generation = generation.to_string();
+    super::runtime::blocking(move || {
+        let Some(runtime) = Runtime::open(&generation)? else { return Ok(None); };
+        match runtime.session() {
+            Ok(record) => Ok(record.config_path),
+            Err(SessionError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }).await
+}
+
 pub async fn cleanup(generation: &str, actions: super::action_gate::ActionGate) -> Result<(), SessionError> {
     let generation = generation.to_string();
     let Some((runtime, _lease, saved_deadline)) = super::runtime::blocking(move || {

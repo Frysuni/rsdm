@@ -1,0 +1,98 @@
+{ pkgs, rsdm }:
+
+let
+  module = import ../../packaging/nix/module.nix {
+    packages.${pkgs.stdenv.hostPlatform.system}.rsdm-stable = rsdm;
+  };
+  controller = import ./controller.nix { inherit pkgs; };
+  compositor = pkgs.writeShellScript "custom-config-desktop" ''
+    export WLR_RENDERER=pixman
+    exec ${pkgs.sway}/bin/sway --config /etc/sway/custom-config
+  '';
+  application = pkgs.writeShellScript "custom-config-app" ''
+    trap 'touch /tmp/custom-app-saved; exit 0' TERM
+    touch /tmp/custom-app-ready
+    while :; do sleep 1; done
+  '';
+in
+pkgs.testers.runNixOSTest {
+  name = "rsdm-custom-config-recovery";
+  globalTimeout = 120;
+  nodes.machine = { lib, ... }: {
+    imports = [ module ];
+    virtualisation.memorySize = 2048;
+    virtualisation.qemu.options = [ "-vga none -device virtio-gpu-pci" ];
+    users.users.alice = {
+      isNormalUser = true;
+      uid = 1000;
+      group = "alice";
+      password = "test-password";
+    };
+    users.groups.alice = {};
+    programs.sway.enable = true;
+    security.polkit.enable = true;
+    services.rsdm = { enable = true; package = rsdm; keyring = "none"; };
+    systemd.services.rsdm.serviceConfig.ExecStart = lib.mkForce "${rsdm}/bin/rsdm --config /etc/rsdm-custom.toml dm";
+    environment.etc."rsdm.toml".source = lib.mkForce (pkgs.writeText "default-disabled.toml" ''
+      [session_manager]
+      enabled = false
+    '');
+    environment.etc."rsdm-custom.toml".text = ''
+      [dm]
+      fixed_session = "${compositor}"
+      [dm.remember]
+      username = false
+      [security]
+      failure_delay_ms = 0
+    '';
+    environment.etc."rsdm-explicit.toml".text = ''
+      [dm]
+      fixed_session = "${rsdm}/bin/rsdm --config /etc/rsdm-session.toml session start -- ${compositor}"
+      [dm.remember]
+      username = false
+      [session_manager]
+      enabled = false
+      [security]
+      failure_delay_ms = 0
+    '';
+    environment.etc."rsdm-session.toml".text = "";
+    environment.etc."sway/custom-config".text = ''
+      output * bg #ff00ff solid_color
+      exec ${rsdm}/bin/rsdm --config /etc/rsdm-session.toml session finalize SWAYSOCK
+    '';
+  };
+
+  testScript = ''
+    start_all()
+    machine.wait_for_unit("rsdm.service")
+    machine.wait_until_succeeds("journalctl --no-pager -u rsdm | grep 'display manager initialized'")
+    machine.succeed("loginctl enable-linger alice")
+    user = "runuser -u alice -- env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
+    client = "${controller} published alice ${rsdm}/bin/rsdm --config /etc/rsdm-session.toml "
+    for scenario in ["wrapped desktop", "explicit session start"]:
+        with subtest(scenario):
+            if scenario == "explicit session start":
+                machine.succeed("systemctl stop rsdm; cp --remove-destination /etc/rsdm-explicit.toml /etc/rsdm-custom.toml; systemctl start rsdm")
+                machine.wait_until_succeeds("journalctl --no-pager -u rsdm | grep 'display manager initialized' | test $(wc -l) -ge 2")
+            machine.succeed("rm -f /tmp/custom-app-ready /tmp/custom-app-saved")
+            machine.send_key("ctrl-alt-f1")
+            machine.send_chars("alice")
+            machine.send_key("tab")
+            machine.send_chars("test-password")
+            machine.send_key("ret")
+            machine.wait_until_succeeds(client + "session status | grep ': running '", timeout=40)
+            machine.succeed(client + "app --shutdown-timeout 2 --shutdown-method term -- ${application}")
+            machine.wait_for_file("/tmp/custom-app-ready")
+            compositor = machine.succeed(user + "systemctl --user list-units --plain --no-legend 'session-rsdm-*' | awk '{print $1}'").strip()
+            pid = machine.succeed(user + "systemctl --user show --property=MainPID --value " + compositor).strip()
+            coordinator = machine.succeed("pgrep -u alice -f 'rsdm --config /etc/rsdm-(custom|session).toml session start'").strip()
+            assert coordinator.isdigit(), coordinator
+            machine.succeed("kill -KILL " + coordinator)
+            count = 1 if scenario == "wrapped desktop" else 2
+            machine.wait_until_succeeds("journalctl --no-pager -b | grep 'pam_unix(rsdm:session): session closed for user alice' | test $(wc -l) -ge " + str(count))
+            machine.fail("kill -0 " + pid)
+            machine.succeed("test -e /tmp/custom-app-saved")
+            machine.wait_until_tty_matches("1", "Password", timeout=15)
+            machine.fail("journalctl --no-pager -b | grep 'session recovery exited with'")
+  '';
+}

@@ -81,6 +81,8 @@ pub enum SessionAction {
     Cleanup {
         #[arg(long)]
         generation: String,
+        #[arg(long)]
+        recorded_config: bool,
     },
 }
 
@@ -103,6 +105,11 @@ pub struct AppOptions {
 }
 
 pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
+    let recorded_path = match &action {
+        SessionAction::Cleanup { generation, recorded_config: true } => session_manager::recovery_config_path(generation).await?,
+        _ => None,
+    };
+    let path = recorded_path.as_deref().unwrap_or(path);
     let updates = if matches!(&action, SessionAction::Start { .. } | SessionAction::Attach | SessionAction::Serve | SessionAction::Finalize { .. } | SessionAction::AppStop { .. } | SessionAction::AppExec { .. } | SessionAction::AppWatch { .. } | SessionAction::Cleanup { .. }) {
         Some(watch_session_config(path).await?)
     } else { None };
@@ -145,7 +152,7 @@ pub async fn run(path: &Path, action: SessionAction) -> Result<()> {
         SessionAction::AppWatch { generation, unit } => {
             session_manager::watch_app_with_config_updates(&generation, &unit, updates.expect("application lifetime configuration")).await.context("observing application lifetime")
         }
-        SessionAction::Cleanup { generation } => {
+        SessionAction::Cleanup { generation, .. } => {
             session_manager::cleanup_with_config_updates(&generation, updates.expect("recovery configuration")).await.context("recovering the graphical session")
         }
     }

@@ -11,7 +11,7 @@ use super::child_wait::wait_for_exit;
 
 pub(super) fn cleanup(environment: &[(String, String)], uid: u32, gid: u32, generation: &str) -> Result<(), SessionLaunchError> {
     let executable = std::env::current_exe().map_err(|error| SessionLaunchError::Setup(error.to_string()))?;
-    let mut child = Command::new(executable).args(["session", "cleanup", "--generation", generation])
+    let mut child = Command::new(executable).args(["session", "cleanup", "--generation", generation, "--recorded-config"])
         .env_clear().envs(environment.iter().map(|(key, value)| (key, value)))
         // Command::uid also clears inherited supplementary groups.
         .uid(uid).gid(gid).current_dir("/").spawn()

@@ -145,6 +145,7 @@
           power-lifecycle = import ./tests/session-lifecycle/power.nix { inherit pkgs rsdm; };
           lock-power = import ./tests/session-lifecycle/lock.nix { inherit pkgs rsdm; };
           dm-lifecycle = import ./tests/session-lifecycle/dm.nix { inherit pkgs rsdm; };
+          dm-recovery = import ./tests/session-lifecycle/dm-recovery.nix { inherit pkgs rsdm; };
         });
 
       devShells = forAllSystems (
