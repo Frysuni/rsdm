@@ -46,7 +46,27 @@ pkgs.testers.runNixOSTest {
       keyring = "none";
       dm.fixedSession = "${compositor}";
       config.security.failure_delay_ms = 0;
+      config.dm.session_dirs = [ "/etc/rsdm-test-sessions" ];
     };
+    systemd.services.rsdm.preStart = ''
+      ${pkgs.coreutils}/bin/mkdir -p /run/rsdm_noexec
+      if ! ${pkgs.util-linux}/bin/mountpoint -q /run/rsdm_noexec; then
+        ${pkgs.util-linux}/bin/mount -t tmpfs -o noexec,mode=0755 tmpfs /run/rsdm_noexec
+      fi
+      ${pkgs.coreutils}/bin/install -m755 ${pkgs.coreutils}/bin/true /run/rsdm_noexec/true
+    '';
+    environment.etc."rsdm-test-sessions/available.desktop".text = ''
+      [Desktop Entry]
+      Name=Test desktop
+      Exec=${compositor}
+      TryExec=${pkgs.coreutils}/bin/true
+    '';
+    environment.etc."rsdm-test-sessions/unavailable.desktop".text = ''
+      [Desktop Entry]
+      Name=Unavailable desktop
+      Exec=/run/rsdm_noexec/true
+      TryExec=/run/rsdm_noexec/true
+    '';
     environment.etc."sway/config".text = ''
       output * bg #ff00ff solid_color
       exec ${rsdm}/bin/rsdm session finalize SWAYSOCK
@@ -83,6 +103,11 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_unit("rsdm.service")
     machine.wait_until_succeeds("journalctl --no-pager -u rsdm | grep 'display manager initialized'")
     machine.wait_for_unit("multi-user.target")
+    with subtest("Greeter excludes TryExec programs on a noexec filesystem"):
+        machine.succeed("${pkgs.coreutils}/bin/true")
+        status, diagnostic = machine.execute("/run/rsdm_noexec/true")
+        assert status == 126, diagnostic
+        machine.succeed("journalctl --no-pager -u rsdm | grep 'desktop session discovery complete count=1'")
     machine.sleep(2)
     with subtest("Greeter suppresses PID 1 status output while preserving journal logs"):
         machine.succeed("test $(systemctl show -p ShowStatus --value) = no")

@@ -153,11 +153,12 @@ fn try_exec_available(value: &str) -> bool {
 
 #[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
+    use std::ffi::CString;
 
-    fs::metadata(path)
-        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
+    if !path.is_file() { return false; }
+    let Ok(path) = CString::new(path.as_os_str().as_encoded_bytes()) else { return false; };
+    // SAFETY: the path is NUL-terminated; effective credentials match execution.
+    unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), libc::X_OK, libc::AT_EACCESS) == 0 }
 }
 
 #[cfg(not(unix))]
@@ -168,6 +169,23 @@ fn is_executable(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn try_exec_matches_the_kernels_execution_permission_check() {
+        use std::{os::unix::fs::PermissionsExt, process::Command};
+
+        let root = env::temp_dir().join(format!("rsdm-try-exec-permissions-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let program = root.join("program");
+        fs::write(&program, "#!/bin/sh\nexit 0\n").unwrap();
+        for mode in [0o700, 0o010, 0o000] {
+            fs::set_permissions(&program, fs::Permissions::from_mode(mode)).unwrap();
+            let executable = Command::new(&program).status().is_ok_and(|status| status.success());
+            assert_eq!(try_exec_available(program.to_str().unwrap()), executable, "mode {mode:o}");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn hidden_override_masks_lower_priority_session() {
