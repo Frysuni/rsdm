@@ -109,7 +109,8 @@ jobs:
             .#checks.x86_64-linux.power-lifecycle \
             .#checks.x86_64-linux.lock-power \
             .#checks.x86_64-linux.dm-lifecycle \
-            .#checks.x86_64-linux.dm-recovery
+            .#checks.x86_64-linux.dm-recovery \
+            .#checks.x86_64-linux.dm-cancel
 
       - name: build prebuilt rsdm
         run: nix build .#rsdm-stable --print-build-logs

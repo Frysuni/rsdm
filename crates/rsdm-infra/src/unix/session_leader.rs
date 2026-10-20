@@ -222,6 +222,22 @@ fn await_authorization(
 }
 
 fn terminate(pid: libc::pid_t) {
+    // Closing the pipes cancels the login; let PAM finish closing before
+    // forcing an unresponsive owner to exit, including during a DM stop.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let mut status = 0;
+        // SAFETY: this remains our unreaped direct child.
+        let waited = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+        if waited == pid { return; }
+        if waited < 0 {
+            if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted { continue; }
+            return;
+        }
+        if Instant::now() >= deadline { break; }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
     // The process is our unreaped direct child, so its PID cannot be reused
     // between this signal and waitpid.
     if unsafe { libc::kill(pid, libc::SIGKILL) } < 0 {
@@ -276,3 +292,7 @@ fn reap(pid: libc::pid_t) {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
+
+#[cfg(test)]
+#[path = "session_leader_tests.rs"]
+mod tests;

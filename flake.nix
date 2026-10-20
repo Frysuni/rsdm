@@ -146,6 +146,7 @@
           lock-power = import ./tests/session-lifecycle/lock.nix { inherit pkgs rsdm; };
           dm-lifecycle = import ./tests/session-lifecycle/dm.nix { inherit pkgs rsdm; };
           dm-recovery = import ./tests/session-lifecycle/dm-recovery.nix { inherit pkgs rsdm; };
+          dm-cancel = import ./tests/session-lifecycle/dm-cancel.nix { inherit pkgs rsdm; };
         });
 
       devShells = forAllSystems (
