@@ -19,8 +19,16 @@ let
     echo "$$" > "$XDG_RUNTIME_DIR/dm-app-ready"
     while :; do sleep 1; done
   '';
-  fallbackGetty = pkgs.writeShellScript "test-fallback-getty" ''
-    printf '%s\n' "$@" > /tmp/rsdm-fallback-arguments
+  fallbackGetty = pkgs.runCommand "test-fallback-getty" { nativeBuildInputs = [ pkgs.stdenv.cc ]; } ''
+    $CC -x c -o $out - <<'EOF'
+    #include <stdio.h>
+    int main(int argc, char **argv) {
+      FILE *file = fopen("/tmp/rsdm-fallback-arguments", "w");
+      if (!file) return 1;
+      for (int i = 0; i < argc; i++) if (fprintf(file, "%s\n", argv[i]) < 0) return 1;
+      return fclose(file) != 0;
+    }
+    EOF
   '';
 in
 pkgs.testers.runNixOSTest {
@@ -84,7 +92,7 @@ pkgs.testers.runNixOSTest {
         Type = "oneshot";
         Restart = "no";
         RemainAfterExit = true;
-        ExecStart = [ "" "${fallbackGetty} \"quoted value\" \"\" %%I %%%% %I" ];
+        ExecStart = [ "" "@${fallbackGetty} rsdm-custom-getty \"quoted value\" \"\" %%I %%%% %I" ];
       };
     };
     environment.etc."rsdm-fallback.toml".text = ''
@@ -213,7 +221,7 @@ pkgs.testers.runNixOSTest {
         machine.succeed("mkdir /run/rsdm-empty-sessions")
         machine.succeed("systemctl start getty@tty63.service")
         expected = machine.succeed("cat /tmp/rsdm-fallback-arguments")
-        assert expected == "quoted value\n\n%I\n%%\ntty63\n"
+        assert expected == "rsdm-custom-getty\nquoted value\n\n%I\n%%\ntty63\n"
         machine.succeed("rm /tmp/rsdm-fallback-arguments")
         machine.succeed("systemd-run --unit=rsdm-test-fallback --collect -- ${rsdm}/bin/rsdm --config /etc/rsdm-fallback.toml dm")
         machine.wait_for_file("/tmp/rsdm-fallback-arguments")

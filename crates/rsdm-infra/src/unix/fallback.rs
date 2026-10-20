@@ -4,6 +4,8 @@ use std::{convert::Infallible, ffi::CString, io, os::raw::c_char};
 
 use thiserror::Error;
 
+use super::getty_query::GettyCommand;
+
 #[derive(Debug, Error)]
 pub enum FallbackError {
     #[error(transparent)]
@@ -37,7 +39,7 @@ pub async fn exec_fallback(tty_path: &str, primary: &[String]) -> Result<Infalli
     // Resolve the distro's own console login before we exec, so an unconfigured
     // fallback reuses whatever getty systemd runs on this VT.
     let system_getty = super::getty_query::discover_system_getty(tty_path).await;
-    let candidates = fallback_candidates(primary, system_getty.as_deref(), tty_path);
+    let candidates = fallback_candidates(primary, system_getty.as_ref(), tty_path);
     let mut last_error = io::Error::from(io::ErrorKind::NotFound);
     for candidate in &candidates {
         match try_exec(candidate) {
@@ -123,24 +125,25 @@ fn claim_controlling_terminal(fd: i32) -> io::Result<()> {
 /// configured command and before the hardcoded built-ins.
 fn fallback_candidates(
     primary: &[String],
-    system_getty: Option<&[String]>,
+    system_getty: Option<&GettyCommand>,
     tty_path: &str,
-) -> Vec<Vec<String>> {
+) -> Vec<GettyCommand> {
     let tty = tty_path.strip_prefix("/dev/").unwrap_or(tty_path);
-    let mut candidates: Vec<Vec<String>> = Vec::new();
-    let mut push = |command: Vec<String>| {
-        if !command.is_empty() && !candidates.contains(&command) {
+    let mut candidates = Vec::new();
+    let mut push = |executable: &str, argv: Vec<String>| {
+        let command = GettyCommand { executable: executable.to_string(), argv };
+        if !command.argv.is_empty() && !candidates.contains(&command) {
             candidates.push(command);
         }
     };
 
     // The operator's configured fallback wins.
-    push(primary.to_vec());
+    if let Some(executable) = primary.first() { push(executable, primary.to_vec()); }
     // Otherwise reuse the console login the distro already runs on this VT
     // (agetty, mingetty, busybox getty, ...) so an unconfigured fallback still
     // works on a box that does not ship agetty where we expect it.
     if let Some(system_getty) = system_getty {
-        push(system_getty.to_vec());
+        push(&system_getty.executable, system_getty.argv.clone());
     }
     // agetty opens and configures the VT itself, then runs login - the most
     // robust handover. Try it by PATH and the usual absolute locations.
@@ -150,7 +153,7 @@ fn fallback_candidates(
         "/sbin/agetty",
         "/usr/sbin/agetty",
     ] {
-        push(vec![
+        push(agetty, vec![
             agetty.to_string(),
             "--noclear".to_string(),
             tty.to_string(),
@@ -160,16 +163,16 @@ fn fallback_candidates(
     // Plain login as the final resort (it prompts for credentials; we already own
     // the controlling terminal so it will not bounce straight out).
     for login in ["login", "/usr/bin/login", "/bin/login"] {
-        push(vec![login.to_string()]);
+        push(login, vec![login.to_string()]);
     }
     candidates
 }
 
 /// Try to `exec` one candidate. Returns only on failure (exec replaces us).
-fn try_exec(command: &[String]) -> Result<Infallible, FallbackError> {
-    let program = command.first().ok_or(FallbackError::EmptyCommand)?;
-    let program_c = cstring(program)?;
-    let argv = command
+fn try_exec(command: &GettyCommand) -> Result<Infallible, FallbackError> {
+    if command.argv.is_empty() { return Err(FallbackError::EmptyCommand); }
+    let program_c = cstring(&command.executable)?;
+    let argv = command.argv
         .iter()
         .map(|arg| cstring(arg))
         .collect::<Result<Vec<_>, _>>()?;
@@ -193,7 +196,7 @@ fn cstring(value: &str) -> Result<CString, FallbackError> {
 
 #[cfg(test)]
 mod tests {
-    use super::fallback_candidates;
+    use super::{GettyCommand, fallback_candidates};
 
     #[test]
     fn candidates_start_with_the_configured_command() {
@@ -204,23 +207,32 @@ mod tests {
             "linux".to_string(),
         ];
         let candidates = fallback_candidates(&primary, None, "/dev/tty1");
-        assert_eq!(candidates.first(), Some(&primary));
+        assert_eq!(candidates.first().unwrap().argv, primary);
     }
 
     #[test]
     fn discovered_getty_follows_the_configured_command() {
         let primary = vec!["login".to_string()];
-        let system_getty = vec!["/sbin/mingetty".to_string(), "tty1".to_string()];
+        let system_getty = GettyCommand { executable: "/sbin/mingetty".into(), argv: vec!["/sbin/mingetty".into(), "tty1".into()] };
         let candidates = fallback_candidates(&primary, Some(&system_getty), "/dev/tty1");
-        assert_eq!(candidates.first(), Some(&primary));
+        assert_eq!(candidates.first().unwrap().argv, primary);
         assert_eq!(candidates.get(1), Some(&system_getty));
     }
 
     #[test]
     fn discovered_getty_leads_when_no_command_is_configured() {
-        let system_getty = vec!["/sbin/mingetty".to_string(), "tty1".to_string()];
+        let system_getty = GettyCommand { executable: "/sbin/mingetty".into(), argv: vec!["/sbin/mingetty".into(), "tty1".into()] };
         let candidates = fallback_candidates(&[], Some(&system_getty), "/dev/tty1");
         assert_eq!(candidates.first(), Some(&system_getty));
+    }
+
+    #[test]
+    fn identical_arguments_do_not_hide_a_distinct_getty_executable() {
+        let primary = vec!["custom-getty".into(), "tty1".into()];
+        let system_getty = GettyCommand { executable: "/sbin/mingetty".into(), argv: primary.clone() };
+        let candidates = fallback_candidates(&primary, Some(&system_getty), "/dev/tty1");
+        assert_eq!(candidates[0].executable, "custom-getty");
+        assert_eq!(candidates.get(1), Some(&system_getty));
     }
 
     #[test]
@@ -235,7 +247,7 @@ mod tests {
         let candidates = fallback_candidates(&primary, None, "/dev/tty1");
         let count = candidates
             .iter()
-            .filter(|command| *command == &primary)
+            .filter(|command| command.argv == primary)
             .count();
         assert_eq!(count, 1);
     }
@@ -246,18 +258,18 @@ mod tests {
         assert!(
             candidates
                 .iter()
-                .any(|command| command == &vec!["login".to_string()])
+                .any(|command| command.argv == vec!["login".to_string()])
         );
         // The bare tty name (not the device path) is passed to agetty.
         assert!(
             candidates
                 .iter()
-                .any(|command| command.iter().any(|arg| arg == "tty2"))
+                .any(|command| command.argv.iter().any(|arg| arg == "tty2"))
         );
         assert!(
             candidates
                 .iter()
-                .all(|command| command.iter().all(|arg| arg != "/dev/tty2"))
+                .all(|command| command.argv.iter().all(|arg| arg != "/dev/tty2"))
         );
     }
 }
