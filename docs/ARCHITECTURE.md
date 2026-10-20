@@ -173,10 +173,13 @@ still observes a validated false-to-true transition as disabling its generation.
 
 Every user-bus control method verifies session membership. It checks
 bus UID/PID credentials, pins the caller, and verifies its actual logind login.
-Processes without a logind login must belong to a registered application or
-compositor cgroup with the current recorded InvocationID. Another login of the
-same UID is rejected. Authorization queries have a five-second total budget and
-share four concurrent slots. Disabling closes admission before verified requests
+Processes without a logind login must belong to a live user service or scope.
+Shared user units use the primary graphical login selected by logind's user
+`Display` property; no compositor-specific scope names or environment tokens
+establish membership. If that display does not match, only a registered
+application or compositor with its recorded InvocationID is accepted. Another
+actual login of the same UID is rejected. Authorization queries have a
+five-second total budget and share four concurrent slots. Disabling closes admission before verified requests
 can be queued. `Handshake` returns the generation after these same checks;
 CLI app, finalize, stop and cancel use that result instead of trusting an
 environment generation hint.

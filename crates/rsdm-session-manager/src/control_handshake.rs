@@ -1,4 +1,4 @@
-//! Generation discovery requires a login or a registered unit invocation.
+//! Shared user units follow logind's primary graphical login.
 
 use std::time::Duration;
 
@@ -25,7 +25,11 @@ impl Verifier {
             let (runtime, record) = self.session().await?;
             let logind = self.logind().await?;
             if !caller.belongs_to_login(&logind, &self.identity).await? {
-                registered_process(connection, &caller, &runtime, &record).await?;
+                if Caller::belongs_to_display(&logind, &self.identity).await? {
+                    user_unit(connection, &caller).await?;
+                } else {
+                    registered_process(connection, &caller, &runtime, &record).await?;
+                }
             }
             caller.check_alive()?;
             self.session().await?;
@@ -61,16 +65,25 @@ impl Verifier {
 }
 
 async fn registered_process(connection: &Connection, caller: &Caller, runtime: &Runtime, record: &SessionRecord) -> Result<(), SessionError> {
+    let (name, invocation) = user_unit(connection, caller).await?;
+    let expected = registered_invocation(runtime, record, &name).await?;
+    if invocation != expected { return Err(denied("caller unit invocation has changed")); }
+    Ok(())
+}
+
+async fn user_unit(connection: &Connection, caller: &Caller) -> Result<(String, Vec<u8>), SessionError> {
     let manager = zbus::Proxy::new(connection, "org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager").await?;
     let path: OwnedObjectPath = manager.call("GetUnitByPID", &(caller.pid,)).await?;
     let unit = zbus::proxy::Builder::<zbus::Proxy<'_>>::new(connection)
         .destination("org.freedesktop.systemd1")?.path(path)?
         .interface("org.freedesktop.systemd1.Unit")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     let name: String = unit.get_property("Id").await?;
-    let expected = registered_invocation(runtime, record, &name).await?;
     let invocation: Vec<u8> = unit.get_property("InvocationID").await?;
-    if invocation != expected { return Err(denied("caller unit invocation has changed")); }
-    let service = zbus::Proxy::new(connection, "org.freedesktop.systemd1", unit.path(), "org.freedesktop.systemd1.Service").await?;
+    if invocation.is_empty() || invocation.iter().all(|byte| *byte == 0) { return Err(denied("caller unit has no live invocation")); }
+    let interface = if name.ends_with(".scope") { "org.freedesktop.systemd1.Scope" }
+        else if name.ends_with(".service") { "org.freedesktop.systemd1.Service" }
+        else { return Err(denied("caller is not in a user service or scope")); };
+    let service = zbus::Proxy::new(connection, "org.freedesktop.systemd1", unit.path(), interface).await?;
     let group: String = service.get_property("ControlGroup").await?;
     let pid = caller.pid;
     let belongs = super::runtime::blocking(move || {
@@ -80,7 +93,8 @@ async fn registered_process(connection: &Connection, caller: &Caller, runtime: &
     if !belongs || unit.get_property::<Vec<u8>>("InvocationID").await? != invocation {
         return Err(denied("caller is not in the registered unit invocation"));
     }
-    Ok(())
+    caller.check_alive()?;
+    Ok((name, invocation))
 }
 
 async fn registered_invocation(runtime: &Runtime, record: &SessionRecord, unit: &str) -> Result<Vec<u8>, SessionError> {

@@ -8,6 +8,7 @@ use zbus::{Connection, zvariant::OwnedObjectPath};
 use super::{identity::SessionIdentity, runtime::{Runtime, SessionRecord}};
 
 const PATH: &str = "/org/freedesktop/login1/session/test";
+const USER_PATH: &str = "/org/freedesktop/login1/user/test";
 
 #[derive(Debug, zbus_macros::DBusError)]
 #[zbus(prefix = "org.freedesktop")]
@@ -24,6 +25,11 @@ struct Manager { pending: Arc<AtomicBool>, missing: Arc<AtomicBool>, entered: Ar
 
 #[zbus_macros::interface(name = "org.freedesktop.login1.Manager")]
 impl Manager {
+    fn get_user(&self, uid: u32) -> Result<OwnedObjectPath, ManagerError> {
+        if uid != unsafe { libc::geteuid() } { return Err(ManagerError::AccessDenied("unexpected user".into())); }
+        Ok(OwnedObjectPath::try_from(USER_PATH).unwrap())
+    }
+
     #[zbus(name = "GetSessionByPID")]
     async fn get_session_by_pid(&self, pid: u32) -> Result<OwnedObjectPath, ManagerError> {
         if pid != std::process::id() { return Err(ManagerError::AccessDenied("unexpected caller process".into())); }
@@ -33,6 +39,16 @@ impl Manager {
             std::future::pending::<()>().await;
         }
         Ok(OwnedObjectPath::try_from(PATH).unwrap())
+    }
+}
+
+struct User(String);
+
+#[zbus_macros::interface(name = "org.freedesktop.login1.User")]
+impl User {
+    #[zbus(property)]
+    fn display(&self) -> (String, OwnedObjectPath) {
+        (self.0.clone(), OwnedObjectPath::try_from(PATH).unwrap())
     }
 }
 
@@ -80,6 +96,7 @@ impl Context {
         let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
                 .serve_at("/org/freedesktop/login1", manager).unwrap()
+                .serve_at(USER_PATH, User(String::new())).unwrap()
                 .serve_at(PATH, Session(identity)).unwrap().build().await.unwrap()
         });
         let logind = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
@@ -89,6 +106,11 @@ impl Context {
     pub(super) async fn set_login(&self, identity: SessionIdentity) {
         self._server.object_server().remove::<Session, _>(PATH).await.unwrap();
         self._server.object_server().at(PATH, Session(identity)).await.unwrap();
+    }
+
+    pub(super) async fn set_display(&self, id: &str) {
+        self._server.object_server().remove::<User, _>(USER_PATH).await.unwrap();
+        self._server.object_server().at(USER_PATH, User(id.into())).await.unwrap();
     }
 }
 

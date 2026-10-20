@@ -20,12 +20,12 @@ impl Manager {
     }
 }
 
-struct Unit { invocation: Vec<u8>, replace: bool, reads: AtomicUsize }
+struct Unit { name: String, invocation: Vec<u8>, replace: bool, reads: AtomicUsize }
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Unit")]
 impl Unit {
     #[zbus(property)]
-    fn id(&self) -> &str { UNIT }
+    fn id(&self) -> &str { &self.name }
 
     #[zbus(property, name = "InvocationID")]
     fn invocation_id(&self) -> Vec<u8> {
@@ -42,6 +42,14 @@ impl Service {
     fn control_group(&self) -> &str { &self.0 }
 }
 
+struct Scope(String);
+
+#[zbus_macros::interface(name = "org.freedesktop.systemd1.Scope")]
+impl Scope {
+    #[zbus(property)]
+    fn control_group(&self) -> &str { &self.0 }
+}
+
 struct Fixture {
     directory: PathBuf,
     runtime: Runtime,
@@ -52,6 +60,10 @@ struct Fixture {
 
 impl Fixture {
     async fn new(invocation: Vec<u8>, replace: bool, group: String) -> Self {
+        Self::in_unit(UNIT, invocation, replace, group).await
+    }
+
+    async fn in_unit(name: &str, invocation: Vec<u8>, replace: bool, group: String) -> Self {
         let directory = std::env::temp_dir().join(format!("rsdm-handshake-{}", zbus::Guid::generate()));
         fs::create_dir(&directory).unwrap();
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
@@ -62,10 +74,12 @@ impl Fixture {
             deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, lifetime_process: None, preparation: None,
         }).unwrap();
         let (server, client) = tokio::net::UnixStream::pair().unwrap();
+        let name = name.to_string();
         let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
                 .serve_at("/org/freedesktop/systemd1", Manager).unwrap()
-                .serve_at(PATH, Unit { invocation, replace, reads: AtomicUsize::new(0) }).unwrap()
+                .serve_at(PATH, Unit { name, invocation, replace, reads: AtomicUsize::new(0) }).unwrap()
+                .serve_at(PATH, Scope(group.clone())).unwrap()
                 .serve_at(PATH, Service(group)).unwrap().build().await.unwrap()
         });
         let connection = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
@@ -82,6 +96,25 @@ impl Fixture {
         let credentials = ConnectionCredentials::default().set_unix_user_id(self.record.identity.uid).set_process_id(std::process::id());
         let caller = Caller::from_credentials(&credentials, self.record.identity.uid).unwrap();
         registered_process(&self.connection, &caller, &self.runtime, &self.record).await
+    }
+}
+
+#[tokio::test]
+async fn shared_user_scopes_and_services_require_live_pinned_cgroup_membership() {
+    for name in ["app-compositor-terminal.scope", "desktop-launcher.service"] {
+        for (invocation, replace, group, accepted) in [
+            (vec![1; 16], false, current_group(), true),
+            (vec![1; 16], true, current_group(), false),
+            (vec![0; 16], false, current_group(), false),
+            (Vec::new(), false, current_group(), false),
+            (vec![1; 16], false, "/another-session".into(), false),
+            (vec![1; 16], false, "/".into(), false),
+        ] {
+            let fixture = Fixture::in_unit(name, invocation, replace, group).await;
+            let credentials = ConnectionCredentials::default().set_unix_user_id(fixture.record.identity.uid).set_process_id(std::process::id());
+            let caller = Caller::from_credentials(&credentials, fixture.record.identity.uid).unwrap();
+            assert_eq!(user_unit(&fixture.connection, &caller).await.is_ok(), accepted, "{name}");
+        }
     }
 }
 

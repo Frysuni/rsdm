@@ -36,6 +36,7 @@ async fn assert_all_requests_denied(endpoint: Endpoint, receiver: tokio::sync::m
 async fn another_login_of_the_same_uid_cannot_read_or_mutate_the_session() {
     let (endpoint, received) = endpoint().await;
     let mut identity = endpoint.verifier.identity.clone();
+    endpoint.verifier.context.as_ref().unwrap().set_display(&identity.login_session_id).await;
     identity.login_session_id = "another-login".into();
     endpoint.verifier.context.as_ref().unwrap().set_login(identity).await;
     assert_all_requests_denied(endpoint, received).await;

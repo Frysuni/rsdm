@@ -14,6 +14,15 @@ let
     touch "$XDG_RUNTIME_DIR/niri-stubborn-ready"
     while :; do sleep 1; done
   '';
+  launchProbe = pkgs.writeShellScript "test-niri-launch-probe" ''
+    printf '%s\n' "$RSDM_SESSION_GENERATION" > "$XDG_RUNTIME_DIR/launch-probe-$1"
+  '';
+  scopedLaunch = pkgs.writeShellScript "test-niri-scoped-launch" ''
+    sleep 1
+    cat /proc/self/cgroup > "$XDG_RUNTIME_DIR/launch-caller-group"
+    ${rsdm}/bin/rsdm app -- ${launchProbe} scope > "$XDG_RUNTIME_DIR/launch-caller-result" 2>&1
+    echo "$?" > "$XDG_RUNTIME_DIR/launch-caller-exit"
+  '';
 in
 pkgs.testers.runNixOSTest {
   name = "rsdm-native-niri";
@@ -70,6 +79,18 @@ pkgs.testers.runNixOSTest {
         machine.succeed(session + "niri msg version")
         machine.fail(user + "systemctl --user list-units --all --plain --no-legend 'session-rsdm-*' | grep session-rsdm")
         machine.succeed(session + "rsdm session status | grep 'RSDM XSMP: available'")
+
+    with subtest("real compositor scopes and independent user services can launch applications"):
+        machine.succeed(session + "niri msg action spawn -- ${scopedLaunch}")
+        machine.wait_for_file("/run/user/1000/launch-caller-exit")
+        assert "/app.slice/app-niri-" in machine.succeed("cat /run/user/1000/launch-caller-group")
+        result = machine.succeed("cat /run/user/1000/launch-caller-result")
+        assert machine.succeed("cat /run/user/1000/launch-caller-exit").strip() == "0", result
+        machine.wait_for_file("/run/user/1000/launch-probe-scope")
+        machine.succeed(user + "systemd-run --user --wait --pipe --collect --unit=desktop-launch-probe ${rsdm}/bin/rsdm app -- ${launchProbe} service")
+        machine.wait_for_file("/run/user/1000/launch-probe-service")
+        for kind in ["scope", "service"]:
+            assert machine.succeed("cat /run/user/1000/launch-probe-" + kind).strip() == values["RSDM_SESSION_GENERATION"]
 
   '' + windows.testScript + ''
     with subtest("denied power preserves native niri and registered apps"):

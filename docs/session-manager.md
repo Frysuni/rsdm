@@ -780,8 +780,13 @@ acknowledgements retain their slot until the coordinator receives them.
 
 `org.rsdm.Session1.Handshake` returns the generation after checking the caller's
 bus credentials, live process and logind session. A process without a logind
-session must match a registered unit cgroup and its current InvocationID.
-Environment hints alone cannot establish membership. Every control method
+session must belong to a live user service or scope, with pinned process and
+cgroup membership and a stable InvocationID. Shared user units follow logind's
+primary graphical login (`org.freedesktop.login1.User.Display`); when it differs,
+only explicitly registered application or compositor invocations are accepted.
+This supports compositor-created scopes and independent desktop launcher services
+without treating another actual tty login as part of the desktop. Environment
+hints alone cannot establish membership. Every control method
 performs these checks before queueing its request; authorization allows four
 concurrent queries, each within a five-second total budget. CLI app, finalize,
 stop and cancel obtain their generation through the handshake rather than

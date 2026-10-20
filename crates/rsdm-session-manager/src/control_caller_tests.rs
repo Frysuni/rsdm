@@ -1,5 +1,19 @@
 use super::*;
 
+#[tokio::test]
+async fn shared_user_units_follow_only_loginds_current_graphical_login() {
+    let identity = SessionIdentity {
+        generation: "0123456789abcdef0123456789abcdef".into(),
+        login_session_id: "graphical-login".into(), desktop_entry_id: None,
+        uid: unsafe { libc::geteuid() },
+    };
+    let context = crate::control_test_authority::Context::create(identity.clone()).await;
+    for (display, expected) in [("", false), ("other-login", false), ("graphical-login", true), ("new-login", false)] {
+        context.set_display(display).await;
+        assert_eq!(Caller::belongs_to_display(&context.logind, &identity).await.unwrap(), expected);
+    }
+}
+
 #[test]
 fn missing_credentials_and_another_uid_cannot_establish_a_caller() {
     let uid = unsafe { libc::geteuid() };

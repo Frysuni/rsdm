@@ -2,7 +2,7 @@
 
 use std::{os::fd::AsFd, sync::Arc};
 
-use zbus::{Connection, fdo::ConnectionCredentials, message::Header};
+use zbus::{Connection, fdo::ConnectionCredentials, message::Header, zvariant::OwnedObjectPath};
 
 use super::{SessionError, identity::SessionIdentity, processes::ProcessHandle};
 
@@ -50,6 +50,16 @@ impl Caller {
             Err(SessionError::Bus(zbus::Error::MethodError(name, _, _))) if name.as_str() == "org.freedesktop.login1.NoSessionForPID" => Ok(false),
             Err(error) => Err(error),
         }
+    }
+
+    pub(super) async fn belongs_to_display(connection: &Connection, identity: &SessionIdentity) -> Result<bool, SessionError> {
+        let manager = zbus::Proxy::new(connection, "org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager").await?;
+        let path: OwnedObjectPath = manager.call("GetUser", &(identity.uid,)).await?;
+        let user = zbus::proxy::Builder::<zbus::Proxy<'_>>::new(connection)
+            .destination("org.freedesktop.login1")?.path(path)?
+            .interface("org.freedesktop.login1.User")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+        let (display, _): (String, OwnedObjectPath) = user.get_property("Display").await?;
+        Ok(!display.is_empty() && display == identity.login_session_id)
     }
 }
 
