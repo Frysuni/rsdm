@@ -141,8 +141,7 @@ How the box treats the layer behind it depends on the background:
 settings to persist the lock visual fields in
 `$XDG_CONFIG_HOME/rsdm/lock.toml` (or `$HOME/.config/rsdm/lock.toml`). The file
 contains no DM, PAM, or security settings and is loaded as a user-owned overlay
-on the next Lock start. Other commands do not load this file. `dim` is accepted
-as an alias for `wallpaper_dim`.
+on the next Lock start. Other commands do not load this file.
 
 ## Authentication
 
