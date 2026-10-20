@@ -22,8 +22,10 @@ pub(super) async fn command_properties(
     let executable = super::runtime::blocking(move || {
         resolve_executable(&program, &search_environment, &search_directory)
     }).await?;
+    let executable = super::bus_path::encode(&executable)?;
+    let directory = super::bus_path::encode(directory)?;
 
-    let command = vec![(executable.to_string_lossy().into_owned(), argv.to_vec(), vec!["no-env-expand".to_string()])];
+    let command = vec![(executable, argv.to_vec(), vec!["no-env-expand".to_string()])];
     let values: Vec<String> = environment.iter().map(|(name, value)| format!("{name}={value}")).collect();
     let absent: Vec<String> = DISPLAY_VARS.iter()
         .filter(|name| !environment.iter().any(|(key, _)| key == **name))
@@ -34,7 +36,7 @@ pub(super) async fn command_properties(
         ("ExecStartEx", Variant::new(command)),
         ("Environment", Variant::new(values)),
         ("UnsetEnvironment", Variant::new(absent)),
-        ("WorkingDirectory", Variant::new(directory.to_string_lossy().into_owned())),
+        ("WorkingDirectory", Variant::new(directory)),
         ("KillMode", Variant::from("control-group")),
         ("CollectMode", Variant::from("inactive-or-failed")),
         ("AddRef", Variant::from(true)),

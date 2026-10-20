@@ -119,7 +119,8 @@ async fn launch_properties(
     if partial {
         properties.retain(|(name, _)| !matches!(*name, "PartOf" | "After" | "Requisite"));
     }
-    let executable = blocking(|| Ok(std::env::current_exe()?)).await?.to_string_lossy().into_owned();
+    let executable = blocking(|| Ok(std::env::current_exe()?)).await?;
+    let executable = super::bus_path::encode(&executable)?;
     let mut stop_argv = vec![executable.clone()];
     if let Some(path) = config_path {
         let path = path.to_str().ok_or_else(|| SessionError::State("hook configuration path is not valid UTF-8".into()))?;

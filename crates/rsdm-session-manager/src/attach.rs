@@ -32,7 +32,10 @@ pub(super) async fn attach(cfg: &SessionManagerConfig, path: &Path, actions: Act
     let executable = runtime::blocking(|| Ok(std::env::current_exe()?)).await?;
     let path = path.to_path_buf();
     let path = runtime::blocking(move || Ok(std::path::absolute(path)?)).await?;
-    let argv = vec![executable.to_string_lossy().into_owned(), "--config".into(), path.to_string_lossy().into_owned(), "session".into(), "serve".into()];
+    let argv = vec![
+        super::bus_path::encode(&executable)?, "--config".into(), super::bus_path::encode(&path)?,
+        "session".into(), "serve".into(),
+    ];
     let environment = snapshot.identity.command_environment(snapshot.environment.clone());
     let mut properties = units::command_properties(&argv, &environment, &snapshot.directory).await?;
     properties.extend([("StandardInputFileDescriptor", Variant::new(Fd::from(descriptor))), ("Slice", Variant::from("app.slice"))]);

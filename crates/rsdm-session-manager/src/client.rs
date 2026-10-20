@@ -36,7 +36,7 @@ pub async fn run_app(argv: &[String], policy: &ShutdownPolicy) -> Result<i32, Se
     let directory = super::runtime::blocking(|| Ok(std::env::current_dir()?)).await?;
     let request = LaunchRequest {
         generation, argv: argv.to_vec(), environment: env::command_environment(),
-        directory: directory.to_string_lossy().into_owned(),
+        directory: super::bus_path::encode(&directory)?,
         timeout_secs: policy.timeout_secs, on_timeout: policy.on_timeout.to_string(),
         method: policy.method.to_string(), quit_command: policy.quit_command.clone(),
     };

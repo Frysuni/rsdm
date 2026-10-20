@@ -10,6 +10,7 @@ mod attach;
 mod attach_bootstrap;
 mod apps;
 mod bus;
+mod bus_path;
 mod client;
 mod cleanup;
 mod control;

@@ -72,6 +72,18 @@ fn executable_lookup_skips_path_entries_the_current_user_cannot_execute() {
 }
 
 #[tokio::test]
+async fn unit_properties_reject_a_working_directory_that_dbus_cannot_represent() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    let programs = Programs::new();
+    let directory = programs.0.join(OsString::from_vec(b"working-\xff".to_vec()));
+    fs::create_dir(&directory).unwrap();
+    let argv = vec![programs.0.join("example").to_str().unwrap().to_string()];
+    let result = command_properties(&argv, &programs.environment(), &directory).await;
+    assert!(result.is_err(), "lossy working directory was accepted: {result:?}");
+}
+
+#[tokio::test]
 async fn anchor_does_not_create_an_ordering_cycle_through_autostart_apps() {
     let programs = Programs::new();
     let properties = anchor_properties(Some("example-compositor.service"), &programs.environment(), &programs.0).await.unwrap();
