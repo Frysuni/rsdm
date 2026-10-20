@@ -33,6 +33,7 @@ mod coordinator_startup;
 mod coordinator_status;
 mod deadline;
 mod env;
+mod executable;
 mod identity;
 mod lifecycle;
 mod native_compositor;

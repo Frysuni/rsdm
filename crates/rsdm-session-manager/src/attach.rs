@@ -29,7 +29,7 @@ pub(super) async fn attach(cfg: &SessionManagerConfig, path: &Path, actions: Act
     };
     let (server, descriptor) = super::attach_bootstrap::channel(snapshot.clone())?;
     let server = BootstrapTask(server);
-    let executable = runtime::blocking(|| Ok(std::env::current_exe()?)).await?;
+    let executable = runtime::blocking(|| Ok(super::executable::installed_path()?)).await?;
     let path = path.to_path_buf();
     let path = runtime::blocking(move || Ok(std::path::absolute(path)?)).await?;
     let argv = vec![

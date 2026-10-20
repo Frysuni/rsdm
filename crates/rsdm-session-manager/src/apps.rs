@@ -119,7 +119,7 @@ async fn launch_properties(
     if partial {
         properties.retain(|(name, _)| !matches!(*name, "PartOf" | "After" | "Requisite"));
     }
-    let executable = blocking(|| Ok(std::env::current_exe()?)).await?;
+    let executable = blocking(|| Ok(super::executable::installed_path()?)).await?;
     let executable = super::bus_path::encode(&executable)?;
     let mut stop_argv = vec![executable.clone()];
     if let Some(path) = config_path {

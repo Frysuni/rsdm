@@ -92,8 +92,6 @@ pkgs.testers.runNixOSTest {
             machine.send_chars("test-password")
             machine.send_key("ret")
             machine.wait_until_succeeds(client + "session status | grep ': running '", timeout=40)
-            machine.succeed(client + "app --shutdown-timeout 2 --shutdown-method term -- ${application}")
-            machine.wait_for_file("/tmp/custom-app-ready")
             compositor = machine.succeed(user + "systemctl --user list-units --plain --no-legend 'session-rsdm-*' | awk '{print $1}'").strip()
             pid = machine.succeed(user + "systemctl --user show --property=MainPID --value " + compositor).strip()
             coordinator = machine.succeed("pgrep -u alice -f 'rsdm --config /etc/rsdm-(custom|session).toml session start'").strip()
@@ -101,6 +99,8 @@ pkgs.testers.runNixOSTest {
             if scenario == "replaced executable":
                 machine.succeed("install -m755 ${rsdm}/bin/rsdm /run/test-dm/bin/rsdm.next; mv -f /run/test-dm/bin/rsdm.next /run/test-dm/bin/rsdm")
                 machine.succeed("readlink /proc/$(systemctl show rsdm -p MainPID --value)/exe | grep -F '(deleted)'")
+            machine.succeed(client + "app --shutdown-timeout 2 --shutdown-method term -- ${application}")
+            machine.wait_for_file("/tmp/custom-app-ready")
             machine.succeed("kill -KILL " + coordinator)
             machine.wait_until_succeeds("journalctl --no-pager -b | grep 'pam_unix(rsdm:session): session closed for user alice' | test $(wc -l) -ge " + str(count))
             machine.fail("kill -0 " + pid)
