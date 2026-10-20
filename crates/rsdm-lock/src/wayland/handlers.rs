@@ -108,8 +108,6 @@ impl OutputHandler for App {
         output: wl_output::WlOutput,
     ) {
         tracing::debug!("Wayland output removed");
-        // niri's output off can remove the global. Keep the connector's
-        // restoration obligation until output on succeeds, even without a surface.
         self.surfaces.retain(|surface| surface.output != output);
         if self.primary_output.as_ref() == Some(&output) {
             self.choose_primary_output();

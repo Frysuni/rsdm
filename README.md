@@ -126,7 +126,7 @@ services.rsdm = {
   lock = {
     enable = true;
     primaryOutput = "DP-1";
-    secondaryOutput = "background"; # background, black, or off (niri)
+    secondaryOutput = "background"; # background, black, or off (currently black)
     size = null; # TTY-like auto size, or an integer from 1 to 12
   };
   idle = {

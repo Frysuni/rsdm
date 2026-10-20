@@ -2,6 +2,9 @@
 
 Baseline: `1930481` (2.2.2). Finding numbers refer to the local `audit.md`.
 
+The output-power worker described below is no longer part of the Lock runtime.
+The current `off` policy keeps outputs enabled and covers them with opaque black.
+
 Each finding must be checked against its callers before changing code. Confirmed
 defects receive a regression check and a separate commit. Related documentation
 claims are closed with the implementation that makes them accurate. A finding

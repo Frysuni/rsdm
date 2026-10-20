@@ -63,8 +63,8 @@ secondary_output = "background" # background | black | off
 ```
 
 `background` keeps only `[lock.design]` wallpaper/effects. `black` paints opaque
-black. `off` uses a compositor output-power protocol when available and
-otherwise falls back to opaque black without changing output topology.
+black. `off` currently uses the same opaque black fallback on every compositor;
+outputs remain enabled and their topology stays unchanged.
 Find niri names with `niri msg outputs`.
 
 Wallpaper scaling is cached separately for each output at its physical buffer

@@ -266,9 +266,8 @@ Locker (`lock`) runtime path:
 3. Reuse one physical-pixel software canvas and at most two shm buffers per
    output, writing only released buffers and retaining redraw requests while
    both are busy. The primary receives the full
-   interactive scene; secondary outputs receive background-only or black. niri
-   `off` outputs use one bounded IPC worker, which retains connector restoration
-   obligations even when the corresponding Wayland globals disappear
+   interactive scene; secondary outputs receive background-only or black.
+   `off` currently uses the black fallback and leaves output power unchanged
 4. Verify typed passwords through the `rsdm-lock` PAM service (auth only),
    rate limited
 5. On success send `unlock`, round-trip so the compositor acknowledges it, then

@@ -47,8 +47,6 @@ impl App {
             .map(|output| self.output_name(output))
             .unwrap_or_else(|| "<none>".to_string());
         tracing::info!(output = %name, "selected primary lock output");
-        // A replacement primary may have been powered off as a secondary.
-        // Serialize restoration ahead of the new topology in the output worker.
         self.restore_secondary_outputs();
         self.primary_output = selected;
     }

@@ -63,9 +63,8 @@ current pixel area. `secondary_output` controls every other output:
 - `background` (default) keeps only the configured wallpaper and animated
   background;
 - `black` paints opaque black;
-- `off` temporarily disables secondary outputs through supported compositor IPC
-  (currently niri) and restores them after unlock. On other compositors it
-  safely falls back to black.
+- `off` currently uses the opaque black fallback on every compositor; outputs
+  remain enabled and their topology stays unchanged.
 
 The locker uses Wayland fractional-scale and viewporter protocols when present,
 so a scale such as `1.5` is rendered at the compositor's preferred buffer size

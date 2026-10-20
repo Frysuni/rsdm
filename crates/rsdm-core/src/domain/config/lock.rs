@@ -54,9 +54,7 @@ pub enum SecondaryOutput {
     Background,
     /// Paint an opaque black surface.
     Black,
-    /// Ask a supported compositor to disable the output for the duration of the
-    /// lock. Currently niri is supported; elsewhere this safely falls back to
-    /// black while still covering the output.
+    /// Currently use opaque black without changing output topology or power.
     Off,
 }
 

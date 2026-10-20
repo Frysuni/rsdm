@@ -42,9 +42,9 @@ secondary_output = "background" # background | black | off
 # size = 2                       # omit for TTY-like auto sizing
 ```
 
-`off` uses the opaque black-surface fallback when no compositor output-power
-protocol is available; it never changes niri's output topology. niri's fractional output scales, including `1.5`,
-are handled through Wayland fractional-scale/viewporter buffers.
+`off` currently uses the opaque black fallback and keeps niri's outputs enabled.
+niri's fractional output scales, including `1.5`, are handled through Wayland
+fractional-scale/viewporter buffers.
 
 ## Idle locking
 
