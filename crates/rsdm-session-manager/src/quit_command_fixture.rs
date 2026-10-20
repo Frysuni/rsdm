@@ -2,7 +2,7 @@
 
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, sync::{Arc, atomic::{AtomicBool, AtomicU8, AtomicUsize}}};
 
-use zbus::{Connection, zvariant::{OwnedObjectPath, OwnedValue}};
+use zbus::{Connection, OwnedObjectPath, OwnedVariant};
 
 use super::*;
 
@@ -66,8 +66,8 @@ impl Manager {
     }
 
     fn start_transient_unit(
-        &self, unit: &str, _mode: &str, properties: Vec<(String, OwnedValue)>,
-        _auxiliary: Vec<(String, Vec<(String, OwnedValue)>)>,
+        &self, unit: &str, _mode: &str, properties: Vec<(String, OwnedVariant)>,
+        _auxiliary: Vec<(String, Vec<(String, OwnedVariant)>)>,
     ) -> Result<OwnedObjectPath, ManagerError> {
         assert_eq!(unit, self.0.unit);
         for (name, value) in properties {
@@ -169,14 +169,14 @@ impl Fixture {
         let (server, client) = tokio::net::UnixStream::pair().unwrap();
         let shared = state.clone();
         let server = tokio::spawn(async move {
-            zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
-                .serve_at("/org/freedesktop/systemd1", Manager(shared.clone())).unwrap()
-                .serve_at("/app", Service(shared.clone())).unwrap()
-                .serve_at("/app", ApplicationUnit(shared.clone())).unwrap()
-                .serve_at("/helper", Unit(shared.clone())).unwrap()
-                .serve_at("/helper", Service(shared)).unwrap().build().await.unwrap()
+            zbus::connection::Builder::unix_stream(server.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+                .serve_at("/org/freedesktop/systemd1", Manager(shared.clone()))
+                .serve_at("/app", Service(shared.clone()))
+                .serve_at("/app", ApplicationUnit(shared.clone()))
+                .serve_at("/helper", Unit(shared.clone()))
+                .serve_at("/helper", Service(shared)).build().await.unwrap()
         });
-        let client = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
+        let client = zbus::connection::Builder::unix_stream(client.into_std().unwrap()).p2p().build().await.unwrap();
 
         Self { directory, runtime, manager: UserManager::with_connection(client), _server: server.await.unwrap(), state }
     }

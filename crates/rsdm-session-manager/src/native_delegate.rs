@@ -72,7 +72,7 @@ impl Provider {
         manager.read(|| async {
             let connection = manager.connection();
             match probe(&connection, self.kind, identity, logind).await {
-                Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "org.freedesktop.DBus.Error.NameHasNoOwner" => Ok(false),
+                Err(zbus::Error::FDO(error)) if matches!(*error, zbus::fdo::Error::NameHasNoOwner(_)) => Ok(false),
                 result => result,
             }
         }).await
@@ -106,9 +106,9 @@ impl Provider {
                 recipient.verify(&connection, logind, identity).await?;
                 manager.actions.check().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
                 if method == "Logout" {
-                    proxy.call_with_flags::<_, _, ()>(method, MethodFlags::NoAutoStart.into(), &(0_u32,)).await?;
+                    proxy.call_with_flags::<_, _, ()>(method, MethodFlags::NO_AUTO_START, &(0_u32,)).await?;
                 } else {
-                    proxy.call_with_flags::<_, _, ()>(method, MethodFlags::NoAutoStart.into(), &()).await?;
+                    proxy.call_with_flags::<_, _, ()>(method, MethodFlags::NO_AUTO_START, &()).await?;
                 }
                 Ok(())
             }).await?;
@@ -119,7 +119,7 @@ impl Provider {
 
 async fn connect_logind(manager: &UserManager) -> Result<Connection, SessionError> {
     manager.request(async {
-        zbus::connection::Builder::system()?.method_timeout(std::time::Duration::from_secs(2)).build().await
+        zbus::connection::Builder::system().method_timeout(std::time::Duration::from_secs(2)).build().await
     }).await.map_err(Into::into)
 }
 
@@ -127,8 +127,8 @@ async fn recipient(manager: &UserManager, connection: &Connection, kind: Provide
     let desktop = if kind == ProviderKind::Plasma { Some(pin(manager, connection, "org.kde.ksmserver").await?) } else { None };
     let peer = match pin(manager, connection, name).await {
         Ok(peer) => peer,
-        Err(SessionError::Bus(zbus::Error::MethodError(error, _, _)))
-            if kind == ProviderKind::Plasma && error.as_str() == "org.freedesktop.DBus.Error.NameHasNoOwner" => {
+        Err(SessionError::Bus(zbus::Error::FDO(error)))
+            if kind == ProviderKind::Plasma && matches!(*error, zbus::fdo::Error::NameHasNoOwner(_)) => {
             let desktop = desktop.as_ref().expect("verified Plasma desktop");
             manager.request(async {
                 desktop.verify_login(connection, logind, identity).await?;
@@ -169,8 +169,8 @@ async fn probe(connection: &Connection, kind: ProviderKind, identity: &SessionId
     let desktop = if kind == ProviderKind::Plasma { Some(pin_peer(connection, "org.kde.ksmserver").await?) } else { None };
     let (available, peer) = match pin_peer(connection, name).await {
         Ok(peer) => (true, Some(peer)),
-        Err(zbus::Error::MethodError(error, _, _))
-            if kind == ProviderKind::Plasma && error.as_str() == "org.freedesktop.DBus.Error.NameHasNoOwner" => {
+        Err(zbus::Error::FDO(error))
+            if kind == ProviderKind::Plasma && matches!(*error, zbus::fdo::Error::NameHasNoOwner(_)) => {
             let reply = connection.call_method(Some("org.freedesktop.DBus"), "/org/freedesktop/DBus",
                 Some("org.freedesktop.DBus"), "ListActivatableNames", &()).await?;
             let names: Vec<String> = reply.body().deserialize()?;

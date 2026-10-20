@@ -23,7 +23,7 @@ const PATH: &str = "/org/freedesktop/login1";
 const INTERFACE: &str = "org.freedesktop.login1.Manager";
 
 async fn connection(timeout: Duration) -> Result<Connection, LogindError> {
-    Ok(zbus::connection::Builder::system()?.method_timeout(timeout).build().await?)
+    Ok(zbus::connection::Builder::system().method_timeout(timeout).build().await?)
 }
 
 async fn proxy(connection: &Connection) -> Result<Proxy<'_>, zbus::Error> {
@@ -115,7 +115,7 @@ async fn within_timeout<T>(
 }
 
 async fn inhibit(connection: &Connection, reason: &str) -> Result<OwnedFd, LogindError> {
-    let fd: zbus::zvariant::OwnedFd = proxy(connection).await?
+    let fd: zbus::OwnedFd = proxy(connection).await?
         .call("Inhibit", &("shutdown", "RSDM", reason, "delay")).await?;
     Ok(fd.into())
 }

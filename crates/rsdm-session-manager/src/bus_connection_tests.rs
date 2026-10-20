@@ -72,12 +72,12 @@ async fn fixture(state: UnitState) -> (Connection, Connection, Arc<UnitState>) {
     let shared = state.clone();
     let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let server = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
-            .serve_at(MANAGER_PATH, Manager(shared.clone())).unwrap()
-            .serve_at("/unit", Unit(shared.clone())).unwrap()
-            .serve_at("/unit", Service(shared)).unwrap().build().await.unwrap()
+        zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+            .serve_at(MANAGER_PATH, Manager(shared.clone()))
+            .serve_at("/unit", Unit(shared.clone()))
+            .serve_at("/unit", Service(shared)).build().await.unwrap()
     });
-    let client = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    let client = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
     (client, server.await.unwrap(), state)
 }
 

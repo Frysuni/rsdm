@@ -11,7 +11,7 @@ use super::*;
 #[path = "app_stop_batch_tests.rs"]
 mod batch;
 use rsdm_core::domain::ShutdownPolicy;
-use zbus::zvariant::OwnedObjectPath;
+use zbus::OwnedObjectPath;
 
 const GENERATION: &str = "0123456789abcdef0123456789abcdef";
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
@@ -71,13 +71,13 @@ impl Fixture {
         let shared = queries.clone();
         let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
-            zbus::connection::Builder::unix_stream(server_socket).p2p()
-                .server(zbus::Guid::generate()).unwrap()
-                .serve_at("/org/freedesktop/systemd1", Manager(shared)).unwrap()
-                .serve_at("/unit", Unit).unwrap().serve_at("/unit", Service).unwrap()
+            zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p()
+                .server(zbus::Guid::generate())
+                .serve_at("/org/freedesktop/systemd1", Manager(shared))
+                .serve_at("/unit", Unit).serve_at("/unit", Service)
                 .build().await.unwrap()
         });
-        let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+        let connection = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
         Self { runtime, app, queries, manager: UserManager::with_connection(connection), _server: server.await.unwrap() }
     }
 }

@@ -2,7 +2,7 @@
 
 use super::*;
 use std::sync::Mutex;
-use zbus::zvariant::OwnedObjectPath;
+use zbus::OwnedObjectPath;
 
 struct Manager { mutations: Arc<Mutex<Vec<String>>> }
 

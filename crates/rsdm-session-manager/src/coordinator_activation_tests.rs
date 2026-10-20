@@ -2,7 +2,7 @@
 
 use std::sync::Mutex;
 
-use zbus::zvariant::{OwnedObjectPath, OwnedValue};
+use zbus::{OwnedObjectPath, OwnedVariant};
 
 use super::*;
 use crate::control::{Reply, Request};
@@ -29,8 +29,8 @@ impl Manager {
     }
 
     fn start_transient_unit(
-        &self, _unit: &str, _mode: &str, _properties: Vec<(String, OwnedValue)>,
-        _auxiliary: Vec<(String, Vec<(String, OwnedValue)>)>,
+        &self, _unit: &str, _mode: &str, _properties: Vec<(String, OwnedVariant)>,
+        _auxiliary: Vec<(String, Vec<(String, OwnedVariant)>)>,
     ) -> zbus::fdo::Result<OwnedObjectPath> {
         assert!(self.0.runtime.session().unwrap().owns_targets, "ownership must precede activation");
         self.0.starts.fetch_add(1, Ordering::SeqCst);

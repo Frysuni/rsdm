@@ -21,7 +21,7 @@ async fn uses_user_manager(bus: &Proxy<'_>) -> zbus::Result<bool> {
     let pid: u32 = match bus.call("GetConnectionUnixProcessID", &("org.freedesktop.DBus",)).await {
         Ok(pid) => pid,
         // Peers without PID lookup retain the standard activation interface.
-        Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "org.freedesktop.DBus.Error.UnknownMethod" => return Ok(false),
+        Err(zbus::Error::FDO(error)) if matches!(*error, zbus::fdo::Error::UnknownMethod(_)) => return Ok(false),
         Err(error) => return Err(error),
     };
     tokio::task::spawn_blocking(move || {

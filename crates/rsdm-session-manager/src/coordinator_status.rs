@@ -160,8 +160,6 @@ pub(super) async fn native_logout(manager: &UserManager, record: &SessionRecord)
             Capability::new("native-logout", "available", "The native logout peers belong to this logind session; the desktop owns confirmation dialogs."),
         Ok(Ok(true)) => Capability::new("native-logout", "available", "A verified native desktop has an owned or activatable logout service; it owns confirmation dialogs."),
         Ok(Ok(false)) => Capability::new("native-logout", "unavailable", "No live native desktop with an owned or activatable logout service was found."),
-        Ok(Err(SessionError::Bus(zbus::Error::MethodError(name, reason, _)))) if name.as_str() == "org.freedesktop.DBus.Error.AccessDenied" =>
-            Capability::new("native-logout", "unavailable", reason.as_deref().unwrap_or("Native desktop ownership could not be verified.")),
         Ok(Err(SessionError::Bus(zbus::Error::FDO(error)))) if matches!(error.as_ref(), zbus::fdo::Error::AccessDenied(_)) =>
             Capability::new("native-logout", "unavailable", &error.to_string()),
         Ok(Err(error)) => Capability::new("native-logout", "unknown", &error.to_string()),

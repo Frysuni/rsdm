@@ -3,7 +3,7 @@
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, process::Stdio, sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering}};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use zbus::zvariant::OwnedObjectPath;
+use zbus::OwnedObjectPath;
 
 use super::*;
 use crate::{app_stop::ShutdownControl, app_dispatch::State as DispatchState};
@@ -116,13 +116,13 @@ impl Fixture {
         let shared = state.clone();
         let (server, connection) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
-            zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
-                .serve_at("/org/freedesktop/systemd1", Manager(shared.clone())).unwrap()
-                .serve_at("/app", Unit { state: shared.clone(), scope: false }).unwrap()
-                .serve_at("/scope", Unit { state: shared.clone(), scope: true }).unwrap().serve_at("/scope", Scope).unwrap()
-                .serve_at("/app", Service(shared)).unwrap().build().await.unwrap()
+            zbus::connection::Builder::unix_stream(server.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+                .serve_at("/org/freedesktop/systemd1", Manager(shared.clone()))
+                .serve_at("/app", Unit { state: shared.clone(), scope: false })
+                .serve_at("/scope", Unit { state: shared.clone(), scope: true }).serve_at("/scope", Scope)
+                .serve_at("/app", Service(shared)).build().await.unwrap()
         });
-        let connection = zbus::connection::Builder::unix_stream(connection).p2p().build().await.unwrap();
+        let connection = zbus::connection::Builder::unix_stream(connection.into_std().unwrap()).p2p().build().await.unwrap();
         let mut manager = UserManager::with_connection(connection);
         manager.deadline = state.deadline.clone();
         Self { directory, runtime, manager, state, _server: server.await.unwrap() }

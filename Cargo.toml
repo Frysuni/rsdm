@@ -45,9 +45,9 @@ tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
 wayland-protocols = { version = "=0.32.12", features = ["client", "staging"] }
 wayland-client = "0.31.11"
 zeroize = { version = "1.8.1", features = ["derive"] }
-zbus = { version = "=5.14.0", default-features = false, features = ["tokio"] }
+zbus = { version = "=6.0.0", default-features = false, features = ["tokio", "proxy", "service", "tracing"] }
 # Interface macros use runtime internals; keep both on the same release.
-zbus_macros = "=5.14.0"
+zbus_macros = "=6.0.0"
 
 [profile.release]
 lto = "thin"

@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use rsdm_core::domain::SessionPhase;
-use zbus::{Connection, message::Header, zvariant::OwnedObjectPath};
+use zbus::{Connection, message::Header, OwnedObjectPath};
 
 use super::{SessionError, control_caller::{Caller, denied}, identity::SessionIdentity, runtime::{Runtime, SessionRecord}};
 
@@ -60,7 +60,7 @@ impl Verifier {
     async fn logind(&self) -> Result<Connection, SessionError> {
         #[cfg(test)]
         if let Some(context) = &self.context { return Ok(context.logind.clone()); }
-        Ok(zbus::connection::Builder::system()?.method_timeout(Duration::from_secs(5)).build().await?)
+        Ok(zbus::connection::Builder::system().method_timeout(Duration::from_secs(5)).build().await?)
     }
 }
 
@@ -75,8 +75,8 @@ pub(super) async fn user_unit(connection: &Connection, caller: &Caller) -> Resul
     let manager = zbus::Proxy::new(connection, "org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager").await?;
     let path: OwnedObjectPath = manager.call("GetUnitByPID", &(caller.pid,)).await?;
     let unit = zbus::proxy::Builder::<zbus::Proxy<'_>>::new(connection)
-        .destination("org.freedesktop.systemd1")?.path(path)?
-        .interface("org.freedesktop.systemd1.Unit")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+        .destination("org.freedesktop.systemd1").path(path)
+        .interface("org.freedesktop.systemd1.Unit").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     let name: String = unit.get_property("Id").await?;
     let invocation: Vec<u8> = unit.get_property("InvocationID").await?;
     if invocation.is_empty() || invocation.iter().all(|byte| *byte == 0) { return Err(denied("caller unit has no live invocation")); }

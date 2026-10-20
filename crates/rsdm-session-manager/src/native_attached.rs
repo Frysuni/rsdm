@@ -41,9 +41,9 @@ impl Scoped {
                 return Err(zbus::fdo::Error::Failed("native logout preparation was cancelled or entered recovery".into()).into());
             }
             if method == "Logout" {
-                proxy.call_with_flags::<_, _, ()>(method, MethodFlags::NoAutoStart.into(), &(0_u32,)).await?;
+                proxy.call_with_flags::<_, _, ()>(method, MethodFlags::NO_AUTO_START, &(0_u32,)).await?;
             } else {
-                proxy.call_with_flags::<_, _, ()>(method, MethodFlags::NoAutoStart.into(), &()).await?;
+                proxy.call_with_flags::<_, _, ()>(method, MethodFlags::NO_AUTO_START, &()).await?;
             }
             Ok(())
         }).await.map_err(Into::into)
@@ -54,7 +54,7 @@ pub(super) async fn discover(manager: &UserManager, identity: &SessionIdentity) 
     let targets = manager.read(|| async { read_targets(manager.connection()).await }).await?;
     if targets.is_empty() { return Ok(None); }
     let logind = manager.request(async {
-        zbus::connection::Builder::system()?.method_timeout(Duration::from_secs(2)).build().await
+        zbus::connection::Builder::system().method_timeout(Duration::from_secs(2)).build().await
     }).await?;
     scope_targets(manager, identity, logind, targets).await
 }
@@ -89,7 +89,7 @@ pub(super) async fn read_targets(connection: Connection) -> zbus::Result<Vec<Tar
     for kind in [ProviderKind::Gnome, ProviderKind::Plasma] {
         match read_target(&connection, kind).await {
             Ok(target) => targets.push(target),
-            Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "org.freedesktop.DBus.Error.NameHasNoOwner" => {},
+            Err(zbus::Error::FDO(error)) if matches!(*error, zbus::fdo::Error::NameHasNoOwner(_)) => {},
             Err(error) => rejected = Some(error),
         }
     }

@@ -163,7 +163,7 @@ impl Transport {
             let connection = tokio::select! {
                 biased;
                 result = async {
-                    zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await
+                    zbus::connection::Builder::session().method_timeout(Duration::from_secs(5)).build().await
                 } => result,
                 _ = tokio::time::sleep_until(deadline.into()) => {
                     Err(zbus::fdo::Error::TimedOut("connecting the user bus timed out".into()).into())
@@ -255,14 +255,14 @@ async fn restore_reference(connection: &Connection, unit: &str, reference: &Refe
         Err(error) if missing_unit(&error) => return Ok(()),
         Err(error) => return Err(error),
     };
-    let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination(DESTINATION)?.path(path.clone())?
-        .interface("org.freedesktop.systemd1.Unit")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+    let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination(DESTINATION).path(path.clone())
+        .interface("org.freedesktop.systemd1.Unit").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     let id: Vec<u8> = proxy.get_property("InvocationID").await?;
     if id.iter().all(|byte| *byte == 0) || reference.invocation.as_ref().is_some_and(|expected| *expected != id)
         || proxy.get_property::<String>("Id").await? != unit || !proxy.get_property::<bool>("Transient").await?
     { return Ok(()); }
-    let service = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination(DESTINATION)?.path(path)?
-        .interface("org.freedesktop.systemd1.Service")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+    let service = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination(DESTINATION).path(path)
+        .interface("org.freedesktop.systemd1.Service").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     let environment: Vec<String> = service.get_property("Environment").await?;
     if !environment.contains(&format!("RSDM_SESSION_GENERATION={}", reference.generation)) { return Ok(()); }
 
@@ -275,12 +275,11 @@ async fn restore_reference(connection: &Connection, unit: &str, reference: &Refe
 
 pub(super) fn disconnected(error: &zbus::Error) -> bool {
     match error {
-        zbus::Error::InputOutput(error) => matches!(error.kind(),
+        zbus::Error::InputOutput(error) | zbus::Error::Connection(error, _) => matches!(error.kind(),
             std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
             | std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::NotConnected
             | std::io::ErrorKind::UnexpectedEof),
         zbus::Error::FDO(error) => matches!(**error, zbus::fdo::Error::Disconnected(_)),
-        zbus::Error::MethodError(name, _, _) => name.as_str() == "org.freedesktop.DBus.Error.Disconnected",
         _ => false,
     }
 }

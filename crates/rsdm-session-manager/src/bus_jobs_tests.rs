@@ -10,7 +10,7 @@ use super::fixture::{fixture, state};
 async fn accepted_start_survives_lost_reply_or_job_signal_without_replay() {
     for lost_reply in [true, false] {
         let (manager, _server, state) = fixture(state(lost_reply, true, 0)).await;
-        let properties = vec![("Environment", Value::new(vec!["RSDM_SESSION_GENERATION=ours".to_string()]))];
+        let properties = vec![("Environment", Variant::new(vec!["RSDM_SESSION_GENERATION=ours".to_string()]))];
         start(&manager, "example.service", &properties, Duration::from_millis(20), &AtomicBool::new(false), None).await.unwrap();
         assert_eq!(state.calls.load(Ordering::SeqCst), 1);
     }
@@ -33,7 +33,7 @@ async fn an_existing_or_foreign_unit_cannot_confirm_a_lost_start_reply() {
         initial.exists.store(existing, Ordering::SeqCst);
         if !existing { initial.generation = "foreign"; }
         let (manager, _server, state) = fixture(initial).await;
-        let properties = vec![("Environment", Value::new(vec!["RSDM_SESSION_GENERATION=ours".to_string()]))];
+        let properties = vec![("Environment", Variant::new(vec!["RSDM_SESSION_GENERATION=ours".to_string()]))];
         assert!(start(&manager, "example.service", &properties, Duration::from_millis(50), &AtomicBool::new(false), None).await.is_err());
         assert_eq!(state.calls.load(Ordering::SeqCst), 1);
     }

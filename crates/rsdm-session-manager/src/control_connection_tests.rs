@@ -26,12 +26,12 @@ async fn fixture() -> (Server, Connection, mpsc::UnboundedReceiver<()>, Arc<Noti
     let bus = Bus { entered, resume: resume.clone() };
     let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let peer = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server_socket).p2p()
-            .server(zbus::Guid::generate()).unwrap()
-            .serve_at("/org/freedesktop/DBus", bus).unwrap()
+        zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p()
+            .server(zbus::Guid::generate())
+            .serve_at("/org/freedesktop/DBus", bus)
             .build().await.unwrap()
     });
-    let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    let connection = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
     // SAFETY: geteuid has no preconditions.
     let (endpoint, _received) = Endpoint::channel(unsafe { libc::geteuid() });
     (Server::with_connection(connection, endpoint), peer.await.unwrap(), ready, resume)

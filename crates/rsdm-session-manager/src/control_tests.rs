@@ -13,11 +13,11 @@ async fn connect(uid: u32) -> (Connection, Connection, tokio::sync::mpsc::Receiv
 async fn connect_endpoint(endpoint: Endpoint, receiver: tokio::sync::mpsc::Receiver<Request>) -> (Connection, Connection, tokio::sync::mpsc::Receiver<Request>) {
     let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let server = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server_socket)
-            .p2p().server(zbus::Guid::generate()).unwrap()
-            .serve_at(OBJECT_PATH, endpoint).unwrap().build().await.unwrap()
+        zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap())
+            .p2p().server(zbus::Guid::generate())
+            .serve_at(OBJECT_PATH, endpoint).build().await.unwrap()
     });
-    let client = zbus::connection::Builder::unix_stream(client_socket)
+    let client = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap())
         .p2p().build().await.unwrap();
     (server.await.unwrap(), client, receiver)
 }

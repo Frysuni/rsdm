@@ -1,6 +1,6 @@
 use std::{fs, sync::atomic::{AtomicUsize, Ordering}};
 
-use zbus::zvariant::OwnedValue;
+use zbus::OwnedVariant;
 
 use super::*;
 
@@ -29,7 +29,7 @@ impl Drop for Programs {
     fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
 }
 
-fn property(properties: &UnitProperties, name: &str) -> OwnedValue {
+fn property(properties: &UnitProperties, name: &str) -> OwnedVariant {
     properties.iter().find(|(key, _)| *key == name).unwrap().1.try_to_owned().unwrap()
 }
 

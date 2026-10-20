@@ -12,7 +12,7 @@ impl Information {
     #[zbus(name = "supportInformation")]
     fn support_information(&self, #[zbus(header)] header: zbus::message::Header<'_>) -> String {
         assert_eq!(header.destination().unwrap().as_str(), ":1.1");
-        assert!(header.primary().flags().contains(zbus::message::Flags::NoAutoStart));
+        assert!(header.primary().flags().contains(zbus::message::Flags::NO_AUTO_START));
         self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         format!("KWin version: {}\n", self.version)
     }

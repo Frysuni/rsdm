@@ -1,6 +1,6 @@
 use std::{io::Write, os::unix::net::UnixStream, sync::{Arc, Mutex}, time::Instant};
 
-use zbus::{object_server::SignalEmitter, zvariant::OwnedFd as BusFd};
+use zbus::{object_server::SignalEmitter, OwnedFd as BusFd};
 
 use super::*;
 
@@ -33,10 +33,10 @@ async fn connect(preparing: bool) -> (Connection, Connection, UnixStream, Arc<Mu
     let service = Logind { descriptor: descriptor.clone(), preparing };
     let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let worker = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server_socket).p2p()
-            .server(zbus::Guid::generate()).unwrap().serve_at(PATH, service).unwrap().build().await.unwrap()
+        zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p()
+            .server(zbus::Guid::generate()).serve_at(PATH, service).build().await.unwrap()
     });
-    let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    let connection = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
     (connection, worker.await.unwrap(), writer, descriptor)
 }
 

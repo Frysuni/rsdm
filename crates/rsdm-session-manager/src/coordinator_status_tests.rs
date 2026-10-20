@@ -38,10 +38,10 @@ enum LifecycleError { NoSuchUnit(String) }
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Manager")]
 impl LifecycleManager {
-    fn get_unit(&self, unit: &str) -> Result<zbus::zvariant::OwnedObjectPath, LifecycleError> {
+    fn get_unit(&self, unit: &str) -> Result<zbus::OwnedObjectPath, LifecycleError> {
         assert_eq!(unit, "compositor.service");
         if self.missing { return Err(LifecycleError::NoSuchUnit("compositor unit is absent".into())); }
-        Ok(zbus::zvariant::OwnedObjectPath::try_from("/compositor").unwrap())
+        Ok(zbus::OwnedObjectPath::try_from("/compositor").unwrap())
     }
 }
 

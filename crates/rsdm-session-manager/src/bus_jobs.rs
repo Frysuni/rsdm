@@ -36,7 +36,7 @@ pub(super) async fn start(
                 return Err(zbus::fdo::Error::Failed("application shutdown cancelled before service start".into()).into());
             }
             manager.actions.check().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
-            reference = if new_unit && properties.iter().any(|(name, value)| *name == "AddRef" && matches!(value, Value::Bool(true))) {
+            reference = if new_unit && properties.iter().any(|(name, value)| *name == "AddRef" && matches!(value, Variant::Bool(true))) {
                 generation.as_ref().map(|generation| manager.transport.stage_reference(unit, generation.clone()))
             } else { None };
             if let Some(reference) = &mut reference { reference.submitted(); }
@@ -61,8 +61,8 @@ async fn verify_quit_app(manager: &Proxy<'_>, app: &crate::runtime::AppRecord, c
         return Err(zbus::fdo::Error::Failed("application shutdown cancelled before service start".into()).into());
     }
     let path: OwnedObjectPath = manager.call("GetUnit", &(&app.unit,)).await?;
-    let unit = zbus::proxy::Builder::<Proxy<'_>>::new(manager.connection()).destination(DESTINATION)?.path(path)?
-        .interface("org.freedesktop.systemd1.Unit")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+    let unit = zbus::proxy::Builder::<Proxy<'_>>::new(manager.connection()).destination(DESTINATION).path(path)
+        .interface("org.freedesktop.systemd1.Unit").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     let invocation: Vec<u8> = unit.get_property("InvocationID").await?;
     if app.invocation_id.is_empty() || app.invocation_id.iter().all(|byte| *byte == 0) || invocation != app.invocation_id {
         return Err(zbus::fdo::Error::AccessDenied("application invocation changed before quit command dispatch".into()).into());
@@ -75,10 +75,6 @@ async fn rejected_start(manager: &UserManager, unit: &str, error: &zbus::Error) 
         return true;
     }
     let denied = match error {
-        zbus::Error::MethodError(name, _, _) => matches!(name.as_str(),
-            "org.freedesktop.DBus.Error.InvalidArgs" | "org.freedesktop.DBus.Error.AccessDenied"
-            | "org.freedesktop.DBus.Error.UnknownProperty" | "org.freedesktop.DBus.Error.PropertyReadOnly"
-            | "org.freedesktop.DBus.Error.NotSupported"),
         zbus::Error::FDO(error) => matches!(**error, zbus::fdo::Error::InvalidArgs(_)
             | zbus::fdo::Error::AccessDenied(_) | zbus::fdo::Error::UnknownProperty(_)
             | zbus::fdo::Error::PropertyReadOnly(_) | zbus::fdo::Error::NotSupported(_)),
@@ -131,7 +127,7 @@ fn job_timeout(unit: &str) -> zbus::Error {
 
 fn generation(properties: &UnitProperties) -> Result<Option<String>, SessionError> {
     let Some((_, value)) = properties.iter().find(|(name, _)| *name == "Environment") else { return Ok(None); };
-    let environment: Vec<String> = Vec::try_from(OwnedValue::try_from(value).map_err(zbus::Error::from)?)
+    let environment: Vec<String> = Vec::try_from(OwnedVariant::try_from(value).map_err(zbus::Error::from)?)
         .map_err(zbus::Error::from)?;
     Ok(environment.into_iter().find_map(|entry| {
         entry.strip_prefix("RSDM_SESSION_GENERATION=").map(str::to_string)
@@ -178,8 +174,8 @@ async fn inspect(manager: &UserManager, unit: &str, operation: &Operation) -> zb
         Err(error) => return Err(error),
     };
     let connection = manager.connection();
-    let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(&connection).destination(DESTINATION)?.path(path.clone())?
-        .interface("org.freedesktop.systemd1.Unit")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+    let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(&connection).destination(DESTINATION).path(path.clone())
+        .interface("org.freedesktop.systemd1.Unit").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     let id: String = proxy.get_property("Id").await?;
     if id != unit { return Err(zbus::Error::Failure(format!("{unit} resolved to another unit"))); }
     let (pending, _): (u32, OwnedObjectPath) = proxy.get_property("Job").await?;
@@ -205,8 +201,8 @@ async fn inspect_start(
     manager: &UserManager, path: OwnedObjectPath, state: String, generation: &Option<String>,
 ) -> zbus::Result<bool> {
     let connection = manager.connection();
-    let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(&connection).destination(DESTINATION)?.path(path)?
-        .interface("org.freedesktop.systemd1.Service")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+    let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(&connection).destination(DESTINATION).path(path)
+        .interface("org.freedesktop.systemd1.Service").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     if let Some(generation) = generation {
         let environment: Vec<String> = proxy.get_property("Environment").await?;
         if !environment.contains(&format!("RSDM_SESSION_GENERATION={generation}")) {

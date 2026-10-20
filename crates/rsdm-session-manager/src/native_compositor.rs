@@ -36,7 +36,7 @@ async fn owner(connection: &Connection, name: &str) -> zbus::Result<Option<Strin
         Some("org.freedesktop.DBus"), "GetNameOwner", &(name,)).await
     {
         Ok(reply) => Ok(Some(reply.body().deserialize()?)),
-        Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "org.freedesktop.DBus.Error.NameHasNoOwner" => Ok(None),
+        Err(zbus::Error::FDO(error)) if matches!(*error, zbus::fdo::Error::NameHasNoOwner(_)) => Ok(None),
         Err(error) => Err(error),
     }
 }

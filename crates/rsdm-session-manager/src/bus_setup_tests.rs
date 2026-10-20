@@ -28,11 +28,11 @@ async fn fixture(version_delay: Duration, subscribe_delay: Duration) -> (Connect
     let subscriptions = Arc::new(AtomicUsize::new(0));
     let state = subscriptions.clone();
     let server = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
-            .serve_at(MANAGER_PATH, Manager { version_delay, subscribe_delay, subscriptions: state }).unwrap()
+        zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+            .serve_at(MANAGER_PATH, Manager { version_delay, subscribe_delay, subscriptions: state })
             .build().await.unwrap()
     });
-    let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    let connection = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
     (connection, server.await.unwrap(), subscriptions)
 }
 
@@ -66,7 +66,7 @@ async fn the_recovery_budget_includes_a_hung_bus_handshake() {
     let (_silent_peer, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let before = Instant::now();
     let result = UserManager::connect_with(
-        zbus::connection::Builder::unix_stream(client_socket).p2p().build(), short_deadline(),
+        zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build(), short_deadline(),
     ).await;
     assert_timed_out(result, before);
 }

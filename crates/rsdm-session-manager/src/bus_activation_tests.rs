@@ -19,6 +19,15 @@ impl Bus {
 
 struct Manager(Arc<Mutex<Vec<&'static str>>>);
 
+struct LegacyBus(Arc<Mutex<Vec<&'static str>>>);
+
+#[zbus_macros::interface(name = "org.freedesktop.DBus")]
+impl LegacyBus {
+    fn update_activation_environment(&self, _values: BTreeMap<String, String>) {
+        self.0.lock().unwrap().push("activation");
+    }
+}
+
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Manager")]
 impl Manager {
     fn set_environment(&self, values: Vec<String>) {
@@ -38,11 +47,11 @@ async fn fixture(pid: u32) -> (crate::bus::UserManager, Connection, Arc<Mutex<Ve
     let manager = Manager(calls.clone());
     let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let server = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
-            .serve_at("/org/freedesktop/DBus", bus).unwrap()
-            .serve_at("/org/freedesktop/systemd1", manager).unwrap().build().await.unwrap()
+        zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+            .serve_at("/org/freedesktop/DBus", bus)
+            .serve_at("/org/freedesktop/systemd1", manager).build().await.unwrap()
     });
-    let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    let connection = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
     (crate::bus::UserManager::with_connection(connection), server.await.unwrap(), calls)
 }
 
@@ -82,6 +91,15 @@ async fn broker_cleanup_awaits_the_manager_instead_of_scheduling_a_late_activati
 #[tokio::test]
 async fn other_bus_implementations_keep_the_standard_activation_update() {
     let (manager, _server, calls) = fixture(std::process::id()).await;
+    crate::env::clear_names(&manager, &["RSDM_SESSION_GENERATION".into()]).await.unwrap();
+    assert_eq!(*calls.lock().unwrap(), ["activation", "unset"]);
+}
+
+#[tokio::test]
+async fn a_bus_without_pid_lookup_keeps_the_standard_activation_update() {
+    let (manager, server, calls) = fixture(std::process::id()).await;
+    server.object_server().remove::<Bus, _>("/org/freedesktop/DBus").await.unwrap();
+    server.object_server().at("/org/freedesktop/DBus", LegacyBus(calls.clone())).await.unwrap();
     crate::env::clear_names(&manager, &["RSDM_SESSION_GENERATION".into()]).await.unwrap();
     assert_eq!(*calls.lock().unwrap(), ["activation", "unset"]);
 }

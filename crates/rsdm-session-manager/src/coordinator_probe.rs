@@ -141,7 +141,7 @@ async fn verify_boot_external(
     let unit = process
         .and_then(|process| process.unit.as_deref())
         .ok_or_else(|| SessionError::State("pending compositor start has no unit".into()))?;
-    let job = manager.unit_property::<(u32, zbus::zvariant::OwnedObjectPath)>(
+    let job = manager.unit_property::<(u32, zbus::OwnedObjectPath)>(
         unit,
         "org.freedesktop.systemd1.Unit",
         "Job",

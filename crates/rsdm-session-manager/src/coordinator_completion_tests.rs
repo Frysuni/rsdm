@@ -2,7 +2,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 
-use zbus::zvariant::OwnedObjectPath;
+use zbus::OwnedObjectPath;
 
 use crate::control::Reply;
 
@@ -31,8 +31,8 @@ impl FakeManager {
 
     fn start_transient_unit(
         &self, _unit: &str, _mode: &str,
-        _properties: Vec<(String, zbus::zvariant::OwnedValue)>,
-        _auxiliary: Vec<(String, Vec<(String, zbus::zvariant::OwnedValue)>)>,
+        _properties: Vec<(String, zbus::OwnedVariant)>,
+        _auxiliary: Vec<(String, Vec<(String, zbus::OwnedVariant)>)>,
     ) -> zbus::fdo::Result<OwnedObjectPath> {
         self.0.starts.fetch_add(1, Ordering::SeqCst);
         Err(zbus::fdo::Error::Failed("activation must not be repeated".into()))

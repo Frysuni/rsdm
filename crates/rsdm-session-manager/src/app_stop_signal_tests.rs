@@ -3,7 +3,7 @@
 use std::{fs, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, path::PathBuf,
     process::{Child, Command}, sync::{Arc, atomic::{AtomicU32, AtomicUsize}}};
 
-use zbus::{Connection, zvariant::OwnedObjectPath};
+use zbus::{Connection, OwnedObjectPath};
 
 use super::*;
 
@@ -89,12 +89,12 @@ impl Fixture {
         let (server, client) = tokio::net::UnixStream::pair().unwrap();
         let service = Service { main: main.clone(), group };
         let server = tokio::spawn(async move {
-            zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
-                .serve_at("/org/freedesktop/systemd1", Manager { pid, process, control, snapshot, reads: AtomicUsize::new(0) }).unwrap()
-                .serve_at("/app", Unit { snapshot, reads: AtomicUsize::new(0) }).unwrap()
-                .serve_at("/app", service).unwrap().build().await.unwrap()
+            zbus::connection::Builder::unix_stream(server.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+                .serve_at("/org/freedesktop/systemd1", Manager { pid, process, control, snapshot, reads: AtomicUsize::new(0) })
+                .serve_at("/app", Unit { snapshot, reads: AtomicUsize::new(0) })
+                .serve_at("/app", service).build().await.unwrap()
         });
-        let client = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
+        let client = zbus::connection::Builder::unix_stream(client.into_std().unwrap()).p2p().build().await.unwrap();
         Self { directory, runtime, manager: UserManager::with_connection(client), _server: server.await.unwrap(), child, main }
     }
 

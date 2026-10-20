@@ -10,6 +10,15 @@ struct Broker {
     owner_queries: AtomicUsize,
 }
 
+struct AbsentBroker;
+
+#[zbus_macros::interface(name = "org.freedesktop.DBus")]
+impl AbsentBroker {
+    fn get_name_owner(&self, _name: &str) -> zbus::fdo::Result<String> {
+        Err(zbus::fdo::Error::NameHasNoOwner("no native compositor".into()))
+    }
+}
+
 #[zbus_macros::interface(name = "org.freedesktop.DBus")]
 impl Broker {
     fn get_name_owner(&self, name: &str) -> String {
@@ -34,15 +43,23 @@ async fn fixture(uid: Option<u32>, pid: Option<u32>, replaced: bool, descriptor:
     let (server, client) = tokio::net::UnixStream::pair().unwrap();
     let broker = Broker { uid, pid, replaced, descriptor, owner_queries: AtomicUsize::new(0) };
     let server = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
-            .serve_at("/org/freedesktop/DBus", broker).unwrap().build().await.unwrap()
+        zbus::connection::Builder::unix_stream(server.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+            .serve_at("/org/freedesktop/DBus", broker).build().await.unwrap()
     });
-    let client = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
+    let client = zbus::connection::Builder::unix_stream(client.into_std().unwrap()).p2p().build().await.unwrap();
     (client, server.await.unwrap())
 }
 
 fn provider() -> Provider {
     Provider { kind: ProviderKind::Gnome, native_unit: None, logout_command: Vec::new() }
+}
+
+#[tokio::test]
+async fn an_absent_native_compositor_is_not_an_authorization_failure() {
+    let (client, server) = fixture(None, None, false, None).await;
+    server.object_server().remove::<Broker, _>("/org/freedesktop/DBus").await.unwrap();
+    server.object_server().at("/org/freedesktop/DBus", AbsentBroker).await.unwrap();
+    assert!(pin(&client, &provider()).await.unwrap().is_none());
 }
 
 #[tokio::test]

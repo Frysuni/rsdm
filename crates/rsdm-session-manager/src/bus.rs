@@ -2,7 +2,8 @@
 
 use std::{future::Future, sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
 
-use zbus::{Connection, Proxy, zvariant::{OwnedObjectPath, OwnedValue, Value}};
+use serde::de::DeserializeOwned;
+use zbus::{Connection, Proxy, OwnedObjectPath, OwnedVariant, Type, Variant};
 
 use super::{SessionError, deadline::Deadline};
 
@@ -22,7 +23,7 @@ const DESTINATION: &str = "org.freedesktop.systemd1";
 const MANAGER_PATH: &str = "/org/freedesktop/systemd1";
 const MANAGER_INTERFACE: &str = "org.freedesktop.systemd1.Manager";
 
-pub(super) type UnitProperties = Vec<(&'static str, Value<'static>)>;
+pub(super) type UnitProperties = Vec<(&'static str, Variant<'static>)>;
 
 #[derive(Clone)]
 pub(super) struct UserManager {
@@ -35,7 +36,7 @@ pub(super) struct UserManager {
 impl UserManager {
     pub async fn connect_until(deadline: Deadline) -> Result<Self, SessionError> {
         Self::connect_with(async {
-            zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await
+            zbus::connection::Builder::session().method_timeout(Duration::from_secs(5)).build().await
         }, deadline).await
     }
 
@@ -138,15 +139,14 @@ impl UserManager {
 
     pub async fn unit_property<T>(&self, unit: &str, interface: &'static str, name: &str) -> Result<T, SessionError>
     where
-        T: TryFrom<OwnedValue>,
-        T::Error: Into<zbus::Error>,
+        T: DeserializeOwned + Type,
     {
         self.read(|| async {
             let connection = self.connection();
             let manager = Proxy::new(&connection, DESTINATION, MANAGER_PATH, MANAGER_INTERFACE).await?;
             let path: OwnedObjectPath = manager.call("GetUnit", &(unit,)).await?;
-            let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(&connection).destination(DESTINATION)?.path(path)?
-                .interface(interface)?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+            let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(&connection).destination(DESTINATION).path(path)
+                .interface(interface).cache_properties(zbus::proxy::CacheProperties::No).build().await?;
             proxy.get_property(name).await
         }).await
     }
@@ -266,16 +266,11 @@ where
 
 pub(super) fn retryable_error(error: &zbus::Error) -> bool {
     match error {
-        zbus::Error::MethodError(name, _, _) => matches!(name.as_str(),
-            "org.freedesktop.DBus.Error.NoReply" | "org.freedesktop.DBus.Error.Disconnected"
-            | "org.freedesktop.DBus.Error.ServiceUnknown" | "org.freedesktop.DBus.Error.NameHasNoOwner"
-            | "org.freedesktop.DBus.Error.Timeout" | "org.freedesktop.DBus.Error.TimedOut"
-            | "org.freedesktop.DBus.Error.UnknownObject"),
         zbus::Error::FDO(error) => matches!(**error, zbus::fdo::Error::NoReply(_)
             | zbus::fdo::Error::Disconnected(_) | zbus::fdo::Error::ServiceUnknown(_)
             | zbus::fdo::Error::NameHasNoOwner(_) | zbus::fdo::Error::Timeout(_)
             | zbus::fdo::Error::TimedOut(_) | zbus::fdo::Error::UnknownObject(_)),
-        zbus::Error::InputOutput(error) => matches!(error.kind(),
+        zbus::Error::InputOutput(error) | zbus::Error::Connection(error, _) => matches!(error.kind(),
             std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
             | std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::NotConnected
             | std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::TimedOut

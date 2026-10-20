@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicUsize, Ordering}};
 
-use zbus::{Connection, zvariant::OwnedObjectPath};
+use zbus::{Connection, OwnedObjectPath};
 
 use crate::{bus::UserManager, runtime::{AppRecord, SessionRecord}};
 
@@ -139,16 +139,16 @@ impl Fixture {
         let shared = state.clone();
         let (server, client) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
-            zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
-                .serve_at("/org/freedesktop/systemd1", Manager(shared.clone())).unwrap()
-                .serve_at("/compositor", Unit { state: shared.clone(), role: "compositor" }).unwrap()
-                .serve_at("/compositor", Service(shared.clone())).unwrap()
-                .serve_at("/app", Unit { state: shared.clone(), role: "app" }).unwrap()
-                .serve_at("/scope", Unit { state: shared.clone(), role: "scope" }).unwrap()
-                .serve_at("/scope", Scope(shared.clone())).unwrap()
-                .serve_at("/app", Service(shared)).unwrap().build().await.unwrap()
+            zbus::connection::Builder::unix_stream(server.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+                .serve_at("/org/freedesktop/systemd1", Manager(shared.clone()))
+                .serve_at("/compositor", Unit { state: shared.clone(), role: "compositor" })
+                .serve_at("/compositor", Service(shared.clone()))
+                .serve_at("/app", Unit { state: shared.clone(), role: "app" })
+                .serve_at("/scope", Unit { state: shared.clone(), role: "scope" })
+                .serve_at("/scope", Scope(shared.clone()))
+                .serve_at("/app", Service(shared)).build().await.unwrap()
         });
-        let connection = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
+        let connection = zbus::connection::Builder::unix_stream(client.into_std().unwrap()).p2p().build().await.unwrap();
         let mut record = crate::helper_start_fixture::record();
         record.compositor_unit = Some("niri.service".into());
         record.compositor_invocation = vec![1; 16];

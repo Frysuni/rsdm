@@ -5,7 +5,7 @@ use std::{future::Future, time::Duration};
 pub(super) use rsdm_system::generation::new_generation;
 
 use serde::{Deserialize, Serialize};
-use zbus::zvariant::OwnedObjectPath;
+use zbus::OwnedObjectPath;
 
 use super::SessionError;
 
@@ -25,7 +25,7 @@ impl SessionIdentity {
     pub(super) async fn discover_attach() -> Result<Self, SessionError> {
         let uid = unsafe { libc::geteuid() };
         let connect = async {
-            Ok(zbus::connection::Builder::system()?.method_timeout(Duration::from_secs(5)).build().await?)
+            Ok(zbus::connection::Builder::system().method_timeout(Duration::from_secs(5)).build().await?)
         };
         let login_session_id = verified_login_session(connect, uid, None).await?;
         Ok(Self { generation: super::runtime::blocking(|| Ok(new_generation()?)).await?, login_session_id,
@@ -42,7 +42,7 @@ impl SessionIdentity {
         let uid = unsafe { libc::geteuid() };
         let timeout = Duration::from_secs(5);
         let connection = async {
-            Ok(zbus::connection::Builder::system()?.method_timeout(timeout).build().await?)
+            Ok(zbus::connection::Builder::system().method_timeout(timeout).build().await?)
         };
         let session_hint = std::env::var("XDG_SESSION_ID").ok().filter(|id| !id.is_empty());
         let login_session_id = verified_login_session(connection, uid, session_hint.as_deref()).await?;
@@ -111,8 +111,8 @@ pub(super) async fn login_or_display_path(manager: &zbus::Proxy<'_>, pid: u32, u
 pub(super) async fn primary_display(manager: &zbus::Proxy<'_>, uid: u32) -> Result<(String, OwnedObjectPath), SessionError> {
     let path: OwnedObjectPath = manager.call("GetUser", &(uid,)).await?;
     let user = zbus::proxy::Builder::<zbus::Proxy<'_>>::new(manager.connection())
-        .destination("org.freedesktop.login1")?.path(path)?
-        .interface("org.freedesktop.login1.User")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+        .destination("org.freedesktop.login1").path(path)
+        .interface("org.freedesktop.login1.User").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     Ok(user.get_property("Display").await?)
 }
 

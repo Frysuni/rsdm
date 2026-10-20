@@ -1,7 +1,7 @@
 //! Detailed diagnostics have their own wire format; legacy status stays unchanged.
 
 use serde::{Deserialize, Serialize};
-use zbus::zvariant::Type;
+use zbus::Type;
 
 use crate::{app_dispatch::{Method, State}, app_result::Outcome, control::SessionStatus, runtime::AppRecord};
 

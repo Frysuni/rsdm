@@ -69,13 +69,13 @@ async fn fixture_with_display(uid: u32, display: Option<&str>) -> (zbus::Connect
     let user = User(display.unwrap_or_default().to_string());
     let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let server = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server_socket).p2p()
-            .server(zbus::Guid::generate()).unwrap()
-            .serve_at("/org/freedesktop/login1", manager).unwrap()
-            .serve_at("/org/freedesktop/login1/user/test", user).unwrap()
-            .serve_at(SESSION_PATH, Session(uid)).unwrap().build().await.unwrap()
+        zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p()
+            .server(zbus::Guid::generate())
+            .serve_at("/org/freedesktop/login1", manager)
+            .serve_at("/org/freedesktop/login1/user/test", user)
+            .serve_at(SESSION_PATH, Session(uid)).build().await.unwrap()
     });
-    let client = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    let client = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
     (client, server.await.unwrap(), calls)
 }
 

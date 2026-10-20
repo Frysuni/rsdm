@@ -7,7 +7,7 @@ use std::{
 };
 
 use rsdm_session_manager::{SessionStatus, StopOutcome};
-use zbus::zvariant::OwnedObjectPath;
+use zbus::OwnedObjectPath;
 
 #[path = "support/terminal.rs"]
 mod terminal_output;
@@ -20,6 +20,8 @@ const GENERATION: &str = "0123456789abcdef0123456789abcdef";
 mod disabled;
 #[path = "support/bootstrap_disable.rs"]
 mod bootstrap_disable;
+#[path = "support/session_status.rs"]
+mod session_status;
 type Calls = Arc<Mutex<Vec<String>>>;
 type Launch = (String, Vec<String>, Vec<(String, String)>, String, u64, String, String, Vec<String>);
 
@@ -120,11 +122,11 @@ impl SessionTools {
         BufReader::new(bus.stdout.take().unwrap()).read_line(&mut address).unwrap();
         let address = address.trim().to_string();
         let calls = Calls::default();
-        let connection = zbus::connection::Builder::address(address.as_str()).unwrap()
-            .serve_at("/org/freedesktop/login1", Login { calls: calls.clone() }).unwrap()
-            .serve_at("/org/freedesktop/login1/session/test", LoginSession).unwrap()
-            .serve_at("/org/rsdm/Session1", Session { calls: calls.clone(), finalize_fails }).unwrap()
-            .name("org.freedesktop.login1").unwrap().name("org.rsdm.Session1").unwrap().build().await.unwrap();
+        let connection = zbus::connection::Builder::address(address.as_str())
+            .serve_at("/org/freedesktop/login1", Login { calls: calls.clone() })
+            .serve_at("/org/freedesktop/login1/session/test", LoginSession)
+            .serve_at("/org/rsdm/Session1", Session { calls: calls.clone(), finalize_fails })
+            .name("org.freedesktop.login1").name("org.rsdm.Session1").build().await.unwrap();
         Self { root, bus, connection, address, calls }
     }
 
@@ -220,16 +222,6 @@ async fn cancelled_logout_is_not_reported_as_success() {
     assert_eq!(String::from_utf8_lossy(&output.stdout), "cancelled: application timed out\n");
     assert!(String::from_utf8_lossy(&output.stderr).contains("forced shutdown: earlier.service"));
     assert!(!output.stdout.contains(&0x1b) && !output.stderr.contains(&0x1b));
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn session_status_preserves_the_plain_application_list() {
-    let tools = SessionTools::new(false).await;
-    let output = tools.run(&["session", "status"]);
-    assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout), format!(
-        "managed: running (login test, desktop example, generation {GENERATION})\nRSDM XSMP: unavailable; auto uses the provider's shutdown method\nexample.service: registered, term, 30s\n"));
-    assert!(output.stderr.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

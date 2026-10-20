@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, Receiver, Sender, error::TrySendError};
-use zbus::{Connection, message::Header, object_server::ResponseDispatchNotifier, zvariant::Type};
+use zbus::{Connection, message::Header, object_server::ResponseDispatchNotifier, Type};
 
 use super::SessionError;
 

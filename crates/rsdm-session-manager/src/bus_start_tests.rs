@@ -5,8 +5,8 @@ use std::sync::atomic::Ordering;
 use super::{*, fixture::{fixture, state, Rejection}};
 
 fn properties() -> UnitProperties {
-    vec![("AddRef", Value::Bool(true)),
-         ("Environment", Value::new(vec!["RSDM_SESSION_GENERATION=ours".to_string()]))]
+    vec![("AddRef", Variant::Bool(true)),
+         ("Environment", Variant::new(vec!["RSDM_SESSION_GENERATION=ours".to_string()]))]
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -84,7 +84,7 @@ async fn preflight_denial_bad_generation_and_expired_deadline_never_stage_a_refe
     assert_eq!(state.calls.load(Ordering::SeqCst), 0);
 
     let (manager, _server, state) = fixture(super::fixture::state(false, false, 0)).await;
-    let malformed = vec![("AddRef", Value::Bool(true)), ("Environment", Value::Bool(true))];
+    let malformed = vec![("AddRef", Variant::Bool(true)), ("Environment", Variant::Bool(true))];
     assert!(matches!(manager.start_service("example.service", &malformed).await, Err(SessionError::StartRejected { reference_retained: false, .. })));
     manager.deadline.set(1);
     assert!(matches!(manager.start_service("example.service", &properties()).await, Err(SessionError::StartRejected { reference_retained: false, .. })));

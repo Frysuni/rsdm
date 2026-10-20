@@ -3,7 +3,7 @@
 use std::{path::Path, time::Duration};
 
 use rsdm_core::domain::SessionManagerConfig;
-use zbus::zvariant::{Fd, Value};
+use zbus::{Fd, Variant};
 
 use super::{SessionError, action_gate::ActionGate, attach_bootstrap::Snapshot, bus::UserManager, control, env, identity::SessionIdentity, runtime, units};
 
@@ -18,7 +18,7 @@ impl Drop for BootstrapTask {
 pub(super) async fn attach(cfg: &SessionManagerConfig, path: &Path, actions: ActionGate) -> Result<String, SessionError> {
     if !cfg.enabled { return Err(SessionError::Disabled); }
     actions.check()?;
-    let connected = tokio::time::timeout(Duration::from_secs(5), zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build());
+    let connected = tokio::time::timeout(Duration::from_secs(5), zbus::connection::Builder::session().method_timeout(Duration::from_secs(5)).build());
     let connection = actions.guard(connected).await?
         .map_err(|_| SessionError::State("connecting for attach timed out".into()))??;
     if control_exists(&connection).await? { return join(&connection, actions).await; }
@@ -35,7 +35,7 @@ pub(super) async fn attach(cfg: &SessionManagerConfig, path: &Path, actions: Act
     let argv = vec![executable.to_string_lossy().into_owned(), "--config".into(), path.to_string_lossy().into_owned(), "session".into(), "serve".into()];
     let environment = snapshot.identity.command_environment(snapshot.environment.clone());
     let mut properties = units::command_properties(&argv, &environment, &snapshot.directory).await?;
-    properties.extend([("StandardInputFileDescriptor", Value::new(Fd::from(descriptor))), ("Slice", Value::from("app.slice"))]);
+    properties.extend([("StandardInputFileDescriptor", Variant::new(Fd::from(descriptor))), ("Slice", Variant::from("app.slice"))]);
     match manager.start_service(UNIT, &properties).await {
         Ok(()) => {},
         Err(SessionError::StartRejected { error, .. }) if matches!(error.as_ref(), SessionError::Bus(zbus::Error::MethodError(name, _, _)) if name.as_str() == "org.freedesktop.systemd1.UnitExists") => {},

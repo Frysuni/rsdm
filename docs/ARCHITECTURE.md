@@ -107,8 +107,9 @@ User-manager operations stay on the caller's runtime; compositor startup,
 application launches, preparation, observation, and teardown use Tokio tasks.
 Control endpoint registration and health checks run as Tokio tasks; dropping
 the server aborts its pending reconnection task.
-The workspace uses zbus's Tokio backend with its blocking API disabled.
-Private bus fixtures use Tokio sockets and asynchronous setup. User-manager
+The workspace uses zbus 6's Tokio backend with explicit proxy, service and
+tracing features. Private bus fixtures hand owned Unix sockets to zbus and
+use asynchronous setup. User-manager
 jobs, reconnects, recovery leases, and shared deadlines use Tokio timers;
 Session Manager has no direct async-io, async-channel, or futures-lite dependency.
 Native session launchers use Tokio child processes. Cancelling an exit wait

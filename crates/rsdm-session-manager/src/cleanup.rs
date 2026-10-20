@@ -162,7 +162,7 @@ async fn acquire_lease(manager: &UserManager) -> Result<(), SessionError> {
     manager.deadline.bound(async {
         let lease = async {
             loop {
-                match manager.connection().request_name_with_flags(BUS_NAME, RequestNameFlags::DoNotQueue.into()).await {
+                match manager.connection().request_name_with_flags(BUS_NAME, RequestNameFlags::DO_NOT_QUEUE).await {
                     Ok(_) => return Ok(()),
                     Err(zbus::Error::NameTaken) => { tokio::time::sleep(Duration::from_millis(50)).await; }
                     Err(error) => return Err(error.into()),

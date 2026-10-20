@@ -1,6 +1,6 @@
 //! Authenticate an app process inside the caller's held IPC request slot.
 
-use zbus::{Proxy, proxy::CacheProperties, zvariant::OwnedObjectPath};
+use zbus::{Proxy, proxy::CacheProperties, OwnedObjectPath};
 
 use super::{processes::{self, ProcessHandle}, runtime::{self, AppRecord}};
 
@@ -59,8 +59,8 @@ async fn current_application(manager: &Proxy<'_>, unit: &Proxy<'_>, app: &AppRec
 pub(super) async fn unit_proxy<'a>(manager: &Proxy<'a>, unit: &str, interface: &str) -> zbus::Result<Proxy<'a>> {
     let path: OwnedObjectPath = manager.call("GetUnit", &(unit,)).await?;
     // These reads share the caller's held slot and original bus connection.
-    zbus::proxy::Builder::<Proxy<'_>>::new(manager.connection()).destination("org.freedesktop.systemd1")?.path(path)?
-        .interface(format!("org.freedesktop.systemd1.{interface}"))?.cache_properties(CacheProperties::No).build().await
+    zbus::proxy::Builder::<Proxy<'_>>::new(manager.connection()).destination("org.freedesktop.systemd1").path(path)
+        .interface(format!("org.freedesktop.systemd1.{interface}")).cache_properties(CacheProperties::No).build().await
 }
 
 pub(super) fn valid_invocation(invocation: &[u8]) -> bool {

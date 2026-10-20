@@ -1,6 +1,6 @@
 use std::{sync::{Arc, atomic::{AtomicUsize, Ordering}}};
 
-use zbus::{Connection, zvariant::OwnedObjectPath};
+use zbus::{Connection, OwnedObjectPath};
 
 use super::*;
 
@@ -46,14 +46,14 @@ async fn manager(invocation: Vec<u8>, state: &'static str, processes: Vec<u32>) 
     let shared = queries.clone();
     let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let worker = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server_socket).p2p()
-            .server(zbus::Guid::generate()).unwrap()
-            .serve_at("/org/freedesktop/systemd1", Manager { processes, queries: shared }).unwrap()
-            .serve_at("/org/freedesktop/systemd1/unit/native", Unit { invocation, state }).unwrap()
-            .serve_at("/org/freedesktop/systemd1/unit/native", Service).unwrap()
+        zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p()
+            .server(zbus::Guid::generate())
+            .serve_at("/org/freedesktop/systemd1", Manager { processes, queries: shared })
+            .serve_at("/org/freedesktop/systemd1/unit/native", Unit { invocation, state })
+            .serve_at("/org/freedesktop/systemd1/unit/native", Service)
             .build().await.unwrap()
     });
-    let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    let connection = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
     (UserManager::with_connection(connection), worker.await.unwrap(), queries)
 }
 

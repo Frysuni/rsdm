@@ -38,8 +38,8 @@ async fn verify(connection: &Connection, unit: &str, expected: &[u8]) -> zbus::R
         Err(error) if missing_unit(&error) => return Ok(false),
         Err(error) => return Err(error),
     };
-    let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination(DESTINATION)?.path(path)?
-        .interface("org.freedesktop.systemd1.Unit")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+    let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination(DESTINATION).path(path)
+        .interface("org.freedesktop.systemd1.Unit").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     let current: Vec<u8> = proxy.get_property("InvocationID").await?;
     if expected.iter().any(|byte| *byte != 0) && current == expected { return Ok(true); }
     if current.iter().any(|byte| *byte != 0) { return Err(ownership_error(unit)); }

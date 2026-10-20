@@ -3,7 +3,7 @@
 use std::{path::Path, time::Duration};
 
 use rsdm_core::domain::{ShutdownMethod, ShutdownPolicy, TimeoutAction};
-use zbus::zvariant::Value;
+use zbus::Variant;
 
 use super::{
     SessionError, bus::{UnitProperties, UserManager}, control::LaunchRequest, deadline::Deadline, env::valid_environment_name,
@@ -129,12 +129,12 @@ async fn launch_properties(
     start_argv.extend(["session".into(), "app-exec".into(), "--generation".into(), runtime.generation.clone(), "--unit".into(), app.unit.clone(), "--".into()]);
     start_argv.extend(request.argv.clone());
     properties.retain(|(name, _)| *name != "ExecStartEx");
-    properties.push(("ExecStartEx", Value::new(vec![(executable.clone(), start_argv, vec!["no-env-expand".to_string()])])));
+    properties.push(("ExecStartEx", Variant::new(vec![(executable.clone(), start_argv, vec!["no-env-expand".to_string()])])));
     stop_argv.extend(["session".into(), "app-stop".into(), "--generation".into(), runtime.generation.clone(), "--unit".into(), app.unit.clone()]);
     let stop_command = vec![(executable, stop_argv, vec!["no-env-expand".to_string()])];
     properties.extend([
-        ("ExecStopEx", Value::new(stop_command)),
-        ("TimeoutStopUSec", Value::from(app.policy.timeout_secs.saturating_add(20).saturating_mul(1_000_000))),
+        ("ExecStopEx", Variant::new(stop_command)),
+        ("TimeoutStopUSec", Variant::from(app.policy.timeout_secs.saturating_add(20).saturating_mul(1_000_000))),
     ]);
     Ok(properties)
 }

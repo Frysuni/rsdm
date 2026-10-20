@@ -95,7 +95,7 @@ impl Manager {
 
     async fn start_transient_unit(
         &self, _unit: &str, _mode: &str,
-        _properties: Vec<(String, OwnedValue)>, _auxiliary: Vec<(String, Vec<(String, OwnedValue)>)>,
+        _properties: Vec<(String, OwnedVariant)>, _auxiliary: Vec<(String, Vec<(String, OwnedVariant)>)>,
     ) -> Result<OwnedObjectPath, ManagerError> {
         self.0.calls.fetch_add(1, Ordering::SeqCst);
         if let Some(rejection) = self.0.rejection {
@@ -164,12 +164,12 @@ pub(super) async fn fixture(state: State) -> (UserManager, Connection, Arc<State
     let shared = state.clone();
     let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let server = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
-            .serve_at(MANAGER_PATH, Manager(shared.clone())).unwrap()
-            .serve_at("/unit", Unit(shared.clone())).unwrap()
-            .serve_at("/unit", Service(shared)).unwrap().build().await.unwrap()
+        zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+            .serve_at(MANAGER_PATH, Manager(shared.clone()))
+            .serve_at("/unit", Unit(shared.clone()))
+            .serve_at("/unit", Service(shared)).build().await.unwrap()
     });
-    let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    let connection = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
     let server = server.await.unwrap();
     let manager = UserManager::from_connection(connection).await.unwrap();
     (manager, server, state)

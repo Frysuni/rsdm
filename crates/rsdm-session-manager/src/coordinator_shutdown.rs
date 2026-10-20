@@ -261,9 +261,9 @@ async fn run_logout_command(manager: &UserManager, record: &SessionRecord, provi
     // must survive that stop long enough to return its actual result. Bound
     // its lifetime in systemd as well, including if the coordinator crashes.
     properties.extend([
-        ("ExitType", zbus::zvariant::Value::from("cgroup")),
-        ("RuntimeMaxUSec", zbus::zvariant::Value::from(15_000_000_u64)),
-        ("TimeoutStopUSec", zbus::zvariant::Value::from(1_000_000_u64)),
+        ("ExitType", zbus::Variant::from("cgroup")),
+        ("RuntimeMaxUSec", zbus::Variant::from(15_000_000_u64)),
+        ("TimeoutStopUSec", zbus::Variant::from(1_000_000_u64)),
     ]);
     let result = async {
         manager.start_service(&unit, &properties).await?;

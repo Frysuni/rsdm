@@ -24,11 +24,12 @@ pub async fn status_details(cfg: &SessionManagerConfig) -> Result<SessionStatusD
 async fn connection() -> Result<Option<Connection>, SessionError> {
     if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() && std::env::var_os("XDG_RUNTIME_DIR").is_none() { return Ok(None); }
     let connected = tokio::time::timeout(Duration::from_secs(5),
-        zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build()).await
+        zbus::connection::Builder::session().method_timeout(Duration::from_secs(5)).build()).await
         .map_err(|_| SessionError::State("session status connection timed out".into()))?;
     match connected {
         Ok(connection) => Ok(Some(connection)),
-        Err(zbus::Error::InputOutput(error)) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused) => Ok(None),
+        Err(zbus::Error::InputOutput(error) | zbus::Error::Connection(error, _))
+            if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused) => Ok(None),
         Err(error) => Err(error.into()),
     }
 }
@@ -38,7 +39,7 @@ async fn query_details(connection: &Connection) -> Result<SessionStatusDetails, 
     let proxy = zbus::Proxy::new(connection, owner.as_str(), control::OBJECT_PATH, control::BUS_NAME).await?;
     match proxy.call::<_, _, SessionStatusDetails>("StatusDetails", &()).await {
         Ok(details) => Ok(details),
-        Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "org.freedesktop.DBus.Error.UnknownMethod" => {
+        Err(zbus::Error::FDO(error)) if matches!(*error, zbus::fdo::Error::UnknownMethod(_)) => {
             Ok(SessionStatusDetails::legacy(proxy.call("Status", &()).await?))
         }
         Err(error) => Err(error.into()),
@@ -49,7 +50,7 @@ async fn coordinator_owner(connection: &Connection) -> Result<Option<OwnedUnique
     let reply = connection.call_method(Some("org.freedesktop.DBus"), "/org/freedesktop/DBus", Some("org.freedesktop.DBus"), "GetNameOwner", &(control::BUS_NAME,)).await;
     match reply {
         Ok(reply) => Ok(Some(reply.body().deserialize()?)),
-        Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "org.freedesktop.DBus.Error.NameHasNoOwner" => Ok(None),
+        Err(zbus::Error::FDO(error)) if matches!(*error, zbus::fdo::Error::NameHasNoOwner(_)) => Ok(None),
         Err(error) => Err(error.into()),
     }
 }

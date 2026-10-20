@@ -68,11 +68,11 @@ fn old_status() -> SessionStatus {
 async fn connect<T: Interface>(calls: Arc<Calls>, present: bool, interface: T) -> (Connection, Connection) {
     let (server, client) = tokio::net::UnixStream::pair().unwrap();
     let server = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
-            .serve_at("/org/freedesktop/DBus", Bus { calls, present }).unwrap()
-            .serve_at(control::OBJECT_PATH, interface).unwrap().build().await.unwrap()
+        zbus::connection::Builder::unix_stream(server.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+            .serve_at("/org/freedesktop/DBus", Bus { calls, present })
+            .serve_at(control::OBJECT_PATH, interface).build().await.unwrap()
     });
-    let client = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
+    let client = zbus::connection::Builder::unix_stream(client.into_std().unwrap()).p2p().build().await.unwrap();
     (server.await.unwrap(), client)
 }
 
@@ -131,7 +131,7 @@ async fn absent_owner_is_inactive_without_any_coordinator_call_or_activation() {
 
 #[test]
 fn legacy_wire_signatures_are_unchanged() {
-    use zbus::zvariant::Type;
+    use zbus::Type;
     assert_eq!(SessionStatus::SIGNATURE.to_string(), "(sssssba(ssts))");
     assert_eq!(crate::StopOutcome::SIGNATURE.to_string(), "(sass)");
 }

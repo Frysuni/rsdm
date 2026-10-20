@@ -67,10 +67,10 @@ impl Fixture {
         let shared = state.clone();
         let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
-            zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
-                .serve_at(MANAGER_PATH, Manager(shared)).unwrap().build().await.unwrap()
+            zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+                .serve_at(MANAGER_PATH, Manager(shared)).build().await.unwrap()
         });
-        let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+        let connection = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
         Self { manager: UserManager::with_connection(connection), entered, state, _server: server.await.unwrap() }
     }
 

@@ -1,6 +1,6 @@
 use std::{sync::{Arc, Mutex}};
 
-use zbus::{object_server::SignalEmitter, zvariant::OwnedValue};
+use zbus::{object_server::SignalEmitter, OwnedVariant};
 
 use super::*;
 
@@ -37,8 +37,8 @@ impl FakeManager {
         &self,
         unit: &str,
         mode: &str,
-        _properties: Vec<(String, OwnedValue)>,
-        _auxiliary: Vec<(String, Vec<(String, OwnedValue)>)>,
+        _properties: Vec<(String, OwnedVariant)>,
+        _auxiliary: Vec<(String, Vec<(String, OwnedVariant)>)>,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<OwnedObjectPath> {
         self.calls.lock().unwrap().push((unit.into(), mode.into()));
@@ -66,11 +66,11 @@ async fn connect(version: &'static str, result: &'static str) -> (UserManager, C
     let calls = Calls::default();
     let manager = FakeManager { version, result, calls: calls.clone() };
     let server = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server_socket)
-            .p2p().server(zbus::Guid::generate()).unwrap()
-            .serve_at(MANAGER_PATH, manager).unwrap().build().await.unwrap()
+        zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap())
+            .p2p().server(zbus::Guid::generate())
+            .serve_at(MANAGER_PATH, manager).build().await.unwrap()
     });
-    let client = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    let client = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
     let server = server.await.unwrap();
     let client = UserManager::from_connection(client).await.unwrap();
     (client, server, calls)

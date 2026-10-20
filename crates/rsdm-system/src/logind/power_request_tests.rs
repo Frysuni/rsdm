@@ -42,10 +42,10 @@ async fn fixture(answer: &'static str, hung: bool, lost_reply: bool) -> (Connect
     let calls = Calls::default();
     let state = calls.clone();
     let server = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
-            .serve_at(PATH, Logind { answer, hung, lost_reply, calls: state }).unwrap().build().await.unwrap()
+        zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+            .serve_at(PATH, Logind { answer, hung, lost_reply, calls: state }).build().await.unwrap()
     });
-    let client = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    let client = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
     (client, server.await.unwrap(), calls)
 }
 

@@ -89,10 +89,10 @@ async fn maintain_connection(connection: Connection, endpoint: Endpoint) -> Main
 
 async fn serve(endpoint: Endpoint) -> Result<Connection, SessionError> {
     tokio::time::timeout(Duration::from_secs(5), async {
-        Ok(zbus::connection::Builder::session()?
+        Ok(zbus::connection::Builder::session()
             .method_timeout(Duration::from_secs(5))
             .allow_name_replacements(false).replace_existing_names(false)
-            .serve_at(OBJECT_PATH, endpoint)?.name(BUS_NAME)?.build().await?)
+            .serve_at(OBJECT_PATH, endpoint).name(BUS_NAME).build().await?)
     }).await.map_err(|_| zbus::Error::from(zbus::fdo::Error::TimedOut("connecting session control timed out".into())))?
 }
 

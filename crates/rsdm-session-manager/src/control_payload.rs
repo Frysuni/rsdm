@@ -1,7 +1,7 @@
 //! Bound control payloads before they enter the coordinator or recovery state.
 
 use serde::Serialize;
-use zbus::zvariant::{LE, Type, serialized::Context, serialized_size};
+use zbus::{Type, wire::{LE, serialized::Context, serialized_size}};
 
 use super::LaunchRequest;
 use crate::{env::valid_environment_name, identity::valid_generation};
@@ -90,7 +90,7 @@ fn string(value: &str) -> Result<(), String> {
 }
 
 fn check_size<T: Serialize + Type>(value: &T, limit: usize) -> Result<(), String> {
-    let size = serialized_size(Context::new_dbus(LE, 0), value)
+    let size = serialized_size(Context::new(LE, 0), value)
         .map_err(|error| format!("invalid request encoding: {error}"))?;
     if size.size() > limit {
         return Err(format!("encoded request exceeds {limit} bytes"));

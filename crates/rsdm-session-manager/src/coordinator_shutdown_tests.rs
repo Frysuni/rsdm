@@ -64,13 +64,13 @@ impl Fixture {
         let runtime = Runtime { path: directory.clone(), generation: GENERATION.into() };
         let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
-            zbus::connection::Builder::unix_stream(server_socket).p2p()
-                .server(zbus::Guid::generate()).unwrap()
+            zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p()
+                .server(zbus::Guid::generate())
                 // Builder waits for the dispatcher's match stream to be ready;
                 // dynamically adding interfaces alone leaves the first call racing it.
-                .serve_at("/fixture", FixtureReady).unwrap().build().await.unwrap()
+                .serve_at("/fixture", FixtureReady).build().await.unwrap()
         });
-        let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+        let connection = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
         let manager = UserManager::with_connection(connection.clone());
         let provider = Provider { kind: ProviderKind::External, native_unit: None, logout_command: Vec::new() };
         let xsmp = xsmp::Handle::start(&manager, &runtime, &provider).await.unwrap();

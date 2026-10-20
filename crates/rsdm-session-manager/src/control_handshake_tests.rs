@@ -76,13 +76,13 @@ impl Fixture {
         let (server, client) = tokio::net::UnixStream::pair().unwrap();
         let name = name.to_string();
         let server = tokio::spawn(async move {
-            zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
-                .serve_at("/org/freedesktop/systemd1", Manager).unwrap()
-                .serve_at(PATH, Unit { name, invocation, replace, reads: AtomicUsize::new(0) }).unwrap()
-                .serve_at(PATH, Scope(group.clone())).unwrap()
-                .serve_at(PATH, Service(group)).unwrap().build().await.unwrap()
+            zbus::connection::Builder::unix_stream(server.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+                .serve_at("/org/freedesktop/systemd1", Manager)
+                .serve_at(PATH, Unit { name, invocation, replace, reads: AtomicUsize::new(0) })
+                .serve_at(PATH, Scope(group.clone()))
+                .serve_at(PATH, Service(group)).build().await.unwrap()
         });
-        let connection = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
+        let connection = zbus::connection::Builder::unix_stream(client.into_std().unwrap()).p2p().build().await.unwrap();
         let identity = SessionIdentity { generation: GENERATION.into(), uid: unsafe { libc::geteuid() }, login_session_id: "test".into(), desktop_entry_id: None };
         let record = SessionRecord {
             identity, anchor_unit: format!("rsdm-session-{GENERATION}.service"), compositor_unit: None,

@@ -3,7 +3,7 @@
 use std::{sync::{Arc, atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering}}};
 
 use rsdm_core::domain::{SessionPhase, ShutdownPolicy};
-use zbus::{Connection, zvariant::{OwnedObjectPath, OwnedValue}};
+use zbus::{Connection, OwnedObjectPath, OwnedVariant};
 
 use super::{bus::UserManager, identity::SessionIdentity, runtime::{AppRecord, SessionRecord}};
 
@@ -55,8 +55,8 @@ impl Manager {
     }
 
     fn start_transient_unit(
-        &self, _unit: &str, _mode: &str, properties: Vec<(String, OwnedValue)>,
-        _auxiliary: Vec<(String, Vec<(String, OwnedValue)>)>,
+        &self, _unit: &str, _mode: &str, properties: Vec<(String, OwnedVariant)>,
+        _auxiliary: Vec<(String, Vec<(String, OwnedVariant)>)>,
     ) -> Result<OwnedObjectPath, ManagerError> {
         self.0.starts.fetch_add(1, Ordering::SeqCst);
         self.0.lifetime_bound.store(properties.iter().any(|(name, _)| *name == "PartOf")
@@ -126,13 +126,13 @@ impl Fixture {
         let shared = Arc::clone(&state);
         let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
-            zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
-                .serve_at("/org/freedesktop/systemd1", Manager(Arc::clone(&shared))).unwrap()
-                .serve_at("/app", Service).unwrap().serve_at("/app", ApplicationUnit).unwrap()
-                .serve_at("/helper", Unit(shared)).unwrap()
+            zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+                .serve_at("/org/freedesktop/systemd1", Manager(Arc::clone(&shared)))
+                .serve_at("/app", Service).serve_at("/app", ApplicationUnit)
+                .serve_at("/helper", Unit(shared))
                 .build().await.unwrap()
         });
-        let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+        let connection = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
         Self { manager: UserManager::with_connection(connection), state, _server: server.await.unwrap() }
     }
 }

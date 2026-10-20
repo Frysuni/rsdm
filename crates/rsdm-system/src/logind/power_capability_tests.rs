@@ -30,11 +30,11 @@ async fn answer(answer: &Answer) -> zbus::fdo::Result<String> {
 async fn connect(hibernate: Answer, suspend: Answer) -> (Connection, Connection) {
     let (server, client) = tokio::net::UnixStream::pair().unwrap();
     let worker = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server).p2p()
-            .server(zbus::Guid::generate()).unwrap()
-            .serve_at(PATH, Logind { hibernate, suspend }).unwrap().build().await.unwrap()
+        zbus::connection::Builder::unix_stream(server.into_std().unwrap()).p2p()
+            .server(zbus::Guid::generate())
+            .serve_at(PATH, Logind { hibernate, suspend }).build().await.unwrap()
     });
-    let client = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
+    let client = zbus::connection::Builder::unix_stream(client.into_std().unwrap()).p2p().build().await.unwrap();
     (client, worker.await.unwrap())
 }
 

@@ -22,11 +22,11 @@ pub(super) async fn activate(
         if let Some(unit) = compositor {
             required.push(unit.to_string());
         }
-        properties.push(("Requisite", zbus::zvariant::Value::new(required)));
+        properties.push(("Requisite", zbus::Variant::new(required)));
     }
     if !external_target && provider.kind == ProviderKind::Managed {
         properties.retain(|(name, _)| *name != "Wants");
-        properties.push(("Wants", zbus::zvariant::Value::new(vec![
+        properties.push(("Wants", zbus::Variant::new(vec![
             units::SESSION_TARGET.to_string(), units::AUTOSTART_TARGET.to_string(),
         ])));
     }

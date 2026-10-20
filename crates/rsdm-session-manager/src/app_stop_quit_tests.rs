@@ -1,6 +1,6 @@
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, sync::Arc};
 
-use zbus::zvariant::OwnedObjectPath;
+use zbus::OwnedObjectPath;
 
 use super::*;
 
@@ -55,11 +55,11 @@ impl Fixture {
         let state = coordinator.clone();
         let (server, client) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
-            zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
-                .serve_at("/org/freedesktop/systemd1", Manager { control, coordinator: state.clone() }).unwrap()
-                .serve_at("/coordinator", Unit(state)).unwrap().build().await.unwrap()
+            zbus::connection::Builder::unix_stream(server.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+                .serve_at("/org/freedesktop/systemd1", Manager { control, coordinator: state.clone() })
+                .serve_at("/coordinator", Unit(state)).build().await.unwrap()
         });
-        let client = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
+        let client = zbus::connection::Builder::unix_stream(client.into_std().unwrap()).p2p().build().await.unwrap();
         Self { directory, runtime, manager: UserManager::with_connection(client), coordinator, _server: server.await.unwrap() }
     }
 

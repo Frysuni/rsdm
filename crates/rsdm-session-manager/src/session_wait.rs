@@ -2,7 +2,7 @@
 
 use std::{os::unix::process::ExitStatusExt, sync::Arc, time::Duration};
 
-use zbus::{Connection, zvariant::{OwnedObjectPath, OwnedValue}};
+use zbus::{Connection, OwnedObjectPath, OwnedVariant};
 
 use super::{SessionError, processes::ProcessHandle, provider::Provider, runtime::SessionRecord, session_process::SessionProcess};
 
@@ -113,15 +113,15 @@ async fn observe_unit(connection: &Connection, unit: &str, record: &SessionRecor
 }
 
 async fn property<T>(connection: &Connection, path: &OwnedObjectPath, interface: &str, name: &str) -> Result<T, SessionError>
-where T: TryFrom<OwnedValue>, T::Error: Into<zbus::Error> {
+where T: TryFrom<OwnedVariant>, T::Error: Into<zbus::Error> {
     let reply = connection.call_method(Some(DESTINATION), path, Some("org.freedesktop.DBus.Properties"), "Get", &(interface, name)).await?;
-    let value: OwnedValue = reply.body().deserialize()?;
+    let value: OwnedVariant = reply.body().deserialize()?;
     value.try_into().map_err(|error: T::Error| SessionError::from(error.into()))
 }
 
 async fn connect() -> Result<Connection, SessionError> {
     tokio::time::timeout(Duration::from_secs(5), async {
-        Ok(zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await?)
+        Ok(zbus::connection::Builder::session().method_timeout(Duration::from_secs(5)).build().await?)
     }).await.map_err(|_| SessionError::State("launcher observation bus connection timed out".into()))?
 }
 

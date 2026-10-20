@@ -47,9 +47,9 @@ impl Manager {
         }
     }
 
-    fn get_unit(&self, _unit: &str) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
+    fn get_unit(&self, _unit: &str) -> zbus::fdo::Result<zbus::OwnedObjectPath> {
         self.0.reads.fetch_add(1, Ordering::SeqCst);
-        if self.0.ready.load(Ordering::SeqCst) { return Ok(zbus::zvariant::OwnedObjectPath::try_from("/anchor").unwrap()); }
+        if self.0.ready.load(Ordering::SeqCst) { return Ok(zbus::OwnedObjectPath::try_from("/anchor").unwrap()); }
         Err(zbus::fdo::Error::Failed("unexpected readiness query".into()))
     }
 }

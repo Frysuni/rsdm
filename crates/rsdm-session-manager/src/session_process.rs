@@ -70,8 +70,8 @@ impl SessionProcess {
         if self.compositor.lock().unwrap().is_some() { return Ok(()); }
         let pid: u32 = match manager.unit_property(unit, "org.freedesktop.systemd1.Service", "MainPID").await {
             Ok(pid) => pid,
-            Err(SessionError::Bus(zbus::Error::MethodError(name, _, _))) if matches!(name.as_str(),
-                "org.freedesktop.DBus.Error.UnknownProperty" | "org.freedesktop.DBus.Error.UnknownInterface") => return Ok(()),
+            Err(SessionError::Bus(zbus::Error::FDO(error))) if matches!(*error,
+                zbus::fdo::Error::UnknownProperty(_) | zbus::fdo::Error::UnknownInterface(_)) => return Ok(()),
             Err(error) => return Err(error),
         };
         if pid == 0 { return Ok(()); }

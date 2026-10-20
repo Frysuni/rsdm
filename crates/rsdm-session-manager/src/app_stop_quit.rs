@@ -3,7 +3,7 @@
 use std::{path::Path, sync::atomic::{AtomicBool, Ordering}, time::Duration};
 
 use rsdm_core::domain::ShutdownMethod;
-use zbus::zvariant::Value;
+use zbus::Variant;
 
 use super::ShutdownControl;
 use crate::{SessionError, bus::UserManager, processes::{app_processes, terminate_main},
@@ -139,10 +139,10 @@ async fn quit_properties(manager: &UserManager, app: &AppRecord, anchor: &str) -
         return Err(SessionError::State("application exited during quit command preparation".into()));
     }
     properties.extend([
-        ("Slice", Value::from(crate::units::APP_SLICE)),
-        ("TimeoutStopUSec", Value::from(1_000_000_u64)),
-        ("PartOf", Value::new(vec![anchor.to_string()])),
-        ("Requisite", Value::new(vec![anchor.to_string()])),
+        ("Slice", Variant::from(crate::units::APP_SLICE)),
+        ("TimeoutStopUSec", Variant::from(1_000_000_u64)),
+        ("PartOf", Variant::new(vec![anchor.to_string()])),
+        ("Requisite", Variant::new(vec![anchor.to_string()])),
     ]);
     Ok(properties)
 }

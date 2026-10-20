@@ -36,7 +36,7 @@ async fn attached_apps_keep_private_xsmp_and_have_no_graphical_lifetime_dependen
     let properties = launch_properties(&fixture.manager, &fixture.runtime, "foreign-anchor.service", &fixture.request, &fixture.app, None).await.unwrap();
     assert!(properties.iter().all(|(name, _)| !matches!(*name, "After" | "PartOf" | "Requisite")));
     let value = properties.into_iter().find(|(name, _)| *name == "Environment").unwrap().1;
-    let environment: Vec<String> = zbus::zvariant::OwnedValue::try_from(value).unwrap().try_into().unwrap();
+    let environment: Vec<String> = zbus::OwnedVariant::try_from(value).unwrap().try_into().unwrap();
     assert!(environment.contains(&"SESSION_MANAGER=private-xsmp".into()));
     assert!(environment.contains(&"VALUE=caller".into()));
     assert!(!environment.contains(&"SESSION_MANAGER=foreign-xsmp".into()));
@@ -87,7 +87,7 @@ async fn stop_hooks_preserve_the_coordinators_config_path_as_one_argument() {
     let path = Path::new("/run/custom config/rsdm.toml");
     let properties = launch_properties(&fixture.manager, &fixture.runtime, "anchor.service", &fixture.request, &fixture.app, Some(path)).await.unwrap();
     let value = properties.into_iter().find(|(name, _)| *name == "ExecStopEx").unwrap().1;
-    let commands: Vec<(String, Vec<String>, Vec<String>)> = zbus::zvariant::OwnedValue::try_from(value).unwrap().try_into().unwrap();
+    let commands: Vec<(String, Vec<String>, Vec<String>)> = zbus::OwnedVariant::try_from(value).unwrap().try_into().unwrap();
     let (executable, argv, flags) = &commands[0];
     assert_eq!(argv, &vec![executable.clone(), "--config".into(), path.to_str().unwrap().into(),
         "session".into(), "app-stop".into(), "--generation".into(), fixture.runtime.generation.clone(),
@@ -102,7 +102,7 @@ async fn the_original_command_runs_after_origin_capture_with_literal_arguments()
     let path = Path::new("/run/custom config/rsdm.toml");
     let properties = launch_properties(&fixture.manager, &fixture.runtime, "anchor.service", &fixture.request, &fixture.app, Some(path)).await.unwrap();
     let value = properties.into_iter().find(|(name, _)| *name == "ExecStartEx").unwrap().1;
-    let commands: Vec<(String, Vec<String>, Vec<String>)> = zbus::zvariant::OwnedValue::try_from(value).unwrap().try_into().unwrap();
+    let commands: Vec<(String, Vec<String>, Vec<String>)> = zbus::OwnedVariant::try_from(value).unwrap().try_into().unwrap();
     let (executable, argv, flags) = &commands[0];
     let mut expected = vec![executable.clone(), "--config".into(), path.to_str().unwrap().into(), "session".into(), "app-exec".into(),
         "--generation".into(), fixture.runtime.generation.clone(), "--unit".into(), fixture.app.unit.clone(), "--".into()];

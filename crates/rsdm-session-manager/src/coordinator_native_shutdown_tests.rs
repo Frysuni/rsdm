@@ -15,7 +15,7 @@ struct MissingApplications;
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Manager")]
 impl MissingApplications {
-    fn get_unit(&self, _unit: &str) -> Result<zbus::zvariant::OwnedObjectPath, ManagerError> {
+    fn get_unit(&self, _unit: &str) -> Result<zbus::OwnedObjectPath, ManagerError> {
         Err(ManagerError::NoSuchUnit("application is absent".into()))
     }
 }

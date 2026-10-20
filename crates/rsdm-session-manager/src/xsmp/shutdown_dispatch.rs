@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use rsdm_core::domain::SessionPhase;
-use zbus::{Connection, Proxy, zvariant::OwnedObjectPath};
+use zbus::{Connection, Proxy, OwnedObjectPath};
 
 use super::{ffi, peer::Peer, protocol::Phase};
 use crate::{SessionError, app_stop::ShutdownControl, bus::UserManager, processes::monotonic_usec, runtime::{Runtime, SessionRecord}};
@@ -76,8 +76,8 @@ async fn current_process(connection: &Connection, peer: &Peer) -> zbus::Result<b
     if !peer.alive().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))? { return Ok(false); }
     let manager = Proxy::new(connection, "org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager").await?;
     let path: OwnedObjectPath = manager.call("GetUnit", &(&peer.unit,)).await?;
-    let service = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination("org.freedesktop.systemd1")?.path(path)?
-        .interface("org.freedesktop.systemd1.Service")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+    let service = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination("org.freedesktop.systemd1").path(path)
+        .interface("org.freedesktop.systemd1.Service").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     let control: u32 = service.get_property("ControlPID").await?;
     let processes: Vec<(String, u32, String)> = manager.call("GetUnitProcesses", &(&peer.unit,)).await?;
     Ok(peer.pid != control && processes.iter().any(|(_, pid, _)| *pid == peer.pid))
@@ -86,8 +86,8 @@ async fn current_process(connection: &Connection, peer: &Peer) -> zbus::Result<b
 async fn current_invocation(connection: &Connection, peer: &Peer) -> zbus::Result<bool> {
     let manager = Proxy::new(connection, "org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager").await?;
     let path: OwnedObjectPath = manager.call("GetUnitByPID", &(peer.pid,)).await?;
-    let unit = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination("org.freedesktop.systemd1")?.path(path)?
-        .interface("org.freedesktop.systemd1.Unit")?.cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+    let unit = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination("org.freedesktop.systemd1").path(path)
+        .interface("org.freedesktop.systemd1.Unit").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     let name: String = unit.get_property("Id").await?;
     let invocation: Vec<u8> = unit.get_property("InvocationID").await?;
     Ok(name == peer.unit && !peer.invocation.is_empty() && peer.invocation.iter().any(|byte| *byte != 0) && invocation == peer.invocation)

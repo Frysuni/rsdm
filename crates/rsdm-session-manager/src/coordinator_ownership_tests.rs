@@ -2,7 +2,7 @@
 
 use super::*;
 use std::sync::{Mutex, atomic::AtomicBool};
-use zbus::zvariant::OwnedObjectPath;
+use zbus::OwnedObjectPath;
 
 #[path = "coordinator_recovery_ownership_tests.rs"]
 mod recovery;

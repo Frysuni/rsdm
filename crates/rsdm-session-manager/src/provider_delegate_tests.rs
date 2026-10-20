@@ -104,7 +104,7 @@ struct State {
 impl State {
     async fn request(&self, method: &str, header: zbus::message::Header<'_>) -> zbus::fdo::Result<()> {
         assert_eq!(header.destination().unwrap().as_str(), ":1.1");
-        assert!(header.primary().flags().contains(zbus::message::Flags::NoAutoStart));
+        assert!(header.primary().flags().contains(zbus::message::Flags::NO_AUTO_START));
         self.calls.lock().unwrap().push(method.to_string());
         self.accepted.notify_one();
         match self.reply {
@@ -149,13 +149,13 @@ async fn fixture(reply: Reply, broker: Broker) -> (UserManager, zbus::Connection
     let plasma = Plasma(state.clone());
     let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let server = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server_socket).p2p()
-            .server(zbus::Guid::generate()).unwrap()
-            .serve_at("/org/freedesktop/DBus", broker).unwrap()
-            .serve_at("/org/gnome/SessionManager", gnome).unwrap()
-            .serve_at("/LogoutPrompt", plasma).unwrap().build().await.unwrap()
+        zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p()
+            .server(zbus::Guid::generate())
+            .serve_at("/org/freedesktop/DBus", broker)
+            .serve_at("/org/gnome/SessionManager", gnome)
+            .serve_at("/LogoutPrompt", plasma).build().await.unwrap()
     });
-    let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    let connection = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
     (UserManager::with_connection(connection), server.await.unwrap(), state)
 }
 

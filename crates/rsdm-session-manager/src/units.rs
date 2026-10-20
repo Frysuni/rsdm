@@ -2,7 +2,7 @@
 
 use std::{os::unix::fs::PermissionsExt, path::{Path, PathBuf}};
 
-use zbus::zvariant::Value;
+use zbus::Variant;
 
 use super::{SessionError, bus::UnitProperties, env::DISPLAY_VARS};
 
@@ -29,15 +29,15 @@ pub(super) async fn command_properties(
         .filter(|name| !environment.iter().any(|(key, _)| key == **name))
         .map(|name| (*name).to_string()).collect();
     Ok(vec![
-        ("Type", Value::from("exec")),
-        ("TimeoutStartUSec", Value::from(10_000_000_u64)),
-        ("ExecStartEx", Value::new(command)),
-        ("Environment", Value::new(values)),
-        ("UnsetEnvironment", Value::new(absent)),
-        ("WorkingDirectory", Value::new(directory.to_string_lossy().into_owned())),
-        ("KillMode", Value::from("control-group")),
-        ("CollectMode", Value::from("inactive-or-failed")),
-        ("AddRef", Value::from(true)),
+        ("Type", Variant::from("exec")),
+        ("TimeoutStartUSec", Variant::from(10_000_000_u64)),
+        ("ExecStartEx", Variant::new(command)),
+        ("Environment", Variant::new(values)),
+        ("UnsetEnvironment", Variant::new(absent)),
+        ("WorkingDirectory", Variant::new(directory.to_string_lossy().into_owned())),
+        ("KillMode", Variant::from("control-group")),
+        ("CollectMode", Variant::from("inactive-or-failed")),
+        ("AddRef", Variant::from(true)),
     ])
 }
 
@@ -46,12 +46,12 @@ pub(super) async fn compositor_properties(
 ) -> Result<UnitProperties, SessionError> {
     let mut properties = command_properties(argv, environment, directory).await?;
     properties.extend([
-        ("Slice", Value::from("session.slice")),
-        ("ExitType", Value::from("main")),
-        ("PartOf", Value::new(vec![SESSION_TARGET.to_string(), anchor.to_string()])),
-        ("Wants", Value::new(vec![PRE_TARGET.to_string()])),
-        ("After", Value::new(vec![PRE_TARGET.to_string()])),
-        ("Before", Value::new(vec![SESSION_TARGET.to_string(), AUTOSTART_TARGET.to_string()])),
+        ("Slice", Variant::from("session.slice")),
+        ("ExitType", Variant::from("main")),
+        ("PartOf", Variant::new(vec![SESSION_TARGET.to_string(), anchor.to_string()])),
+        ("Wants", Variant::new(vec![PRE_TARGET.to_string()])),
+        ("After", Variant::new(vec![PRE_TARGET.to_string()])),
+        ("Before", Variant::new(vec![SESSION_TARGET.to_string(), AUTOSTART_TARGET.to_string()])),
     ]);
     Ok(properties)
 }
@@ -65,11 +65,11 @@ pub(super) async fn app_properties(
         lifetime.push(anchor.to_string());
     }
     properties.extend([
-        ("Slice", Value::from(APP_SLICE)),
-        ("ExitType", Value::from("cgroup")),
-        ("PartOf", Value::new(lifetime.clone())),
-        ("After", Value::new(lifetime.clone())),
-        ("Requisite", Value::new(lifetime)),
+        ("Slice", Variant::from(APP_SLICE)),
+        ("ExitType", Variant::from("cgroup")),
+        ("PartOf", Variant::new(lifetime.clone())),
+        ("After", Variant::new(lifetime.clone())),
+        ("Requisite", Variant::new(lifetime)),
     ]);
     Ok(properties)
 }
@@ -85,14 +85,14 @@ pub(super) async fn anchor_properties(
         after.push(unit.to_string());
         part_of.push(unit.to_string());
         // Requires/BindsTo could restart a compositor that exited during readiness.
-        properties.push(("Requisite", Value::new(vec![unit.to_string()])));
+        properties.push(("Requisite", Variant::new(vec![unit.to_string()])));
     }
     properties.extend([
-        ("Type", Value::from("oneshot")),
-        ("RemainAfterExit", Value::from(true)),
-        ("PartOf", Value::new(part_of)),
-        ("Wants", Value::new(vec![SESSION_TARGET.to_string()])),
-        ("After", Value::new(after)),
+        ("Type", Variant::from("oneshot")),
+        ("RemainAfterExit", Variant::from(true)),
+        ("PartOf", Variant::new(part_of)),
+        ("Wants", Variant::new(vec![SESSION_TARGET.to_string()])),
+        ("After", Variant::new(after)),
     ]);
     Ok(properties)
 }

@@ -30,8 +30,8 @@ pub(super) fn channel(snapshot: Snapshot) -> Result<(tokio::task::JoinHandle<zbu
     if encoded.len() > 262_144 { return Err(SessionError::State("attach environment is too large".into())); }
     let (server, service) = tokio::net::UnixStream::pair()?;
     let server = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate())?
-            .method_timeout(Duration::from_secs(5)).serve_at(PATH, Endpoint(encoded))?.build().await
+        zbus::connection::Builder::unix_stream(server.into_std()?).p2p().server(zbus::Guid::generate())
+            .method_timeout(Duration::from_secs(5)).serve_at(PATH, Endpoint(encoded)).build().await
     });
     // The service side must reach systemd before the peer authentication can finish.
     let descriptor: OwnedFd = service.into_std()?.into();
@@ -46,7 +46,7 @@ pub(super) async fn receive() -> Result<Snapshot, SessionError> {
         let descriptor = unsafe { OwnedFd::from_raw_fd(raw) };
         let socket = std::os::unix::net::UnixStream::from(descriptor);
         socket.set_nonblocking(true)?;
-        let connection = zbus::connection::Builder::unix_stream(tokio::net::UnixStream::from_std(socket)?)
+        let connection = zbus::connection::Builder::unix_stream(socket)
             .p2p().method_timeout(Duration::from_secs(5)).build().await?;
         let proxy = zbus::Proxy::new(&connection, INTERFACE, PATH, INTERFACE).await?;
         let encoded: String = proxy.call("Snapshot", &()).await?;
@@ -64,18 +64,18 @@ pub(super) async fn receive() -> Result<Snapshot, SessionError> {
 }
 
 async fn verify_login(caller: &Caller, identity: &SessionIdentity) -> Result<(), SessionError> {
-    let system = zbus::connection::Builder::system()?.method_timeout(Duration::from_secs(5)).build().await?;
+    let system = zbus::connection::Builder::system().method_timeout(Duration::from_secs(5)).build().await?;
     let manager = zbus::Proxy::new(&system, "org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager").await?;
     let path = super::identity::login_or_display_path(&manager, caller.pid, identity.uid).await?;
     let session = zbus::Proxy::new(&system, "org.freedesktop.login1", &path, "org.freedesktop.login1.Session").await?;
-    let (uid, _): (u32, zbus::zvariant::OwnedObjectPath) = session.get_property("User").await?;
+    let (uid, _): (u32, zbus::OwnedObjectPath) = session.get_property("User").await?;
     let id: String = session.get_property("Id").await?;
     let kind: String = session.get_property("Type").await?;
     if uid != identity.uid || id != identity.login_session_id || !matches!(kind.as_str(), "wayland" | "x11") {
         return Err(SessionError::State("attach requester has no matching graphical logind session".into()));
     }
     if !caller.belongs_to_login(&system, identity).await? {
-        let user = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(5)).build().await?;
+        let user = zbus::connection::Builder::session().method_timeout(Duration::from_secs(5)).build().await?;
         super::control_handshake::user_unit(&user, caller).await?;
     }
     if super::identity::login_or_display_path(&manager, caller.pid, identity.uid).await? != path {
@@ -97,7 +97,7 @@ mod tests {
         };
         let (server, descriptor) = channel(snapshot.clone()).unwrap();
         let socket = std::os::unix::net::UnixStream::from(descriptor);
-        let client = zbus::connection::Builder::unix_stream(tokio::net::UnixStream::from_std(socket).unwrap())
+        let client = zbus::connection::Builder::unix_stream(socket)
             .p2p().build().await.unwrap();
         let _server = server.await.unwrap().unwrap();
         let credentials = client.peer_creds().await.unwrap();

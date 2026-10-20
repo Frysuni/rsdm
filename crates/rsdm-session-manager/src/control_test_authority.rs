@@ -3,7 +3,7 @@
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, sync::{Arc, atomic::{AtomicBool, Ordering}}};
 
 use rsdm_core::domain::SessionPhase;
-use zbus::{Connection, zvariant::OwnedObjectPath};
+use zbus::{Connection, OwnedObjectPath};
 
 use super::{identity::SessionIdentity, runtime::{Runtime, SessionRecord}};
 
@@ -94,12 +94,12 @@ impl Context {
         let login_entered = Arc::new(tokio::sync::Notify::new());
         let manager = Manager { pending: pending_login.clone(), missing: missing_login.clone(), entered: login_entered.clone() };
         let server = tokio::spawn(async move {
-            zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
-                .serve_at("/org/freedesktop/login1", manager).unwrap()
-                .serve_at(USER_PATH, User(String::new())).unwrap()
-                .serve_at(PATH, Session(identity)).unwrap().build().await.unwrap()
+            zbus::connection::Builder::unix_stream(server.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+                .serve_at("/org/freedesktop/login1", manager)
+                .serve_at(USER_PATH, User(String::new()))
+                .serve_at(PATH, Session(identity)).build().await.unwrap()
         });
-        let logind = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
+        let logind = zbus::connection::Builder::unix_stream(client.into_std().unwrap()).p2p().build().await.unwrap();
         Arc::new(Self { runtime, logind, pending_login, missing_login, login_entered, _server: server.await.unwrap(), directory })
     }
 

@@ -33,7 +33,7 @@ impl Connection {
             let peer = pin_peer(&bus, "org.kde.KWin").await?;
             peer.verify_process(&bus, self.pid).await?;
             let proxy = zbus::Proxy::new(&bus, peer.owner.as_str(), "/KWin", "org.kde.KWin").await?;
-            let information: String = proxy.call_with_flags("supportInformation", zbus::proxy::MethodFlags::NoAutoStart.into(), &()).await?
+            let information: String = proxy.call_with_flags("supportInformation", zbus::proxy::MethodFlags::NO_AUTO_START, &()).await?
                 .ok_or_else(|| zbus::fdo::Error::Failed("KWin version reply is absent".into()))?;
             if !trusted_version(&information) {
                 return Err(zbus::fdo::Error::NotSupported("KWin 6.4 or later is required for XRes-backed window PIDs".into()).into());

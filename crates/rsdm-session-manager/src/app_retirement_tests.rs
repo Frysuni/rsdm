@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
-use zbus::{Connection, zvariant::OwnedObjectPath};
+use zbus::{Connection, OwnedObjectPath};
 
 use super::*;
 use crate::bus::UserManager;
@@ -55,12 +55,12 @@ async fn manager(invocation: Invocation) -> (UserManager, Connection, Arc<Calls>
     let shared = calls.clone();
     let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
     let server = tokio::spawn(async move {
-        zbus::connection::Builder::unix_stream(server_socket).p2p().server(zbus::Guid::generate()).unwrap()
-            .serve_at("/org/freedesktop/systemd1", Manager(shared)).unwrap()
-            .serve_at("/unit", Unit { invocation, reads: AtomicUsize::new(0) }).unwrap()
-            .serve_at("/unit", Service).unwrap().build().await.unwrap()
+        zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+            .serve_at("/org/freedesktop/systemd1", Manager(shared))
+            .serve_at("/unit", Unit { invocation, reads: AtomicUsize::new(0) })
+            .serve_at("/unit", Service).build().await.unwrap()
     });
-    let connection = zbus::connection::Builder::unix_stream(client_socket).p2p().build().await.unwrap();
+    let connection = zbus::connection::Builder::unix_stream(client_socket.into_std().unwrap()).p2p().build().await.unwrap();
     (UserManager::with_connection(connection), server.await.unwrap(), calls)
 }
 

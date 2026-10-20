@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use zbus::{
     Connection, Proxy, connection::Builder,
-    zvariant::OwnedObjectPath,
+    OwnedObjectPath,
 };
 
 // Executable, argv, ignore-errors, start/exit realtime and monotonic timestamps,
@@ -20,7 +20,6 @@ type ExecCommand = (String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32
 pub async fn discover_system_getty(tty_path: &str) -> Option<Vec<String>> {
     let tty = tty_path.strip_prefix("/dev/").unwrap_or(tty_path);
     let builder = Builder::system()
-        .ok()?
         .method_timeout(Duration::from_secs(5));
     let connection = tokio::time::timeout(Duration::from_secs(5), builder.build()).await.ok()?.ok()?;
     for unit in [format!("getty@{tty}.service"), "getty@.service".to_string()] {
@@ -88,13 +87,13 @@ mod tests {
 
     #[tokio::test]
     async fn reads_typed_exec_start_without_retokenizing_arguments() {
-        assert_eq!(<Vec<SystemdExecStart> as zbus::zvariant::Type>::SIGNATURE.to_string(), "a(sasbttttuii)");
+        assert_eq!(<Vec<SystemdExecStart> as zbus::Type>::SIGNATURE.to_string(), "a(sasbttttuii)");
         let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
-        let server = Builder::unix_stream(server_socket).p2p()
-            .server(zbus::Guid::generate()).unwrap()
-            .serve_at("/org/freedesktop/systemd1", Manager).unwrap()
-            .serve_at("/org/freedesktop/systemd1/unit/getty", Getty).unwrap();
-        let client = Builder::unix_stream(client_socket).p2p();
+        let server = Builder::unix_stream(server_socket.into_std().unwrap()).p2p()
+            .server(zbus::Guid::generate())
+            .serve_at("/org/freedesktop/systemd1", Manager)
+            .serve_at("/org/freedesktop/systemd1/unit/getty", Getty);
+        let client = Builder::unix_stream(client_socket.into_std().unwrap()).p2p();
         let (server, client) = tokio::join!(server.build(), client.build());
         let _server = server.unwrap();
         let client = client.unwrap();

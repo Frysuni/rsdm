@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, atomic::{AtomicU32, AtomicU8, Ordering}};
 
-use zbus::{Connection, zvariant::OwnedObjectPath};
+use zbus::{Connection, OwnedObjectPath};
 
 use super::*;
 
@@ -47,12 +47,12 @@ impl Fixture {
         let service = Service(pid.clone());
         let (server, client) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
-            zbus::connection::Builder::unix_stream(server).p2p().server(zbus::Guid::generate()).unwrap()
-                .serve_at("/org/freedesktop/systemd1", Manager).unwrap()
-                .serve_at("/compositor", unit).unwrap().serve_at("/compositor", service).unwrap()
+            zbus::connection::Builder::unix_stream(server.into_std().unwrap()).p2p().server(zbus::Guid::generate())
+                .serve_at("/org/freedesktop/systemd1", Manager)
+                .serve_at("/compositor", unit).serve_at("/compositor", service)
                 .build().await.unwrap()
         });
-        let connection = zbus::connection::Builder::unix_stream(client).p2p().build().await.unwrap();
+        let connection = zbus::connection::Builder::unix_stream(client.into_std().unwrap()).p2p().build().await.unwrap();
         Self { manager: UserManager::with_connection(connection), invocation, pid, _server: server.await.unwrap() }
     }
 }
