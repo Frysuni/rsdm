@@ -5,12 +5,14 @@ use std::{
     io::{self, Read, Write},
     os::{fd::AsRawFd, unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt}},
     path::{Path, PathBuf},
+    process::{Command, Stdio},
 };
 
 const MAX_SNAPSHOT_BYTES: u64 = 128;
 
 pub(super) struct ConsoleLogGuard {
     _printk: Option<PrintkGuard>,
+    restore_systemd_status: bool,
 }
 
 impl ConsoleLogGuard {
@@ -27,9 +29,33 @@ impl ConsoleLogGuard {
             }
         } else { None };
 
-        // PID 1 status output has no readback API. Leave its administrator
-        // policy untouched instead of enabling it unconditionally on drop.
-        Self { _printk: printk }
+        let restore_systemd_status = printk.is_some() && set_systemd_status("no");
+        Self { _printk: printk, restore_systemd_status }
+    }
+}
+
+impl Drop for ConsoleLogGuard {
+    fn drop(&mut self) {
+        if self.restore_systemd_status {
+            // An empty override restores systemd's configured policy, including auto/no.
+            set_systemd_status("");
+        }
+    }
+}
+
+fn set_systemd_status(mode: &str) -> bool {
+    // Bound connection setup as well as the D-Bus method call before drawing the UI.
+    let result = Command::new("timeout")
+        .args(["--signal=KILL", "2s", "busctl", "--system", "--timeout=1s", "call",
+            "org.freedesktop.systemd1", "/org/freedesktop/systemd1",
+            "org.freedesktop.systemd1.Manager", "SetShowStatus", "s", mode])
+        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    match result {
+        Ok(status) if status.success() => true,
+        result => {
+            tracing::warn!(?result, "could not change systemd console status output");
+            false
+        }
     }
 }
 

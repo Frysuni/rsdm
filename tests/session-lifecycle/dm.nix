@@ -39,6 +39,7 @@ pkgs.testers.runNixOSTest {
     users.groups.alice = {};
     programs.sway.enable = true;
     security.polkit.enable = true;
+    systemd.settings.Manager.ShowStatus = pkgs.lib.mkForce true;
     services.rsdm = {
       enable = true;
       package = rsdm;
@@ -83,6 +84,10 @@ pkgs.testers.runNixOSTest {
     machine.wait_until_succeeds("journalctl --no-pager -u rsdm | grep 'display manager initialized'")
     machine.wait_for_unit("multi-user.target")
     machine.sleep(2)
+    with subtest("Greeter suppresses PID 1 status output while preserving journal logs"):
+        machine.succeed("test $(systemctl show -p ShowStatus --value) = no")
+        machine.succeed("systemd-run --unit=rsdm-journal-probe --wait --collect -- /bin/sh -c 'echo rsdm-journal-probe-message'")
+        machine.succeed("journalctl --no-pager -u rsdm-journal-probe | grep rsdm-journal-probe-message")
     machine.send_key("ctrl-alt-f1")
     machine.send_chars("alice")
     machine.send_key("tab")
@@ -96,6 +101,7 @@ pkgs.testers.runNixOSTest {
         print(machine.succeed("journalctl --no-pager -b -n 100"))
         raise
     machine.wait_for_file("/tmp/dm-root-guard-ready")
+    machine.succeed("test $(systemctl show -p ShowStatus --value) = yes")
     environment = machine.succeed(user + "systemctl --user show-environment")
     values = dict(line.split("=", 1) for line in environment.splitlines())
     generation = values["RSDM_SESSION_GENERATION"]
@@ -180,5 +186,12 @@ pkgs.testers.runNixOSTest {
         machine.wait_for_file("/tmp/rsdm-fallback-arguments")
         machine.wait_until_fails("systemctl is-active --quiet rsdm-test-fallback.service")
         assert machine.succeed("cat /tmp/rsdm-fallback-arguments") == expected
+
+    with subtest("closing Greeter restores a configured disabled status policy"):
+        machine.succeed("mkdir -p /run/systemd/system.conf.d")
+        machine.succeed("printf '[Manager]\\nShowStatus=no\\n' > /run/systemd/system.conf.d/rsdm-test.conf")
+        machine.succeed("systemctl daemon-reexec")
+        machine.succeed("systemctl stop rsdm.service")
+        machine.succeed("test $(systemctl show -p ShowStatus --value) = no")
   '';
 }

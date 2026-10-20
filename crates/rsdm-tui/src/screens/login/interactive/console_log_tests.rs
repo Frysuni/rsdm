@@ -67,6 +67,33 @@ fn quieting_preserves_all_loglevels_and_restores_on_normal_exit() {
 }
 
 #[test]
+fn systemd_status_is_reset_only_after_a_confirmed_override() {
+    if std::env::var_os("RSDM_TEST_STATUS_COMMANDS").is_some() {
+        let restore_systemd_status = set_systemd_status("no");
+        drop(ConsoleLogGuard { _printk: None, restore_systemd_status });
+        return;
+    }
+    let fixture = Fixture::new();
+    let command = fixture.path.join("timeout");
+    fs::write(&command, "#!/bin/sh\nprintf '<%s>\\n' \"$@\" >> \"$RSDM_TEST_STATUS_COMMANDS\"\nexit \"$RSDM_TEST_STATUS_EXIT\"\n").unwrap();
+    fs::set_permissions(&command, fs::Permissions::from_mode(0o700)).unwrap();
+    let calls = fixture.path.join("calls");
+    for code in ["0", "1"] {
+        fs::write(&calls, "").unwrap();
+        let result = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "screens::login::interactive::console_log::tests::systemd_status_is_reset_only_after_a_confirmed_override"])
+            .env("PATH", &fixture.path).env("RSDM_TEST_STATUS_COMMANDS", &calls)
+            .env("RSDM_TEST_STATUS_EXIT", code).output().unwrap();
+        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+        let calls = fs::read_to_string(&calls).unwrap();
+        assert!(calls.starts_with("<--signal=KILL>\n<2s>\n<busctl>\n<--system>\n<--timeout=1s>\n"));
+        assert_eq!(calls.matches("<SetShowStatus>").count(), if code == "0" { 2 } else { 1 });
+        assert_eq!(calls.lines().last(), Some(if code == "0" { "<>" } else { "<no>" }));
+        assert!(!calls.contains("<yes>"));
+    }
+}
+
+#[test]
 fn crash_recovery_keeps_the_original_instead_of_the_quiet_value() {
     let fixture = Fixture::new();
     let mut owner = CrashOwner(Command::new(std::env::current_exe().unwrap())
