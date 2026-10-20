@@ -36,6 +36,7 @@ fn take_descriptor(fd: RawFd) -> Result<OwnedFd, SessionLaunchError> {
 }
 
 fn configure_session(request: &ExecRequest) -> Result<(), SessionLaunchError> {
+    verify_account(&request.username, request.uid)?;
     let username = cstring("username", &request.username)?;
     let home = cstring("home", &request.home)?;
     let environment: Vec<(CString, CString)> = request.environment.iter()
@@ -60,7 +61,30 @@ fn configure_session(request: &ExecRequest) -> Result<(), SessionLaunchError> {
     Ok(())
 }
 
+fn verify_account(username: &str, uid: u32) -> Result<(), SessionLaunchError> {
+    let current = super::nss::uid_by_name(username)
+        .map_err(|error| SessionLaunchError::Setup(format!("resolving exec account: {error}")))?;
+    if current != Some(uid) {
+        return Err(SessionLaunchError::Setup("exec account does not match the authenticated uid".into()));
+    }
+    Ok(())
+}
+
 fn check(result: libc::c_int, operation: &str) -> Result<(), SessionLaunchError> {
     if result < 0 { return Err(SessionLaunchError::Setup(format!("{operation}: {}", io::Error::last_os_error()))); }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exec_account_remains_bound_to_the_authenticated_uid() {
+        // SAFETY: geteuid has no preconditions.
+        let uid = unsafe { libc::geteuid() };
+        let username = super::super::nss::user_name_by_uid(uid).unwrap().unwrap();
+        assert!(verify_account(&username, uid.wrapping_add(1)).is_err());
+        verify_account(&username, uid).unwrap();
+    }
 }

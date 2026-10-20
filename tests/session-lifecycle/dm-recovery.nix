@@ -26,9 +26,11 @@ pkgs.testers.runNixOSTest {
       isNormalUser = true;
       uid = 1000;
       group = "alice";
+      extraGroups = [ "session-policy" ];
       password = "test-password";
     };
     users.groups.alice = {};
+    users.groups.session-policy.gid = 1234;
     programs.sway.enable = true;
     security.polkit.enable = true;
     services.rsdm = { enable = true; package = rsdm; keyring = "none"; };
@@ -58,7 +60,11 @@ pkgs.testers.runNixOSTest {
       [security]
       failure_delay_ms = 0
     '';
-    environment.etc."rsdm-session.toml".text = "";
+    environment.etc."rsdm-session.toml" = {
+      text = "";
+      mode = "0640";
+      group = "session-policy";
+    };
     environment.etc."sway/custom-config".text = ''
       output * bg #ff00ff solid_color
       exec ${rsdm}/bin/rsdm --config /etc/rsdm-session.toml session finalize SWAYSOCK

@@ -1,4 +1,4 @@
-use std::{os::{fd::{AsRawFd, OwnedFd}, unix::process::{CommandExt, ExitStatusExt}}, path::PathBuf, process::{Child, Command}};
+use std::{os::{fd::OwnedFd, unix::process::ExitStatusExt}, path::PathBuf, process::Child};
 
 use rsdm_core::{
     domain::{Session, SessionExit},
@@ -107,28 +107,8 @@ fn spawn_child(plan: &SessionLaunchPlan, wrapper: &[String]) -> Result<(Child, S
         username: plan.username.clone(), uid: plan.uid, gid: plan.gid,
         home: path_to_str(&plan.home)?.to_string(), command: plan.command.clone(),
         wrapper: wrapper.to_vec(), environment: plan.environment.clone(),
-    }.seal()?;
-    let gate = StartGate::new().map_err(|error| SessionLaunchError::Setup(format!("creating session start gate: {error}")))?;
-    let inherited = [request.as_raw_fd(), gate.reader.as_raw_fd()];
-    // Re-exec the running inode, including after package replacement/unlink.
-    // User/PAM environment travels in the sealed request; only the parent's
-    // standard streams reach it. Do not let loader variables from a PAM
-    // module influence the fresh privileged image.
-    let mut command = Command::new("/proc/self/exe");
-    command.env_clear();
-    command.args(["session-exec", "--request-fd", &inherited[0].to_string(), "--gate-fd", &inherited[1].to_string()]);
-    // SAFETY: this post-fork callback performs only fcntl and errno checks.
-    // The request and gate own these descriptors through spawn's exec handshake.
-    unsafe {
-        command.pre_exec(move || {
-            for fd in inherited {
-                if libc::fcntl(fd, libc::F_SETFD, 0) < 0 { return Err(std::io::Error::last_os_error()); }
-            }
-            Ok(())
-        });
-    }
-    let child = command.spawn().map_err(|error| SessionLaunchError::Process(format!("starting session exec helper: {error}")))?;
-    Ok((child, gate))
+    };
+    super::session_spawn::spawn(&request)
 }
 
 struct UnixRunningSession {
@@ -148,7 +128,7 @@ impl RunningSession for UnixRunningSession {
 
     fn cleanup(&mut self) -> Result<(), SessionLaunchError> {
         if let Some(generation) = &self.plan.generation {
-            super::session_cleanup::cleanup(&self.plan.environment, self.plan.uid, self.plan.gid, generation)?;
+            super::session_cleanup::cleanup(&self.plan.environment, &self.plan.username, self.plan.uid, self.plan.gid, generation)?;
         }
         Ok(())
     }

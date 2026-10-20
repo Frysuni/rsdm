@@ -1,24 +1,28 @@
 //! Recovery runs after dropping privileges; root never reads user recovery data.
 
 use std::{
-    os::unix::process::CommandExt,
-    process::{Child, Command, ExitStatus},
+    process::{Child, ExitStatus},
     time::{Duration, Instant},
 };
 
 use rsdm_core::ports::SessionLaunchError;
-use super::child_wait::wait_for_exit;
+use super::{child_wait::wait_for_exit, session_exec_request::ExecRequest};
 
-pub(super) fn cleanup(environment: &[(String, String)], uid: u32, gid: u32, generation: &str) -> Result<(), SessionLaunchError> {
-    // Re-exec the running inode even if a package update replaced its pathname.
-    let mut child = Command::new("/proc/self/exe").args(["session", "cleanup", "--generation", generation, "--recorded-config"])
-        .env_clear().envs(environment.iter().map(|(key, value)| (key, value)))
-        // Command::uid also clears inherited supplementary groups.
-        .uid(uid).gid(gid).current_dir("/").spawn()
-        .map_err(|error| SessionLaunchError::Process(format!("session recovery failed: {error}")))?;
+pub(super) fn cleanup(environment: &[(String, String)], username: &str, uid: u32, gid: u32, generation: &str) -> Result<(), SessionLaunchError> {
+    let request = ExecRequest {
+        username: username.into(), uid, gid, home: "/".into(), wrapper: Vec::new(),
+        command: ["/proc/self/exe", "session", "cleanup", "--generation", generation, "--recorded-config"]
+            .into_iter().map(str::to_owned).collect(),
+        environment: environment.to_vec(),
+    };
+    // The fresh helper resolves groups and drops privileges inside this budget;
+    // a blocked NSS provider must not keep the PAM owner alive indefinitely.
+    let (mut child, gate) = super::session_spawn::spawn(&request)?;
+    let released = gate.release();
 
     let status = wait_for_recovery(&mut child, Duration::from_secs(90))
         .map_err(|error| SessionLaunchError::Process(format!("session recovery failed: {error}")))?;
+    released.map_err(|error| SessionLaunchError::Setup(format!("releasing recovery start gate: {error}")))?;
     if !status.success() { return Err(SessionLaunchError::Process(format!("session recovery exited with {status}"))); }
     Ok(())
 }
@@ -43,6 +47,7 @@ fn wait_for_recovery(child: &mut Child, timeout: Duration) -> std::io::Result<Ex
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn recovery_returns_the_helpers_failure_status() {

@@ -14,6 +14,7 @@ mod session_leader;
 mod session_conversation;
 mod session_pipe;
 mod session_report;
+mod session_spawn;
 mod session_start_gate;
 mod shutdown;
 mod terminal;
