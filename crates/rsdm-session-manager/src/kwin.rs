@@ -57,6 +57,7 @@ impl Connection {
             body.extend(17_u32.to_ne_bytes());
             body.extend(MANAGEMENT.to_ne_bytes());
             self.wire.request(2, 0, &body).await?;
+            self.state.management_global = *name;
             self.initialized = true;
         }
         let mut received = 0;

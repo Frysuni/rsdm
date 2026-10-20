@@ -105,7 +105,7 @@ fn apply_event(globals: &mut BTreeMap<u32, (String, u32)>, object: u32, opcode: 
     Ok(false)
 }
 
-fn global(body: &[u8]) -> Result<(u32, String, u32), SessionError> {
+pub(super) fn global(body: &[u8]) -> Result<(u32, String, u32), SessionError> {
     let id = word(body, 0)?;
     let length = word(body, 4)? as usize;
     if id == 0 || length < 2 || length > body.len().saturating_sub(12) { return Err(invalid("invalid registry global")); }

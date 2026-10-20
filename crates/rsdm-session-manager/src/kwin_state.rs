@@ -9,6 +9,7 @@ struct Resource { pid: Option<i32>, parent: u32, initialized: bool, unmapped: bo
 
 #[derive(Default)]
 pub(super) struct State {
+    pub(super) management_global: u32,
     resources: BTreeMap<u32, Resource>,
     uuids: BTreeSet<String>,
     pub(super) pending: Vec<String>,
@@ -23,7 +24,11 @@ impl State {
     pub(super) fn event(&mut self, object: u32, opcode: u16, body: &[u8]) -> Result<(), SessionError> {
         match (object, opcode) {
             (1, 1) if body.len() == 4 => return Ok(()),
-            (2, 1) if body.len() == 4 => return Err(invalid("window-management global was removed")),
+            (2, 0) => { crate::wayland_registry::global(body)?; return Ok(()); }
+            (2, 1) => {
+                if word(body)? == self.management_global { return Err(invalid("window-management global was removed")); }
+                return Ok(());
+            }
             (4, 4) => {
                 let uuid = parse_string(body.get(4..).ok_or_else(|| invalid("incomplete window announcement"))?)?;
                 if self.uuids.len() >= 4096 || !self.uuids.insert(uuid.clone()) { return Err(invalid("duplicate or excessive window UUIDs")); }

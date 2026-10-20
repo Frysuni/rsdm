@@ -26,6 +26,7 @@ async fn sync(peer: &mut UnixStream) {
 async fn snapshot(peer: &mut UnixStream) -> Vec<u32> {
     read_requests(peer).await;
     peer.write_all(&advertisement(9, INTERFACE, 21)).await.unwrap();
+    peer.write_all(&advertisement(10, "wl_output", 4)).await.unwrap();
     peer.write_all(&event(3, 0, &0_u32.to_ne_bytes())).await.unwrap();
     let (object, opcode, body) = request(peer).await;
     assert_eq!((object, opcode), (2, 0));
@@ -89,6 +90,43 @@ async fn a_lost_acknowledgement_keeps_one_close_unconfirmed() {
     server.await.unwrap();
 }
 
+#[tokio::test]
+async fn output_registry_changes_preserve_live_window_handles() {
+    for change in [advertisement(11, "wl_output", 4), event(2, 1, &10_u32.to_ne_bytes())] {
+        let fixture = Fixture::new();
+        let mut connection = Connection::connect(&fixture.path, unsafe { libc::geteuid() }).await.unwrap();
+        let mut peer = fixture.accept().await;
+        let server = tokio::spawn(async move {
+            let handles = snapshot(&mut peer).await;
+            peer.write_all(&change).await.unwrap();
+            sync(&mut peer).await;
+            assert_eq!(request(&mut peer).await, (handles[0], 4, Vec::new()));
+            sync(&mut peer).await;
+            peer
+        });
+        let windows = connection.windows().await.unwrap();
+        assert_eq!(connection.windows().await.unwrap(), windows);
+        assert!(connection.close(windows[0].id).await.unwrap());
+        let _peer = server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn removal_of_the_bound_management_global_rejects_window_handles() {
+    let fixture = Fixture::new();
+    let mut connection = Connection::connect(&fixture.path, unsafe { libc::geteuid() }).await.unwrap();
+    let mut peer = fixture.accept().await;
+    let server = tokio::spawn(async move {
+        snapshot(&mut peer).await;
+        peer.write_all(&event(2, 1, &9_u32.to_ne_bytes())).await.unwrap();
+        sync(&mut peer).await;
+        peer
+    });
+    connection.windows().await.unwrap();
+    assert!(connection.windows().await.unwrap_err().to_string().contains("window-management global was removed"));
+    let _peer = server.await.unwrap();
+}
+
 #[test]
 fn incomplete_unmapped_and_changed_pid_resources_do_not_authorize_the_original_window() {
     let mut state = State::default();
@@ -108,7 +146,8 @@ fn incomplete_unmapped_and_changed_pid_resources_do_not_authorize_the_original_w
 
 #[test]
 fn queued_incomplete_events_and_uuid_reuse_are_rejected() {
-    for frames in [vec![0], event(1, 0, &[]), event(7, 10, &1_u32.to_ne_bytes()), event(4, 4, &[])] {
+    for frames in [vec![0], event(1, 0, &[]), event(7, 10, &1_u32.to_ne_bytes()), event(4, 4, &[]),
+        event(2, 0, &[]), event(2, 1, &[])] {
         assert!(State::default().pending_events(&frames).is_err());
     }
     let mut state = State::default();
