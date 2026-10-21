@@ -67,6 +67,12 @@ does not wait for the program to exit. Status should show the session as
 their launch commands in WM bindings or autostart with `rsdm app -- <program>`.
 See the [niri](compositors/niri.md) and [Hyprland](compositors/hyprland.md) examples.
 
+Working directories sent to systemd must survive its transient unit-file
+serialization. RSDM rejects CR/LF in these paths, a final component ending in a
+space or tab, and an odd number of trailing backslashes. Otherwise a manager
+reload could change the directory used by later shutdown commands. Internal
+spaces and tabs, quotes, percent signs, and Unicode remain literal.
+
 Use `rsdm session stop` for logout, and `rsdm power reboot` or
 `rsdm power poweroff` for power actions. For an app that needs more time in a
 managed WM or niri session, launch it with a policy such as:

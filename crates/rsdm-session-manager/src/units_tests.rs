@@ -84,6 +84,19 @@ async fn unit_properties_reject_a_working_directory_that_dbus_cannot_represent()
 }
 
 #[tokio::test]
+async fn working_directory_properties_preserve_safe_literal_names() {
+    let programs = Programs::new();
+    let argv = vec![programs.0.join("example").to_str().unwrap().to_string()];
+    for name in ["space inside", "quote ' \"", "tab\tinside", "%n %% $HOME Русский", "slashes\\\\"] {
+        let directory = programs.0.join(name);
+        fs::create_dir(&directory).unwrap();
+        let properties = command_properties(&argv, &programs.environment(), &directory).await.unwrap();
+        let value: String = property(&properties, "WorkingDirectory").try_into().unwrap();
+        assert_eq!(value, directory.to_str().unwrap());
+    }
+}
+
+#[tokio::test]
 async fn anchor_does_not_create_an_ordering_cycle_through_autostart_apps() {
     let programs = Programs::new();
     let properties = anchor_properties(Some("example-compositor.service"), &programs.environment(), &programs.0).await.unwrap();

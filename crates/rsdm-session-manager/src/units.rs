@@ -23,7 +23,7 @@ pub(super) async fn command_properties(
         resolve_executable(&program, &search_environment, &search_directory)
     }).await?;
     let executable = super::bus_path::encode(&executable)?;
-    let directory = super::bus_path::encode(directory)?;
+    let directory = super::bus_path::working_directory(directory)?;
 
     let command = vec![(executable, argv.to_vec(), vec!["no-env-expand".to_string()])];
     let values: Vec<String> = environment.iter().map(|(name, value)| format!("{name}={value}")).collect();

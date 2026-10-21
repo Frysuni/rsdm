@@ -36,6 +36,7 @@ in pkgs.testers.runNixOSTest {
     '';
   };
   testScript = ''
+    import json
     import shlex
     import tomllib
 
@@ -49,12 +50,39 @@ in pkgs.testers.runNixOSTest {
     record = tomllib.loads(machine.succeed("cat " + directory + "/session.toml"))
     compositor = record["compositor_unit"]
     before = machine.succeed(user + "systemctl --user show " + compositor + " -p MainPID -p InvocationID")
+
+    with subtest("working directories survive reloads or fail before launch"):
+        for suffix in ["line\nend", "line\rend", "space ", "tab\t", "slash\\"]:
+            working = "/home/alice/" + suffix
+            machine.succeed("mkdir -p " + shlex.quote(working))
+            command = "cd " + shlex.quote(working) + "; exec ${rsdm}/bin/rsdm app -- ${pkgs.coreutils}/bin/true"
+            code, output = machine.execute(control + "sh -c " + shlex.quote(command) + " 2>&1")
+            assert code != 0 and "working directory cannot be preserved" in output, output
+            assert machine.succeed("find " + directory + "/apps -name '*.toml' -print") == ""
+
+        working = "/home/alice/quote ' \" %n $HOME\tРусский\\\\"
+        machine.succeed("mkdir -p " + shlex.quote(working))
+        command = "cd " + shlex.quote(working) + "; exec ${rsdm}/bin/rsdm app --shutdown-method term -- ${pkgs.coreutils}/bin/sleep 60"
+        machine.succeed(control + "sh -c " + shlex.quote(command))
+        unit = tomllib.loads(machine.succeed("cat " + directory + "/apps/*.toml"))["unit"]
+        literal_pid = machine.succeed(user + "systemctl --user show " + unit + " -p MainPID --value").strip()
+        machine.wait_until_succeeds("test /proc/" + literal_pid + "/exe -ef ${pkgs.coreutils}/bin/sleep")
+        unit_path = shlex.split(machine.succeed(user + "busctl --user call org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager GetUnit s " + unit))[1]
+        query = user + "busctl --user --json=short get-property org.freedesktop.systemd1 " + unit_path + " org.freedesktop.systemd1.Service WorkingDirectory"
+        assert json.loads(machine.succeed(query))["data"] == working
+        for operation in ["daemon-reload", "daemon-reexec"]:
+            machine.succeed(user + "systemctl --user " + operation)
+            assert json.loads(machine.succeed(query))["data"] == working
+            machine.succeed(user + "systemctl --user is-active --quiet " + unit)
+        machine.succeed(user + "systemctl --user stop " + unit)
+        machine.wait_until_fails("test -e " + directory + "/apps/" + unit + ".toml")
+
     machine.succeed(control + "rsdm app --shutdown-method term --shutdown-timeout 3 --on-timeout cancel -- ${application}")
     machine.wait_for_file("/run/user/1000/scope-app-ready")
     pid = int(machine.succeed("cat /run/user/1000/scope-app-ready"))
     scope = machine.succeed("cat /run/user/1000/scope-app-unit").strip()
     machine.wait_until_succeeds(user + "systemctl --user is-active --quiet " + scope + " || test -e /run/user/1000/scope-app-stopped")
-    paths = machine.succeed("find " + directory + " -type f -name 'app-rsdm-*.toml'").splitlines()
+    paths = machine.succeed("find " + directory + "/apps -type f -name 'app-rsdm-*.toml'").splitlines()
     assert len(paths) == 1, paths
     app = tomllib.loads(machine.succeed("cat " + shlex.quote(paths[0])))
     assert app["original_process"]["pid"] == pid, app

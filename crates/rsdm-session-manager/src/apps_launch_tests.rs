@@ -122,6 +122,24 @@ async fn a_missing_executable_rolls_back_registration_without_contacting_systemd
     assert_eq!(fixture.state.invocation_reads.load(Ordering::SeqCst), 0);
 }
 
+#[tokio::test]
+async fn unrepresentable_working_directories_roll_back_before_starting_a_unit() {
+    for suffix in ["line\nend", "line\rend", "space ", "tab\t", "slash\\", "space /.", "tab\t/", "slash\\/."] {
+        let mut fixture = Fixture::new(Mode::Accepted).await;
+        let directory = fixture.runtime.path.join(suffix);
+        let normalized: std::path::PathBuf = directory.components().collect();
+        std::fs::create_dir_all(normalized).unwrap();
+        fixture.request.directory = directory.to_str().unwrap().to_string();
+
+        let result = fixture.launch().await;
+        assert!(result.is_err(), "unsafe working directory was accepted: {directory:?}");
+        assert!(result.unwrap_err().to_string().contains("working directory"));
+        assert!(fixture.runtime.apps().unwrap().is_empty());
+        assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.state.invocation_reads.load(Ordering::SeqCst), 0);
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_rejected_start_removes_its_record_without_claiming_another_invocation() {
     for mode in [Mode::Denied, Mode::Collision] {
