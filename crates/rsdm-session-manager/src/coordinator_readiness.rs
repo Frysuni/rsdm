@@ -33,6 +33,11 @@ impl Coordinator {
         if !self.lifecycle.accepts_finalize() { return self.complete_readiness(false).await; }
         let owns_targets = match result {
             Ok(owns) => owns,
+            Err(SessionError::Bus(error)) if super::bus::retryable_error(&error) => {
+                self.ready_busy = false;
+                tracing::warn!(%error, "deferring graphical target ownership check while the user manager is unavailable");
+                return Ok(());
+            }
             Err(error) => return self.ready_completed(Err(error)),
         };
         if owns_targets {
@@ -119,8 +124,18 @@ impl Coordinator {
         self.ready_busy = false;
         if ready {
             if self.provider.kind == ProviderKind::Niri {
+                let current = match self.manager.environment().await {
+                    Ok(environment) => environment,
+                    Err(SessionError::Bus(error)) if super::bus::retryable_error(&error) => {
+                        self.pending_ready = true;
+                        self.ready_busy = true;
+                        tracing::warn!(%error, "deferring niri environment discovery while the user manager is unavailable");
+                        return Ok(());
+                    }
+                    Err(error) => return Err(error),
+                };
                 let publishing = self.environment_reply.as_ref().map(|(names, _)| names.as_slice()).unwrap_or_default();
-                let environment = self.manager.environment().await?.into_iter()
+                let environment = current.into_iter()
                     .filter_map(|entry| entry.split_once('=').map(|(name, value)| (name.to_string(), value.to_string())))
                     .filter(|(name, _)| super::env::WAYLAND_VARS.contains(&name.as_str()))
                     .filter(|(name, _)| !publishing.contains(name)).collect::<Vec<_>>();

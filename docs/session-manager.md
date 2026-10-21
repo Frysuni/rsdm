@@ -634,6 +634,10 @@ configuration switch, do not request logout. Temporary D-Bus read failures defer
 observation and readiness checks. If a start or stop reply is lost, RSDM checks
 the resulting unit state without sending the command again.
 
+Temporary failures reading graphical-target ownership or discovering niri's
+environment preserve the original startup deadline and leave accepted finalize
+requests pending until a later check can complete.
+
 After a user-bus restart, the coordinator reconnects its manager and control
 connections, restores references to matching owned invocations and republishes
 matching activation-environment values. A private runtime lock prevents another

@@ -10,6 +10,8 @@ pub(super) struct State {
     pub(super) reads: AtomicUsize,
     pub(super) fail_activation: std::sync::atomic::AtomicBool,
     pub(super) fail_manager: std::sync::atomic::AtomicBool,
+    pub(super) environment_unavailable: std::sync::atomic::AtomicBool,
+    pub(super) environment_denied: std::sync::atomic::AtomicBool,
     pub(super) ready: std::sync::atomic::AtomicBool,
     pause: Mutex<Option<Pause>>,
 }
@@ -51,7 +53,15 @@ struct Manager(Arc<State>);
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Manager")]
 impl Manager {
     #[zbus(property)]
-    fn environment(&self) -> Vec<String> { self.0.values.lock().unwrap().clone() }
+    fn environment(&self) -> zbus::fdo::Result<Vec<String>> {
+        if self.0.environment_denied.load(Ordering::SeqCst) {
+            return Err(zbus::fdo::Error::AccessDenied("environment access denied".into()));
+        }
+        if self.0.environment_unavailable.load(Ordering::SeqCst) {
+            return Err(zbus::fdo::Error::NoReply("environment temporarily unavailable".into()));
+        }
+        Ok(self.0.values.lock().unwrap().clone())
+    }
 
     async fn set_environment(&self, values: Vec<String>) -> zbus::fdo::Result<()> {
         self.0.writes.lock().unwrap().push(values.clone());
