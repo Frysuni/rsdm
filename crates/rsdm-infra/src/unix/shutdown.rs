@@ -66,9 +66,11 @@ extern "C" fn on_emergency_unlock(
     _context: *mut libc::c_void,
 ) {
     // SAFETY: SA_SIGINFO guarantees a valid siginfo pointer for this handler.
-    // The kernel, not the sender, supplies si_uid. Same-UID SIGUSR1 therefore
-    // cannot turn the emergency path into an authentication bypass.
-    if !info.is_null() && unsafe { (*info).si_uid() } == 0 {
+    // Queued siginfo can contain a caller-supplied UID. The emergency CLI uses
+    // pidfd_send_signal without siginfo, which produces kernel-filled SI_USER.
+    if !info.is_null()
+        && unsafe { (*info).si_code == libc::SI_USER && (*info).si_uid() == 0 }
+    {
         EMERGENCY_UNLOCK.store(true, Ordering::SeqCst);
     }
 }
@@ -92,5 +94,16 @@ mod tests {
             // SAFETY: geteuid has no preconditions.
             unsafe { libc::geteuid() } == 0
         );
+
+        // Queued metadata can claim uid 0 without coming from root.
+        for code in [libc::SI_QUEUE, libc::SI_TIMER, libc::SI_ASYNCIO] {
+            install_emergency_unlock_handler();
+            // SAFETY: zero initializes the sender UID and all siginfo storage.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            info.si_signo = libc::SIGUSR1;
+            info.si_code = code;
+            on_emergency_unlock(libc::SIGUSR1, &mut info, std::ptr::null_mut());
+            assert!(!emergency_unlock_requested(), "untrusted signal code {code}");
+        }
     }
 }
