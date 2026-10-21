@@ -7,8 +7,8 @@ use super::{SessionError, bus::UserManager, env, provider::{Provider, ProviderKi
 pub(super) async fn activate(
     manager: &UserManager, provider: &Provider, anchor: &str, compositor: Option<&str>,
     environment: &[(String, String)], directory: &Path, stopping: &AtomicBool,
-) -> Result<bool, SessionError> {
-    if stopping.load(Ordering::SeqCst) { return Ok(false); }
+) -> Result<Option<bool>, SessionError> {
+    if stopping.load(Ordering::SeqCst) { return Ok(None); }
     let prepared = async {
         let external_target = manager.active(units::SESSION_TARGET).await?;
         if provider.kind != ProviderKind::Managed && (!external_target || !provider.ready(manager).await?) {
@@ -36,9 +36,9 @@ pub(super) async fn activate(
     let (external_target, properties) = prepared.map_err(|error| SessionError::StartRejected {
         error: Box::new(error), reference_retained: false,
     })?;
-    if stopping.load(Ordering::SeqCst) { return Ok(false); }
+    if stopping.load(Ordering::SeqCst) { return Ok(None); }
     manager.start_service(anchor, &properties).await?;
-    Ok(!external_target && provider.kind == ProviderKind::Managed)
+    Ok(Some(!external_target && provider.kind == ProviderKind::Managed))
 }
 
 pub(super) async fn published_display(manager: &UserManager) -> Result<bool, SessionError> {

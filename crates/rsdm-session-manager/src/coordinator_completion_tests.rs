@@ -134,7 +134,7 @@ async fn readiness_completion_waits_for_reads_without_repeating_activation() {
     let (reply, mut received) = tokio::sync::mpsc::channel(1);
     fixture.coordinator.finalize_replies.push(Reply::for_test(reply));
 
-    fixture.coordinator.ready_completed(Ok(true)).unwrap();
+    fixture.coordinator.ready_completed(Ok(Some(true))).await.unwrap();
     assert!(fixture.coordinator.pending_ready);
     assert!(fixture.coordinator.ready_busy);
     assert!(fixture.coordinator.record.owns_targets);

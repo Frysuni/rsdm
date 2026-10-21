@@ -7,6 +7,9 @@ use zbus::{OwnedObjectPath, OwnedVariant};
 use super::*;
 use crate::control::{Reply, Request};
 
+#[path = "coordinator_activation_cancellation_tests.rs"]
+mod cancellation;
+
 struct State {
     runtime: Runtime,
     starts: AtomicUsize,
@@ -145,7 +148,7 @@ async fn unconfirmed_or_retained_starts_are_not_retried_as_read_failures() {
         let error = SessionError::from(zbus::Error::from(zbus::fdo::Error::NoReply("start reply was lost".into())));
         let error = if retained { SessionError::StartRejected { error: Box::new(error), reference_retained: true } } else { error };
 
-        fixture.coordinator.ready_completed(Err(error)).unwrap();
+        fixture.coordinator.ready_completed(Err(error)).await.unwrap();
         assert!(finalized.try_recv().unwrap().is_err());
         assert!(fixture.coordinator.ready_deadline < deadline);
         assert!(!fixture.coordinator.ready_busy && !fixture.coordinator.pending_ready);

@@ -38,7 +38,7 @@ impl Coordinator {
                 tracing::warn!(%error, "deferring graphical target ownership check while the user manager is unavailable");
                 return Ok(());
             }
-            Err(error) => return self.ready_completed(Err(error)),
+            Err(error) => return self.ready_completed(Err(error)).await,
         };
         if owns_targets {
             // Persist intent before the start job can pull in a target,
@@ -99,13 +99,19 @@ impl Coordinator {
         Ok(())
     }
 
-    pub fn ready_completed(&mut self, result: Result<bool, SessionError>) -> Result<(), SessionError> {
+    pub async fn ready_completed(&mut self, result: Result<Option<bool>, SessionError>) -> Result<(), SessionError> {
+        self.resume_if_cancelled().await?;
         match result {
-            Ok(owns_targets) => {
+            Ok(Some(owns_targets)) => {
                 self.record.owns_targets |= owns_targets;
                 self.pending_ready = true;
                 return Ok(());
             }
+            Ok(None) if self.lifecycle.accepts_finalize() => {
+                self.ready_busy = false;
+                self.pending_ready = false;
+            }
+            Ok(None) => return self.complete_readiness(false).await,
             Err(SessionError::StartRejected { error, reference_retained: false })
                 if self.lifecycle.accepts_finalize()
                     && matches!(error.as_ref(), SessionError::Bus(error) if super::bus::retryable_error(error)) =>

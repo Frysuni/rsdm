@@ -607,6 +607,9 @@ discovering the remaining display endpoints from the user manager.
 Shutdown rejects queued publications and waits for the active one within the
 shared shutdown deadline before preparing applications. Cancelling shutdown
 preserves an accepted startup finalize until readiness is confirmed.
+Activation completions apply that cancellation before advancing readiness. An
+activation skipped during logout can then retry, rather than waiting for an
+anchor that was never started.
 
 For an RSDM-owned lifecycle, the anchor activates `graphical-session.target` and
 `xdg-desktop-autostart.target`. Ownership is recorded before activation. Native

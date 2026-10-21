@@ -25,7 +25,7 @@ pub(super) enum Work {
     Observed(super::coordinator_probe::ObservationResult),
     Boot(Result<Vec<u8>, SessionError>),
     TargetsChecked(Result<bool, SessionError>),
-    Ready(Result<bool, SessionError>),
+    Ready(Result<Option<bool>, SessionError>),
     EnvironmentPublished(Result<(), SessionError>),
     Launched(String, Reply<String>, Result<String, SessionError>),
     Prepared(Result<Vec<String>, SessionError>, Option<super::status::Capability>),
@@ -213,7 +213,7 @@ impl Coordinator {
             Work::Observed(result) => self.observation_completed(result).await?,
             Work::Boot(result) => self.boot_completed(result).await?,
             Work::TargetsChecked(result) => self.targets_checked(result).await?,
-            Work::Ready(result) => self.ready_completed(result)?,
+            Work::Ready(result) => self.ready_completed(result).await?,
             Work::EnvironmentPublished(result) => self.environment_published(result).await?,
             Work::Launched(unit, reply, result) => {
                 self.lifecycle.complete_launch(&unit);
