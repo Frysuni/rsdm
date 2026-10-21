@@ -30,10 +30,19 @@ mod tests {
     use super::*;
 
     const CHILD: &str = "RSDM_EXECUTABLE_PATH_TEST_CHILD";
+    const TEST: &str = "executable::tests::replacement_preserves_the_installed_path_including_a_literal_deleted_suffix";
 
     #[test]
     fn replacement_preserves_the_installed_path_including_a_literal_deleted_suffix() {
-        if let Some(path) = std::env::var_os(CHILD) {
+        let child = std::env::var_os(CHILD);
+        if child.is_none() {
+            // Parallel tests must not inherit a writable descriptor to the copied executable.
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", TEST]).env(CHILD, "").output().unwrap();
+            assert!(output.status.success(), "{output:?}");
+            return;
+        }
+        if let Some(path) = child.filter(|path| !path.is_empty()) {
             let path = PathBuf::from(path);
             assert_eq!(installed_path().unwrap(), path);
             // Another hard link keeps nlink nonzero after the executable is replaced.
@@ -53,7 +62,7 @@ mod tests {
             let path = directory.join(filename);
             fs::copy(std::env::current_exe().unwrap(), &path).unwrap();
             let output = std::process::Command::new(&path)
-                .args(["--exact", "executable::tests::replacement_preserves_the_installed_path_including_a_literal_deleted_suffix"])
+                .args(["--exact", TEST])
                 .env(CHILD, &path).output().unwrap();
             assert!(output.status.success(), "{output:?}");
             fs::remove_dir_all(&directory).unwrap();
