@@ -264,7 +264,7 @@ async fn explicit_finalize_retries_activation_after_observation_returns_the_proc
     assert!(fixture.coordinator.observation_busy);
     let (reply, mut response) = tokio::sync::mpsc::channel(1);
     fixture.coordinator.environment_reply = Some(Reply::for_test(reply));
-    fixture.coordinator.environment_published(Ok(())).await.unwrap();
+    fixture.coordinator.environment_published(&[], Ok(())).await.unwrap();
     assert!(!fixture.coordinator.ready_busy);
     assert_eq!(fixture.coordinator.finalize_replies.len(), 1);
 

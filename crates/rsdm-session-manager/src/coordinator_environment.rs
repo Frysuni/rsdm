@@ -25,7 +25,12 @@ impl Coordinator {
         if self.environment_reply.is_some() || !self.lifecycle.accepts_finalize() { return Ok(()); }
         let Some((environment, reply)) = self.pending_environment.pop_front() else { return Ok(()); };
         let recorded = async {
-            activation::claim_environment(&mut self.record, &environment)?;
+            let previous = activation::claim_environment(&mut self.record, &environment)?;
+            if self.provider.kind != super::provider::ProviderKind::Attached {
+                for pair in previous {
+                    if !self.record.previous_environment.contains(&pair) { self.record.previous_environment.push(pair); }
+                }
+            }
             self.save().await
         }.await;
         if let Err(error) = recorded {
@@ -47,14 +52,19 @@ impl Coordinator {
         let events = self.events.clone();
         self.workers += 1;
         tokio::spawn(async move {
-            let _ = events.send(Work::EnvironmentPublished(env::publish(&manager, &environment).await));
+            let result = env::publish(&manager, &environment).await;
+            let names = environment.into_iter().map(|(name, _)| name).collect();
+            let _ = events.send(Work::EnvironmentPublished(names, result));
         });
         Ok(())
     }
 
-    pub(super) async fn environment_published(&mut self, result: Result<(), SessionError>) -> Result<(), SessionError> {
+    pub(super) async fn environment_published(&mut self, names: &[String], result: Result<(), SessionError>) -> Result<(), SessionError> {
         let reply = self.environment_reply.take()
             .ok_or_else(|| SessionError::State("environment publication completed without a request".into()))?;
+        if result.is_ok() {
+            self.record.previous_environment.retain(|(name, _)| !names.contains(name));
+        }
         // No app preparation can start while this publication is outstanding.
         // Honour cancellation before replying, so an accepted startup finalize
         // does not fail and cause its launcher to exit after a cancelled logout.

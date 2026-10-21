@@ -19,7 +19,7 @@ pub(super) async fn rollback(manager: &UserManager, runtime: &Runtime, record: &
         record_disabled(runtime, record).await;
         return;
     }
-    if let Err(error) = env::clear_owned(manager, &record.exported_environment).await {
+    if let Err(error) = env::clear_owned(manager, &record.cleanup_environment()).await {
         if manager.actions.check().is_err() {
             record_disabled(runtime, record).await;
         }

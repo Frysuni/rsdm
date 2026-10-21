@@ -26,7 +26,7 @@ pub(super) enum Work {
     Boot(Result<Vec<u8>, SessionError>),
     TargetsChecked(Result<bool, SessionError>),
     Ready(Result<bool, SessionError>),
-    EnvironmentPublished(Result<(), SessionError>),
+    EnvironmentPublished(Vec<String>, Result<(), SessionError>),
     Launched(String, Reply<String>, Result<String, SessionError>),
     Prepared(Result<Vec<String>, SessionError>, Option<super::status::Capability>),
     Delegated(Result<(), SessionError>),
@@ -214,7 +214,7 @@ impl Coordinator {
             Work::Boot(result) => self.boot_completed(result).await?,
             Work::TargetsChecked(result) => self.targets_checked(result).await?,
             Work::Ready(result) => self.ready_completed(result)?,
-            Work::EnvironmentPublished(result) => self.environment_published(result).await?,
+            Work::EnvironmentPublished(names, result) => self.environment_published(&names, result).await?,
             Work::Launched(unit, reply, result) => {
                 self.lifecycle.complete_launch(&unit);
                 let _ = reply.try_send(result.map_err(|error| error.to_string()));

@@ -9,6 +9,7 @@ pub(super) struct State {
     pub(super) activations: AtomicUsize,
     pub(super) reads: AtomicUsize,
     pub(super) fail_activation: std::sync::atomic::AtomicBool,
+    pub(super) fail_manager: std::sync::atomic::AtomicBool,
     pub(super) ready: std::sync::atomic::AtomicBool,
     pause: Mutex<Option<Pause>>,
 }
@@ -32,12 +33,15 @@ impl Manager {
     #[zbus(property)]
     fn environment(&self) -> Vec<String> { self.0.values.lock().unwrap().clone() }
 
-    async fn set_environment(&self, values: Vec<String>) {
+    async fn set_environment(&self, values: Vec<String>) -> zbus::fdo::Result<()> {
         self.0.writes.lock().unwrap().push(values.clone());
         let pause = self.0.pause.lock().unwrap().take();
         if let Some(pause) = pause {
             pause.entered.notify_one();
             pause.resume.notified().await;
+        }
+        if self.0.fail_manager.load(Ordering::SeqCst) {
+            return Err(zbus::fdo::Error::Failed("manager publication rejected".into()));
         }
         let mut current = self.0.values.lock().unwrap();
         for value in values {
@@ -45,6 +49,13 @@ impl Manager {
             current.retain(|entry| entry.split_once('=').unwrap().0 != name);
             current.push(value);
         }
+        Ok(())
+    }
+
+    fn unset_environment(&self, names: Vec<String>) {
+        self.0.values.lock().unwrap().retain(|entry| {
+            !names.iter().any(|name| entry.split_once('=').unwrap().0 == name)
+        });
     }
 
     fn get_unit(&self, _unit: &str) -> zbus::fdo::Result<zbus::OwnedObjectPath> {

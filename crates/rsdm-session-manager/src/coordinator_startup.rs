@@ -154,6 +154,7 @@ fn initial_record(
         disabled: false,
         config_path: None,
         exported_environment,
+        previous_environment: Vec::new(),
         shutdown_deadline_usec: None,
         shutdown_transaction: None,
     }

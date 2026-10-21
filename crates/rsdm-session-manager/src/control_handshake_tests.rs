@@ -87,7 +87,7 @@ impl Fixture {
         let record = SessionRecord {
             identity, anchor_unit: format!("rsdm-session-{GENERATION}.service"), compositor_unit: None,
             compositor_invocation: Vec::new(), coordinator_unit: None, provider: "managed".into(), owns_targets: true,
-            phase: SessionPhase::Running, disabled: false, config_path: None, exported_environment: Vec::new(), shutdown_deadline_usec: None, shutdown_transaction: None,
+            phase: SessionPhase::Running, disabled: false, config_path: None, exported_environment: Vec::new(), previous_environment: Vec::new(), shutdown_deadline_usec: None, shutdown_transaction: None,
         };
         Self { directory, runtime, record, connection, _server: server.await.unwrap() }
     }

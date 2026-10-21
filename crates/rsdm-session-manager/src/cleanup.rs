@@ -148,7 +148,7 @@ async fn recover_infrastructure(
         if record.provider == "managed" { let _ = manager.unref(&unit).await; }
     }
     if owns_environment {
-        if let Err(error) = env::clear_owned(&manager, &record.exported_environment).await { failure.get_or_insert(error); }
+        if let Err(error) = env::clear_owned(&manager, &record.cleanup_environment()).await { failure.get_or_insert(error); }
     }
 }
 

@@ -43,13 +43,19 @@ pub(super) async fn published_display(manager: &UserManager) -> Result<bool, Ses
 
 pub(super) fn claim_environment(
     record: &mut SessionRecord, pairs: &[(String, String)],
-) -> Result<(), SessionError> {
+) -> Result<Vec<(String, String)>, SessionError> {
     if pairs.iter().any(|(name, value)| !env::valid_environment_name(name) || value.contains('\0')) {
         return Err(SessionError::State("invalid session environment".into()));
     }
+
+    let mut previous = Vec::new();
     for (name, value) in pairs {
-        if let Some((_, old)) = record.exported_environment.iter_mut().find(|(key, _)| key == name) { *old = value.clone(); }
-        else { record.exported_environment.push((name.clone(), value.clone())); }
+        if let Some((_, old)) = record.exported_environment.iter_mut().find(|(key, _)| key == name) {
+            if old != value { previous.push((name.clone(), old.clone())); }
+            *old = value.clone();
+        } else {
+            record.exported_environment.push((name.clone(), value.clone()));
+        }
     }
-    Ok(())
+    Ok(previous)
 }

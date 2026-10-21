@@ -11,7 +11,7 @@ async fn attached_finalize_keeps_private_identity_and_does_not_publish_to_a_mana
     fixture.coordinator.provider.kind = ProviderKind::Attached;
     fixture.coordinator.record.provider = "partial".into();
     fixture.coordinator.record.exported_environment = vec![("SESSION_MANAGER".into(), "private-xsmp".into()),
-        ("XDG_SESSION_ID".into(), "verified".into())];
+        ("XDG_SESSION_ID".into(), "verified".into()), ("VALUE".into(), "previous".into())];
     let (reply, mut result) = tokio::sync::mpsc::channel(1);
     fixture.coordinator.finalize_request(fixture.coordinator.runtime.generation.clone(), vec![
         ("SESSION_MANAGER".into(), "foreign-xsmp".into()), ("XDG_SESSION_ID".into(), "foreign-login".into()),
@@ -22,6 +22,7 @@ async fn attached_finalize_keeps_private_identity_and_does_not_publish_to_a_mana
     assert!(saved.exported_environment.contains(&("SESSION_MANAGER".into(), "private-xsmp".into())));
     assert!(saved.exported_environment.contains(&("XDG_SESSION_ID".into(), "verified".into())));
     assert!(saved.exported_environment.contains(&("VALUE".into(), "published".into())));
+    assert!(saved.previous_environment.is_empty());
     assert_eq!(fixture.coordinator.workers, 0);
 }
 async fn finalize(fixture: &mut Fixture, value: &str) -> tokio::sync::mpsc::Receiver<Result<(), String>> {
@@ -35,7 +36,7 @@ async fn finalize(fixture: &mut Fixture, value: &str) -> tokio::sync::mpsc::Rece
 
 async fn completed_publication(fixture: &mut Fixture) {
     let work = tokio::time::timeout(Duration::from_secs(1), fixture.coordinator.work.recv()).await.unwrap().unwrap();
-    assert!(matches!(work, Work::EnvironmentPublished(_)));
+    assert!(matches!(work, Work::EnvironmentPublished(_, _)));
     fixture.coordinator.completed(work).await.unwrap();
 }
 
@@ -155,6 +156,53 @@ async fn partial_publication_failure_preserves_environment_ownership_for_recover
     completed_publication(&mut fixture).await;
     assert!(next.try_recv().unwrap().is_ok());
     assert_eq!(fixture.coordinator.workers, 0);
+    let record = fixture.coordinator.runtime.session().unwrap();
+    assert!(record.previous_environment.is_empty());
+    *state.values.lock().unwrap() = vec!["WAYLAND_DISPLAY=wayland-failed".into()];
+    crate::env::clear_owned(&fixture.coordinator.manager, &record.cleanup_environment()).await.unwrap();
+    assert_eq!(*state.values.lock().unwrap(), ["WAYLAND_DISPLAY=wayland-failed"]);
+}
+
+#[tokio::test]
+async fn rejected_republication_keeps_the_previous_value_owned_for_cleanup() {
+    let mut fixture = Fixture::new().await;
+    let state = install(&fixture).await;
+    let mut first = finalize(&mut fixture, "wayland-original").await;
+    completed_publication(&mut fixture).await;
+    assert!(first.try_recv().unwrap().is_ok());
+
+    state.fail_manager.store(true, Ordering::SeqCst);
+    let mut rejected = finalize(&mut fixture, "wayland-rejected").await;
+    completed_publication(&mut fixture).await;
+    assert!(rejected.try_recv().unwrap().unwrap_err().contains("manager publication rejected"));
+    assert_eq!(*state.values.lock().unwrap(), ["WAYLAND_DISPLAY=wayland-original"]);
+
+    let record = fixture.coordinator.runtime.session().unwrap();
+    crate::env::clear_owned(&fixture.coordinator.manager, &record.cleanup_environment()).await.unwrap();
+    assert!(state.values.lock().unwrap().is_empty(), "the previous display survived cleanup");
+}
+
+#[tokio::test]
+async fn partially_published_values_remain_owned_across_a_later_rejection() {
+    let mut fixture = Fixture::new().await;
+    let state = install(&fixture).await;
+    let mut first = finalize(&mut fixture, "wayland-original").await;
+    completed_publication(&mut fixture).await;
+    assert!(first.try_recv().unwrap().is_ok());
+
+    state.fail_activation.store(true, Ordering::SeqCst);
+    let mut partial = finalize(&mut fixture, "wayland-partial").await;
+    completed_publication(&mut fixture).await;
+    assert!(partial.try_recv().unwrap().is_err());
+    state.fail_activation.store(false, Ordering::SeqCst);
+    state.fail_manager.store(true, Ordering::SeqCst);
+    let mut rejected = finalize(&mut fixture, "wayland-rejected").await;
+    completed_publication(&mut fixture).await;
+    assert!(rejected.try_recv().unwrap().is_err());
+    assert_eq!(*state.values.lock().unwrap(), ["WAYLAND_DISPLAY=wayland-partial"]);
+    let record = fixture.coordinator.runtime.session().unwrap();
+    crate::env::clear_owned(&fixture.coordinator.manager, &record.cleanup_environment()).await.unwrap();
+    assert!(state.values.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

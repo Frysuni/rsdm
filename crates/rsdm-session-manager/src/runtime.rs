@@ -46,6 +46,8 @@ pub(super) struct SessionRecord {
     pub config_path: Option<PathBuf>,
     #[serde(default)]
     pub exported_environment: Vec<(String, String)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub previous_environment: Vec<(String, String)>,
     #[serde(default)]
     pub shutdown_deadline_usec: Option<u64>,
     #[serde(default)]
@@ -53,6 +55,10 @@ pub(super) struct SessionRecord {
 }
 
 impl SessionRecord {
+    pub(super) fn cleanup_environment(&self) -> Vec<(String, String)> {
+        self.exported_environment.iter().chain(&self.previous_environment).cloned().collect()
+    }
+
     pub(super) fn pending_transaction_id(&self) -> Option<&str> {
         self.shutdown_transaction.as_ref().filter(|transaction| transaction.result.is_none())
             .map(|transaction| transaction.id.as_str())

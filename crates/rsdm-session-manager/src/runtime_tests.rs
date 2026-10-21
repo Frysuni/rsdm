@@ -62,6 +62,23 @@ fn legacy_app_records_have_no_original_process_or_migrated_scope() {
 }
 
 #[test]
+fn session_environment_ownership_survives_record_round_trips_and_legacy_records() {
+    let mut record = crate::helper_start_fixture::record();
+    record.exported_environment = vec![("WAYLAND_DISPLAY".into(), "wayland-proposed".into())];
+    let legacy = toml::to_string(&record).unwrap();
+    assert!(!legacy.contains("previous_environment"));
+    let restored: SessionRecord = toml::from_str(&legacy).unwrap();
+    assert!(restored.previous_environment.is_empty());
+
+    record.previous_environment = vec![("WAYLAND_DISPLAY".into(), "wayland-previous".into())];
+    let restored: SessionRecord = toml::from_str(&toml::to_string(&record).unwrap()).unwrap();
+    assert_eq!(restored.cleanup_environment(), vec![
+        ("WAYLAND_DISPLAY".into(), "wayland-proposed".into()),
+        ("WAYLAND_DISPLAY".into(), "wayland-previous".into()),
+    ]);
+}
+
+#[test]
 fn app_records_cannot_escape_the_directory_or_own_another_generation() {
     let directory = Directory::new();
     let runtime = Runtime::create_at(&directory.0, GENERATION).unwrap();
@@ -147,6 +164,7 @@ fn serialized_size_limit_applies_to_session_records_too() {
         disabled: false,
         config_path: None,
         exported_environment: vec![("VALUE".into(), "x".repeat(MAX_RECORD_BYTES))],
+        previous_environment: Vec::new(),
         shutdown_deadline_usec: None,
         shutdown_transaction: None,
     };

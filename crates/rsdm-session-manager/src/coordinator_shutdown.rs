@@ -241,7 +241,7 @@ async fn finish(
     if let Err(error) = cleanup_manager.stop(&record.anchor_unit, Duration::from_secs(15)).await { failure.get_or_insert(error); }
     let _ = cleanup_manager.unref(&record.anchor_unit).await;
     if let Err(error) = process.stop(&manager, provider, &runtime.generation).await { failure.get_or_insert(error); }
-    if let Err(error) = env::clear_owned(&manager, &record.exported_environment).await { failure.get_or_insert(error); }
+    if let Err(error) = env::clear_owned(&manager, &record.cleanup_environment()).await { failure.get_or_insert(error); }
     let records = runtime.clone();
     if let Err(error) = super::runtime::blocking(move || records.reap_closed_app_locks()).await { failure.get_or_insert(error); }
     match failure { Some(error) => Err(error), None => Ok(()) }

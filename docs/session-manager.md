@@ -644,6 +644,10 @@ the bus executable through its D-Bus PID and updates that environment directly,
 awaiting the reply before logout removes owned variables. Other bus implementations
 receive the standard `UpdateActivationEnvironment` call.
 
+An environment update records both the proposed values and previous owned values
+until publication succeeds. If publication fails or is interrupted, logout and
+recovery can clear either value while preserving values changed by another owner.
+
 Each unit start/stop call has one timeout covering its preflight reads, signal
 subscription, method reply, and completion checks. A lost reply or job signal is
 reconciled against owned unit state inside the same budget, without repeating
