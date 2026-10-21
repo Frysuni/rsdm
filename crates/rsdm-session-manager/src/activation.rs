@@ -9,27 +9,33 @@ pub(super) async fn activate(
     environment: &[(String, String)], directory: &Path, stopping: &AtomicBool,
 ) -> Result<bool, SessionError> {
     if stopping.load(Ordering::SeqCst) { return Ok(false); }
-    let external_target = manager.active(units::SESSION_TARGET).await?;
-    if provider.kind != ProviderKind::Managed && (!external_target || !provider.ready(manager).await?) {
-        return Err(SessionError::State("native session manager is not ready".into()));
-    }
-    let mut properties = units::anchor_properties(compositor, environment, directory).await?;
-    if provider.kind != ProviderKind::Managed {
-        // A native target can stop between readiness and the anchor start job.
-        // Requisite refuses that race; Wants would restart someone else's session.
-        properties.retain(|(name, _)| !matches!(*name, "Wants" | "Requisite"));
-        let mut required = vec![units::SESSION_TARGET.to_string()];
-        if let Some(unit) = compositor {
-            required.push(unit.to_string());
+    let prepared = async {
+        let external_target = manager.active(units::SESSION_TARGET).await?;
+        if provider.kind != ProviderKind::Managed && (!external_target || !provider.ready(manager).await?) {
+            return Err(SessionError::State("native session manager is not ready".into()));
         }
-        properties.push(("Requisite", zbus::Variant::new(required)));
-    }
-    if !external_target && provider.kind == ProviderKind::Managed {
-        properties.retain(|(name, _)| *name != "Wants");
-        properties.push(("Wants", zbus::Variant::new(vec![
-            units::SESSION_TARGET.to_string(), units::AUTOSTART_TARGET.to_string(),
-        ])));
-    }
+        let mut properties = units::anchor_properties(compositor, environment, directory).await?;
+        if provider.kind != ProviderKind::Managed {
+            // A native target can stop between readiness and the anchor start job.
+            // Requisite refuses that race; Wants would restart someone else's session.
+            properties.retain(|(name, _)| !matches!(*name, "Wants" | "Requisite"));
+            let mut required = vec![units::SESSION_TARGET.to_string()];
+            if let Some(unit) = compositor {
+                required.push(unit.to_string());
+            }
+            properties.push(("Requisite", zbus::Variant::new(required)));
+        }
+        if !external_target && provider.kind == ProviderKind::Managed {
+            properties.retain(|(name, _)| *name != "Wants");
+            properties.push(("Wants", zbus::Variant::new(vec![
+                units::SESSION_TARGET.to_string(), units::AUTOSTART_TARGET.to_string(),
+            ])));
+        }
+        Ok::<_, SessionError>((external_target, properties))
+    }.await;
+    let (external_target, properties) = prepared.map_err(|error| SessionError::StartRejected {
+        error: Box::new(error), reference_retained: false,
+    })?;
     if stopping.load(Ordering::SeqCst) { return Ok(false); }
     manager.start_service(anchor, &properties).await?;
     Ok(!external_target && provider.kind == ProviderKind::Managed)

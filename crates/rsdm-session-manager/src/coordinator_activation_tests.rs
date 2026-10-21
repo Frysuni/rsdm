@@ -1,6 +1,6 @@
 //! Target ownership reads cannot hold the actor or start a stopping session.
 
-use std::sync::Mutex;
+use std::sync::{Mutex, atomic::AtomicBool};
 
 use zbus::{OwnedObjectPath, OwnedVariant};
 
@@ -10,6 +10,7 @@ use crate::control::{Reply, Request};
 struct State {
     runtime: Runtime,
     starts: AtomicUsize,
+    unavailable: AtomicBool,
     pause: Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }
 
@@ -17,7 +18,10 @@ struct Manager(Arc<State>);
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Manager")]
 impl Manager {
-    async fn get_unit(&self, unit: &str) -> OwnedObjectPath {
+    async fn get_unit(&self, unit: &str) -> zbus::fdo::Result<OwnedObjectPath> {
+        if self.0.unavailable.load(Ordering::SeqCst) {
+            return Err(zbus::fdo::Error::NoReply("activation preflight temporarily unavailable".into()));
+        }
         if unit == units::SESSION_TARGET {
             let pause = self.0.pause.lock().unwrap().take();
             if let Some((entered, resume)) = pause {
@@ -25,7 +29,7 @@ impl Manager {
                 resume.notified().await;
             }
         }
-        OwnedObjectPath::try_from("/unit").unwrap()
+        Ok(OwnedObjectPath::try_from("/unit").unwrap())
     }
 
     fn start_transient_unit(
@@ -54,7 +58,7 @@ async fn install(fixture: &mut Fixture) -> (Arc<State>, Arc<tokio::sync::Notify>
     let entered = Arc::new(tokio::sync::Notify::new());
     let resume = Arc::new(tokio::sync::Notify::new());
     let state = Arc::new(State {
-        runtime: fixture.coordinator.runtime.clone(), starts: AtomicUsize::new(0),
+        runtime: fixture.coordinator.runtime.clone(), starts: AtomicUsize::new(0), unavailable: AtomicBool::new(false),
         pause: Mutex::new(Some((entered.clone(), resume.clone()))),
     });
     fixture._server.object_server().at("/org/freedesktop/systemd1", Manager(state.clone())).await.unwrap();
@@ -97,6 +101,56 @@ async fn a_pending_target_read_allows_status_and_cancellation_without_rejecting_
     assert!(finalized.try_recv().unwrap().unwrap_err().contains("anchor activation rejected"));
     assert_eq!(state.starts.load(Ordering::SeqCst), 1);
     assert_eq!(fixture.coordinator.workers, 0);
+}
+
+#[tokio::test]
+async fn a_transient_activation_preflight_failure_retries_without_resubmitting_a_start() {
+    let mut fixture = Fixture::new().await;
+    let (state, entered, resume) = install(&mut fixture).await;
+    fixture.coordinator.ready_deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = fixture.coordinator.ready_deadline;
+    let (reply, mut finalized) = tokio::sync::mpsc::channel(1);
+    fixture.coordinator.finalize_replies.push(Reply::for_test(reply));
+    fixture.coordinator.activate();
+    tokio::time::timeout(Duration::from_secs(2), entered.notified()).await.unwrap();
+    state.unavailable.store(true, Ordering::SeqCst);
+    resume.notify_one();
+    complete_check(&mut fixture).await;
+    let failed = tokio::time::timeout(Duration::from_secs(7), fixture.coordinator.work.recv()).await.unwrap().unwrap();
+    assert!(matches!(failed, Work::Ready(Err(_))));
+    assert_eq!(state.starts.load(Ordering::SeqCst), 0);
+    fixture.coordinator.completed(failed).await.unwrap();
+    assert_eq!(fixture.coordinator.ready_deadline, deadline, "a read failure expired the startup budget");
+    assert_eq!(finalized.try_recv(), Err(tokio::sync::mpsc::error::TryRecvError::Empty));
+    assert!(!fixture.coordinator.ready_busy);
+
+    state.unavailable.store(false, Ordering::SeqCst);
+    fixture.coordinator.activate();
+    complete_check(&mut fixture).await;
+    let attempted = tokio::time::timeout(Duration::from_secs(2), fixture.coordinator.work.recv()).await.unwrap().unwrap();
+    fixture.coordinator.completed(attempted).await.unwrap();
+    assert!(finalized.try_recv().unwrap().unwrap_err().contains("anchor activation rejected"));
+    assert_eq!(state.starts.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn unconfirmed_or_retained_starts_are_not_retried_as_read_failures() {
+    for retained in [false, true] {
+        let mut fixture = Fixture::new().await;
+        fixture.coordinator.ready_busy = true;
+        fixture.coordinator.ready_deadline = Instant::now() + Duration::from_secs(30);
+        let deadline = fixture.coordinator.ready_deadline;
+        let (reply, mut finalized) = tokio::sync::mpsc::channel(1);
+        fixture.coordinator.finalize_replies.push(Reply::for_test(reply));
+        let error = SessionError::from(zbus::Error::from(zbus::fdo::Error::NoReply("start reply was lost".into())));
+        let error = if retained { SessionError::StartRejected { error: Box::new(error), reference_retained: true } } else { error };
+
+        fixture.coordinator.ready_completed(Err(error)).unwrap();
+        assert!(finalized.try_recv().unwrap().is_err());
+        assert!(fixture.coordinator.ready_deadline < deadline);
+        assert!(!fixture.coordinator.ready_busy && !fixture.coordinator.pending_ready);
+        assert!(fixture.coordinator.work.try_recv().is_err());
+    }
 }
 
 #[tokio::test]

@@ -106,6 +106,13 @@ impl Coordinator {
                 self.pending_ready = true;
                 return Ok(());
             }
+            Err(SessionError::StartRejected { error, reference_retained: false })
+                if self.lifecycle.accepts_finalize()
+                    && matches!(error.as_ref(), SessionError::Bus(error) if super::bus::retryable_error(error)) =>
+            {
+                self.ready_busy = false;
+                tracing::warn!(%error, "deferring session activation after an unsubmitted start failed");
+            }
             Err(error) => {
                 self.ready_busy = false;
                 for reply in self.finalize_replies.drain(..) {

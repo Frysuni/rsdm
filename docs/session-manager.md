@@ -637,6 +637,8 @@ the resulting unit state without sending the command again.
 Temporary failures reading graphical-target ownership or discovering niri's
 environment preserve the original startup deadline and leave accepted finalize
 requests pending until a later check can complete.
+Activation preparation retries reads only when the start request is known not
+to have been submitted.
 
 After a user-bus restart, the coordinator reconnects its manager and control
 connections, restores references to matching owned invocations and republishes
