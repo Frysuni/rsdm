@@ -62,12 +62,42 @@ impl Surface for TuiSurface<'_> {
             return;
         }
         if let Some(target) = self.buf.cell_mut(Position::new(ax, ay)) {
+            let ch = if cell.ch.is_control() { ' ' } else { cell.ch };
             let mut utf8 = [0u8; 4];
-            target.set_symbol(cell.ch.encode_utf8(&mut utf8));
+            target.set_symbol(ch.encode_utf8(&mut utf8));
             target.set_fg(color(cell.fg));
             if cell.bold {
                 target.modifier.insert(Modifier::BOLD);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend};
+
+    use super::*;
+
+    #[test]
+    fn text_controls_do_not_reach_terminal_output() {
+        let mut output = Vec::new();
+        {
+            let backend = CrosstermBackend::new(&mut output);
+            let options = TerminalOptions {
+                viewport: Viewport::Fixed(ratatui::layout::Rect::new(0, 0, 40, 2)),
+            };
+            let mut terminal = Terminal::with_options(backend, options).unwrap();
+            terminal.draw(|frame| {
+                let mut surface = TuiSurface::new(frame.buffer_mut());
+                surface.text(0, 0, "Нири─█\n\r\t\u{7}\u{1b}[2J", Rgb::new(255, 255, 255), false);
+            }).unwrap();
+        }
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("Нири─█"));
+        for control in ['\n', '\r', '\t', '\u{7}'] {
+            assert!(!output.contains(control), "terminal received text control {control:?}");
+        }
+        assert!(!output.contains("\u{1b}[2J"), "text cleared the terminal");
     }
 }
