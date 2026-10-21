@@ -254,5 +254,5 @@ pkgs.testers.runNixOSTest {
         assert (255, 0, 255) not in locked.getdata(), "desktop background leaked through the lock"
         machine.succeed("rsdm unlock --uid 1000")
         machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: none '")
-  '';
+  '' + import ./lock-settings.nix { inherit pkgs; };
 }

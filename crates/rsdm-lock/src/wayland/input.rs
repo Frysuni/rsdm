@@ -48,31 +48,6 @@ impl App {
         self.needs_redraw = true;
     }
 
-    fn save_runtime_settings(&mut self) {
-        let Some(settings) = self.menu.lock_settings() else {
-            return;
-        };
-        let mut design = self.ctx.design_config.clone();
-        self.ctx.design.apply_runtime_to_config(&mut design);
-        let result = rsdm_infra::config::save_lock_runtime_settings(
-            &self.ctx.config_path,
-            &design,
-            settings.size,
-            settings.secondary_output,
-        );
-        match result {
-            Ok(()) => {
-                self.ctx.design_config = design;
-                self.menu.set_notice("Personal lock settings saved".to_string(), false);
-            }
-            Err(error) => {
-                tracing::error!(%error, "could not save runtime lock settings");
-                self.menu.set_notice(format!("Save failed: {error}"), true);
-            }
-        }
-        self.needs_redraw = true;
-    }
-
     fn handle_regular_key(&mut self, event: KeyEvent) {
         match event.keysym {
             Keysym::Return | Keysym::KP_Enter => self.submit(),

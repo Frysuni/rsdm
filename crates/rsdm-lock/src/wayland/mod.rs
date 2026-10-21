@@ -43,6 +43,7 @@ mod output;
 mod power;
 mod protocol;
 mod render;
+mod settings;
 
 const ANIMATION_FRAME: Duration = Duration::from_millis(66);
 
@@ -110,6 +111,7 @@ struct App {
     authentication: Option<crate::auth::AuthenticationJob>,
     power_action: Option<power::PowerJob>,
     power_capabilities: Option<std::sync::mpsc::Receiver<rsdm_infra::power::PowerCapabilities>>,
+    settings_save: Option<settings::SaveJob>,
     ctx: LockContext,
     menu: Menu,
     menu_enabled: bool,
@@ -162,6 +164,7 @@ pub fn run(config: &AppConfig, config_path: &Path, readiness: Option<std::os::un
         authentication: None,
         power_action: None,
         power_capabilities: power::start_capability_query(),
+        settings_save: None,
         ctx: context,
         menu,
         menu_enabled: config.lock.design.menu,
@@ -207,6 +210,7 @@ fn run_event_loop(
         app.process_authentication();
         app.process_power_action();
         app.process_power_capabilities();
+        app.process_settings_save();
         app.process_clock();
         if rsdm_infra::unix::emergency_unlock_requested() && app.lock_state.is_some() {
             app.unlock();

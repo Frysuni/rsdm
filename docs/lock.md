@@ -143,6 +143,9 @@ settings to persist the lock visual fields in
 `$XDG_CONFIG_HOME/rsdm/lock.toml` (or `$HOME/.config/rsdm/lock.toml`). The file
 contains no DM, PAM, or security settings and is loaded as a user-owned overlay
 on the next Lock start. Other commands do not load this file.
+Saving runs in the background so slow storage does not block authentication or
+emergency unlock. Wait for "Personal lock settings saved" before unlocking if
+you want to keep the changes.
 
 ## Authentication
 
