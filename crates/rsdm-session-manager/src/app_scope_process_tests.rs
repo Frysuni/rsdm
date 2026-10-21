@@ -18,6 +18,36 @@ async fn process_tree() -> (tokio::process::Child, u32, ProcessHandle) {
 }
 
 #[tokio::test]
+async fn process_exit_during_scope_discovery_is_not_a_session_error() {
+    for exited in [true, false] {
+        let fixture = fixture::Fixture::new().await;
+        let mut child = tokio::process::Command::new("sleep").arg("60").kill_on_drop(true).spawn().unwrap();
+        let pid = child.id().unwrap();
+        let handle = ProcessHandle::open(pid).unwrap().unwrap();
+        let Some(pidfd_id) = handle.id().unwrap() else { child.kill().await.unwrap(); return; };
+        let mut app = fixture.app.clone();
+        app.original_process = Some(crate::app_origin::OriginalProcess { pid, pidfd_id });
+        fixture.state.main_pid.store(pid, Ordering::SeqCst);
+        fixture.state.missing_pid.store(true, Ordering::SeqCst);
+
+        let (_, result) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(async {
+                fixture.state.pid_lookup.notified().await;
+                if exited { child.kill().await.unwrap(); }
+                fixture.state.resume_pid_lookup.notify_one();
+            }, discover(&fixture.manager, &app))
+        }).await.unwrap();
+
+        if exited {
+            assert!(result.unwrap().is_none());
+        } else {
+            child.kill().await.unwrap();
+            assert!(result.is_err(), "a live process must retain the lookup error");
+        }
+    }
+}
+
+#[tokio::test]
 async fn scope_children_are_observed_and_signalled_after_the_original_process_exits() {
     let (fixture, mut app, supported) = migrated().await;
     if !supported { return; }

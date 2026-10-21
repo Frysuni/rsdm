@@ -61,9 +61,18 @@ pub(super) async fn refresh(manager: &UserManager, records: &Runtime, mut app: A
 async fn discover(manager: &UserManager, app: &AppRecord) -> Result<Option<MigratedScope>, SessionError> {
     let Some(origin) = &app.original_process else { return Ok(None); };
     let Some(handle) = ProcessHandle::open(origin.pid)? else { return Ok(None); };
-    if origin.pidfd_id == 0 || handle.id()? != Some(origin.pidfd_id) || !handle.alive()?
-        || !processes::verify_invocation(manager, app).await?
-    { return Ok(None); }
+    if origin.pidfd_id == 0 || handle.id()? != Some(origin.pidfd_id) || !handle.alive()? { return Ok(None); }
+
+    // The process can exit while systemd resolves its unit.
+    let scope = inspect_scope(manager, app, origin).await;
+    if !handle.alive()? { return Ok(None); }
+    scope
+}
+
+async fn inspect_scope(
+    manager: &UserManager, app: &AppRecord, origin: &super::app_origin::OriginalProcess,
+) -> Result<Option<MigratedScope>, SessionError> {
+    if !processes::verify_invocation(manager, app).await? { return Ok(None); }
     let main: u32 = manager.unit_property(&app.unit, "org.freedesktop.systemd1.Service", "MainPID").await?;
     if main != origin.pid { return Ok(None); }
     let unit = manager.unit_for_pid(origin.pid).await?;
@@ -84,7 +93,7 @@ async fn discover(manager: &UserManager, app: &AppRecord) -> Result<Option<Migra
     let mut current = manager.processes(&unit).await?.into_iter().map(|(_, pid, _)| pid).collect::<Vec<_>>();
     current.sort_unstable();
     if initial != current || manager.unit_for_pid(main).await? != unit || manager.invocation_id(&unit).await? != invocation_id
-        || !processes::verify_invocation(manager, app).await? || !handle.alive()?
+        || !processes::verify_invocation(manager, app).await?
     { return Ok(None); }
     for handle in owned.handles { if !handle.alive()? { return Ok(None); } }
     Ok(Some(MigratedScope { unit, invocation_id, lifetime_group: Some(lifetime_group), lineage: owned.lineage }))

@@ -23,13 +23,16 @@ pub(super) struct State {
     pub scope_transient: AtomicBool,
     pub scope_reads: AtomicUsize,
     pub scope_missing_at: AtomicUsize,
+    pub missing_pid: AtomicBool,
+    pub pid_lookup: tokio::sync::Notify,
+    pub resume_pid_lookup: tokio::sync::Notify,
 }
 
 struct Manager(Arc<State>);
 
 #[derive(Debug, zbus_macros::DBusError)]
 #[zbus(prefix = "org.freedesktop.systemd1")]
-enum ManagerError { NoSuchUnit(String) }
+enum ManagerError { NoSuchUnit(String), NoUnitForPID(String) }
 
 impl Manager {
     fn check_scope(&self, unit: &str) -> Result<(), ManagerError> {
@@ -63,9 +66,14 @@ impl Manager {
     }
 
     #[zbus(name = "GetUnitByPID")]
-    fn get_unit_by_pid(&self, pid: u32) -> OwnedObjectPath {
+    async fn get_unit_by_pid(&self, pid: u32) -> Result<OwnedObjectPath, ManagerError> {
         assert_eq!(pid, self.0.main_pid.load(Ordering::SeqCst));
-        OwnedObjectPath::try_from(if self.0.scope_present.load(Ordering::SeqCst) { "/scope" } else { "/app" }).unwrap()
+        if self.0.missing_pid.load(Ordering::SeqCst) {
+            self.0.pid_lookup.notify_one();
+            self.0.resume_pid_lookup.notified().await;
+            return Err(ManagerError::NoUnitForPID("process has no unit".into()));
+        }
+        Ok(OwnedObjectPath::try_from(if self.0.scope_present.load(Ordering::SeqCst) { "/scope" } else { "/app" }).unwrap())
     }
 }
 
@@ -135,7 +143,8 @@ impl Fixture {
             scope_present: AtomicBool::new(false), scope_foreign_pid: AtomicU32::new(0), scope_group: Mutex::new(group),
             scope_extra_pid: AtomicU32::new(0),
             scope_pid: AtomicU32::new(std::process::id()),
-            scope_transient: AtomicBool::new(true), scope_reads: AtomicUsize::new(0), scope_missing_at: AtomicUsize::new(usize::MAX) });
+            scope_transient: AtomicBool::new(true), scope_reads: AtomicUsize::new(0), scope_missing_at: AtomicUsize::new(usize::MAX),
+            missing_pid: AtomicBool::new(false), pid_lookup: tokio::sync::Notify::new(), resume_pid_lookup: tokio::sync::Notify::new() });
         let shared = state.clone();
         let (server, client) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
