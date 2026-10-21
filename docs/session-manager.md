@@ -602,6 +602,8 @@ finalize can still activate them.
 
 Finalize publications run serially in a worker, so their D-Bus calls do not
 block status or cancellation. The coordinator saves ownership before publication.
+Automatic niri readiness retains values from an active finalize publication while
+discovering the remaining display endpoints from the user manager.
 Shutdown rejects queued publications and waits for the active one within the
 shared shutdown deadline before preparing applications. Cancelling shutdown
 preserves an accepted startup finalize until readiness is confirmed.

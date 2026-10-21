@@ -15,7 +15,7 @@ impl Coordinator {
         }
         self.xsmp.cancel();
         self.reject_pending_environment("session manager is disabled");
-        if let Some(reply) = self.environment_reply.take() { let _ = reply.try_send(Err("session manager is disabled".into())); }
+        if let Some((_, reply)) = self.environment_reply.take() { let _ = reply.try_send(Err("session manager is disabled".into())); }
         for reply in self.finalize_replies.drain(..) { let _ = reply.try_send(Err("session manager is disabled".into())); }
         while let Some((_, reply, _)) = self.queued.pop_front() { let _ = reply.try_send(Err("session manager is disabled".into())); }
 

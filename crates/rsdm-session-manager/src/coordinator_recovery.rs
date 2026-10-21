@@ -10,7 +10,7 @@ impl Coordinator {
         self.lifecycle.prepare();
         self.xsmp.cancel();
         self.reject_pending_environment("session coordinator failed");
-        if let Some(reply) = self.environment_reply.take() {
+        if let Some((_, reply)) = self.environment_reply.take() {
             let _ = reply.try_send(Err("session coordinator failed".into()));
         }
         let hard_deadline = super::cleanup::recovery_deadline(

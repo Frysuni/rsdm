@@ -119,9 +119,11 @@ impl Coordinator {
         self.ready_busy = false;
         if ready {
             if self.provider.kind == ProviderKind::Niri {
+                let publishing = self.environment_reply.as_ref().map(|(names, _)| names.as_slice()).unwrap_or_default();
                 let environment = self.manager.environment().await?.into_iter()
                     .filter_map(|entry| entry.split_once('=').map(|(name, value)| (name.to_string(), value.to_string())))
-                    .filter(|(name, _)| super::env::WAYLAND_VARS.contains(&name.as_str())).collect::<Vec<_>>();
+                    .filter(|(name, _)| super::env::WAYLAND_VARS.contains(&name.as_str()))
+                    .filter(|(name, _)| !publishing.contains(name)).collect::<Vec<_>>();
                 super::activation::claim_environment(&mut self.record, &environment)?;
             }
             self.ready_once = true;

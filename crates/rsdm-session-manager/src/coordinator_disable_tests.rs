@@ -28,7 +28,7 @@ async fn late_worker_completions_cannot_resume_preparation_after_disable() {
     coordinator.workers = 3;
     coordinator.completed(Work::Prepared(Ok(vec!["forced.service".into()]), None)).await.unwrap();
     coordinator.completed(Work::Delegated(Ok(()))).await.unwrap();
-    coordinator.completed(Work::EnvironmentPublished(Vec::new(), Ok(()))).await.unwrap();
+    coordinator.completed(Work::EnvironmentPublished(Ok(()))).await.unwrap();
     assert_eq!(coordinator.workers, 0);
     assert!(coordinator.forced_units.is_empty());
     assert_eq!(coordinator.lifecycle.phase, SessionPhase::Running);
@@ -47,7 +47,7 @@ async fn a_record_error_still_drains_workers_and_releases_pending_callers() {
     let (sender, mut finalized) = tokio::sync::mpsc::channel(1);
     coordinator.finalize_replies.push(crate::control::Reply::for_test(sender));
     coordinator.workers = 1;
-    coordinator.events.send(Work::EnvironmentPublished(Vec::new(), Ok(()))).unwrap();
+    coordinator.events.send(Work::EnvironmentPublished(Ok(()))).unwrap();
 
     assert!(tokio::time::timeout(Duration::from_secs(3), coordinator.disable()).await.unwrap().is_err());
     assert_eq!(coordinator.workers, 0);

@@ -5,6 +5,9 @@ use crate::control::{Reply, Request};
 mod peer;
 use peer::{install, pause};
 
+#[path = "coordinator_readiness_environment_tests.rs"]
+mod readiness;
+
 #[tokio::test]
 async fn attached_finalize_keeps_private_identity_and_does_not_publish_to_a_manager() {
     let mut fixture = Fixture::new().await;
@@ -36,7 +39,7 @@ async fn finalize(fixture: &mut Fixture, value: &str) -> tokio::sync::mpsc::Rece
 
 async fn completed_publication(fixture: &mut Fixture) {
     let work = tokio::time::timeout(Duration::from_secs(1), fixture.coordinator.work.recv()).await.unwrap().unwrap();
-    assert!(matches!(work, Work::EnvironmentPublished(_, _)));
+    assert!(matches!(work, Work::EnvironmentPublished(_)));
     fixture.coordinator.completed(work).await.unwrap();
 }
 

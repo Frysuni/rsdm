@@ -26,7 +26,7 @@ pub(super) enum Work {
     Boot(Result<Vec<u8>, SessionError>),
     TargetsChecked(Result<bool, SessionError>),
     Ready(Result<bool, SessionError>),
-    EnvironmentPublished(Vec<String>, Result<(), SessionError>),
+    EnvironmentPublished(Result<(), SessionError>),
     Launched(String, Reply<String>, Result<String, SessionError>),
     Prepared(Result<Vec<String>, SessionError>, Option<super::status::Capability>),
     Delegated(Result<(), SessionError>),
@@ -52,7 +52,7 @@ pub(super) struct Coordinator {
     pub queued: VecDeque<(LaunchRequest, Reply<String>, Instant)>,
     pub finalize_replies: Vec<Reply<()>>,
     pub pending_environment: VecDeque<(Vec<(String, String)>, Reply<()>)>,
-    pub environment_reply: Option<Reply<()>>,
+    pub environment_reply: Option<(Vec<String>, Reply<()>)>,
     pub stop_replies: Vec<Reply<StopOutcome>>,
     pub stopping: Arc<AtomicBool>,
     pub shutdown: Option<Arc<ShutdownControl>>,
@@ -214,7 +214,7 @@ impl Coordinator {
             Work::Boot(result) => self.boot_completed(result).await?,
             Work::TargetsChecked(result) => self.targets_checked(result).await?,
             Work::Ready(result) => self.ready_completed(result)?,
-            Work::EnvironmentPublished(names, result) => self.environment_published(&names, result).await?,
+            Work::EnvironmentPublished(result) => self.environment_published(result).await?,
             Work::Launched(unit, reply, result) => {
                 self.lifecycle.complete_launch(&unit);
                 let _ = reply.try_send(result.map_err(|error| error.to_string()));

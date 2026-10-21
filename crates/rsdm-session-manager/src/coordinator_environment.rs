@@ -47,20 +47,20 @@ impl Coordinator {
         }
         // Record ownership before either manager or activation values can be
         // changed. Only the actor writes the session record, including phase.
-        self.environment_reply = Some(reply);
+        let names = environment.iter().map(|(name, _)| name.clone()).collect();
+        self.environment_reply = Some((names, reply));
         let manager = self.manager.clone();
         let events = self.events.clone();
         self.workers += 1;
         tokio::spawn(async move {
             let result = env::publish(&manager, &environment).await;
-            let names = environment.into_iter().map(|(name, _)| name).collect();
-            let _ = events.send(Work::EnvironmentPublished(names, result));
+            let _ = events.send(Work::EnvironmentPublished(result));
         });
         Ok(())
     }
 
-    pub(super) async fn environment_published(&mut self, names: &[String], result: Result<(), SessionError>) -> Result<(), SessionError> {
-        let reply = self.environment_reply.take()
+    pub(super) async fn environment_published(&mut self, result: Result<(), SessionError>) -> Result<(), SessionError> {
+        let (names, reply) = self.environment_reply.take()
             .ok_or_else(|| SessionError::State("environment publication completed without a request".into()))?;
         if result.is_ok() {
             self.record.previous_environment.retain(|(name, _)| !names.contains(name));

@@ -26,6 +26,26 @@ pub(super) fn pause(state: &State) -> (Arc<tokio::sync::Notify>, Arc<tokio::sync
     (entered, resume)
 }
 
+pub(super) async fn hold_requests(manager: &crate::bus::UserManager) -> (Arc<tokio::sync::Semaphore>, tokio::task::JoinSet<()>) {
+    let entered = Arc::new(tokio::sync::Semaphore::new(0));
+    let resume = Arc::new(tokio::sync::Semaphore::new(0));
+    let mut workers = tokio::task::JoinSet::new();
+    for _ in 0..4 {
+        let manager = manager.clone();
+        let entered = entered.clone();
+        let resume = resume.clone();
+        workers.spawn(async move {
+            manager.request(async {
+                entered.add_permits(1);
+                resume.acquire().await.unwrap().forget();
+                Ok::<_, zbus::Error>(())
+            }).await.unwrap();
+        });
+    }
+    tokio::time::timeout(Duration::from_secs(1), entered.acquire_many(4)).await.unwrap().unwrap().forget();
+    (resume, workers)
+}
+
 struct Manager(Arc<State>);
 
 #[zbus_macros::interface(name = "org.freedesktop.systemd1.Manager")]
