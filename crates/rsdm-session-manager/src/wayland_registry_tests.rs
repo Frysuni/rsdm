@@ -74,8 +74,9 @@ async fn a_stalled_registry_is_bounded_and_an_event_flood_is_rejected() {
     let (mut connection, mut peer) = connect(&fixture).await;
     let server = tokio::spawn(async move {
         read_requests(&mut peer).await;
-        for _ in 0..100_000 {
-            if peer.write_all(&event(2, 1, &1_u32.to_ne_bytes())).await.is_err() { break; }
+        let interface = "x".repeat(60_000);
+        for id in 1..=20 {
+            if peer.write_all(&advertisement(id, &interface, 1)).await.is_err() { break; }
         }
     });
     assert!(connection.discover().await.unwrap_err().to_string().contains("oversized"));
