@@ -185,10 +185,7 @@ fn parse_os_release_value(value: &str) -> Option<String> {
         return Some(String::new());
     };
     if matches!(first, '\'' | '"') {
-        if value.chars().last()? != first {
-            return None;
-        }
-        let inner = &value[first.len_utf8()..value.len() - first.len_utf8()];
+        let inner = value.strip_prefix(first)?.strip_suffix(first)?;
         if first == '\'' {
             return Some(inner.to_string());
         }
@@ -278,6 +275,18 @@ mod tests {
             Some("quoted \"name\"".into())
         );
         assert_eq!(parse_os_release_value("plain"), Some("plain".into()));
+    }
+
+    #[test]
+    fn truncated_os_release_quotes_allow_the_name_fallback() {
+        for quote in ["\"", "'"] {
+            let text = format!("PRETTY_NAME={quote}\nNAME=Fallback Linux\n");
+            assert_eq!(find_os_release_value(&text, "PRETTY_NAME"), None);
+            let name = ["PRETTY_NAME", "NAME"]
+                .iter()
+                .find_map(|key| find_os_release_value(&text, key));
+            assert_eq!(name.as_deref(), Some("Fallback Linux"));
+        }
     }
 
     #[test]
