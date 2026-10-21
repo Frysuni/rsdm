@@ -52,7 +52,7 @@ pkgs.testers.runNixOSTest {
       enable = true;
       package = rsdm;
       keyring = "none";
-      dm.fixedSession = "${compositor}";
+      dm.fixedSession = "available";
       config.security.failure_delay_ms = 0;
       config.dm.session_dirs = [ "/etc/rsdm-test-sessions" ];
     };
@@ -66,7 +66,7 @@ pkgs.testers.runNixOSTest {
     environment.etc."rsdm-test-sessions/available.desktop".text = ''
       [Desktop Entry]
       Name=Test desktop
-      Exec=${compositor}
+      Exec=${rsdm}/bin/rsdm session --config /etc/rsdm.toml start -- ${compositor}
       TryExec=${pkgs.coreutils}/bin/true
     '';
     environment.etc."rsdm-test-sessions/unavailable.desktop".text = ''

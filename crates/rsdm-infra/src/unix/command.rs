@@ -49,12 +49,16 @@ pub(super) fn is_session_manager_command(argv: &[String]) -> bool {
     let rsdm = argv.first().is_some_and(|program| std::path::Path::new(program).file_name().is_some_and(|name| name == "rsdm"));
     if !rsdm { return false; }
     let mut arguments = argv.iter().skip(1);
-    while let Some(argument) = arguments.next() {
-        if argument == "--config" { arguments.next(); continue; }
-        if argument.starts_with("--config=") { continue; }
-        return argument == "session" && arguments.next().is_some_and(|action| action == "start");
+    for expected in ["session", "start"] {
+        loop {
+            let Some(argument) = arguments.next() else { return false; };
+            if argument == "--config" { arguments.next(); continue; }
+            if argument.starts_with("--config=") { continue; }
+            if argument != expected { return false; }
+            break;
+        }
     }
-    false
+    true
 }
 
 pub fn cstring(label: &str, value: &str) -> Result<CString, SessionLaunchError> {
@@ -181,6 +185,21 @@ mod tests {
         let command = PreparedCommand::new_wrapped(&prefix, "example -- session start").unwrap();
         assert_eq!(&argv_strings(&command)[..4], prefix.as_slice());
         assert!(!is_session_manager_command(&split_exec("rsdm app -- example session start").unwrap()));
+    }
+
+    #[test]
+    fn global_config_between_subcommands_does_not_add_a_second_session_manager() {
+        let prefix = vec!["/usr/bin/rsdm".into(), "session".into(), "start".into(), "--".into()];
+        for exec in [
+            "/usr/bin/rsdm session --config /etc/example.toml start -- example-session",
+            "/usr/bin/rsdm session --config=/etc/example.toml start -- example-session",
+            "/usr/bin/rsdm session start --config /etc/example.toml -- example-session",
+        ] {
+            let argv = split_exec(exec).unwrap();
+            let command = PreparedCommand::new_wrapped_argv(&prefix, &argv).unwrap();
+            assert_eq!(argv_strings(&command), argv, "{exec}");
+        }
+        assert!(!is_session_manager_command(&split_exec("rsdm session --config /etc/example.toml status").unwrap()));
     }
 
     #[test]
