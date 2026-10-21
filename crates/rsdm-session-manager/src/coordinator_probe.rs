@@ -16,6 +16,7 @@ pub(super) struct ObservationResult {
 }
 
 pub(super) struct Observation {
+    pub(super) phase: SessionPhase,
     pub(super) reaped_apps: bool,
     pub(super) boot: Option<BootCheck>,
     pub(super) readiness_check: Option<Result<bool, SessionError>>,
@@ -117,6 +118,7 @@ pub(super) async fn observe_external(
         };
 
         Ok(Observation {
+            phase,
             reaped_apps,
             boot,
             readiness_check,

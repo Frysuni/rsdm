@@ -610,6 +610,9 @@ preserves an accepted startup finalize until readiness is confirmed.
 Activation completions apply that cancellation before advancing readiness. An
 activation skipped during logout can then retry, rather than waiting for an
 anchor that was never started.
+Readiness observations also apply cancellation before completion. Snapshots taken
+during shutdown preparation are discarded after resuming, so readiness is
+checked against the running session again.
 
 For an RSDM-owned lifecycle, the anchor activates `graphical-session.target` and
 `xdg-desktop-autostart.target`. Ownership is recorded before activation. Native

@@ -91,6 +91,7 @@ impl Coordinator {
     ) -> Result<(), SessionError> {
         self.observation_busy = false;
         self.process = result.process;
+        self.resume_if_cancelled().await?;
         let observation = match result.result {
             Ok(observation) => observation,
             Err(SessionError::Bus(error)) if super::bus::retryable_error(&error) => {
@@ -99,6 +100,10 @@ impl Coordinator {
             }
             Err(error) => return Err(error),
         };
+        // Preparation snapshots skip startup checks, so resuming needs a fresh observation.
+        if observation.phase == SessionPhase::Preparing && self.lifecycle.accepts_launch() {
+            return Ok(());
+        }
 
         if let Some(boot) = observation.boot {
             match boot {
