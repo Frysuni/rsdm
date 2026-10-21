@@ -3,14 +3,34 @@
 use std::{
     io,
     process::{Command, ExitStatus},
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
+
+pub(super) fn start_lock_hooks(hooks: Vec<Vec<String>>) -> Option<JoinHandle<()>> {
+    if hooks.is_empty() {
+        return None;
+    }
+    match thread::Builder::new().name("rsdm-idle-on-lock".into())
+        .spawn(move || run_hooks("on_lock", &hooks))
+    {
+        Ok(worker) => Some(worker),
+        Err(error) => {
+            tracing::warn!(%error, "could not start on_lock hook worker");
+            None
+        }
+    }
+}
 
 pub(super) fn finish_lock_cycle(
     result: io::Result<ExitStatus>,
     lock_confirmed: bool,
+    lock_hooks: Option<JoinHandle<()>>,
     on_unlock: &[Vec<String>],
 ) {
+    if lock_hooks.is_some_and(|worker| worker.join().is_err()) {
+        tracing::warn!("on_lock hook worker panicked");
+    }
     match result {
         Ok(status) if status.success() && lock_confirmed => {
             tracing::info!("idle locker exited after unlock");
@@ -68,12 +88,12 @@ mod tests {
             Ok(ExitStatus::from_raw(9)),
             Err(io::Error::other("wait failed")),
         ] {
-            finish_lock_cycle(result, true, &hooks);
+            finish_lock_cycle(result, true, None, &hooks);
             assert!(!marker.exists());
         }
-        finish_lock_cycle(Ok(ExitStatus::from_raw(0)), false, &hooks);
+        finish_lock_cycle(Ok(ExitStatus::from_raw(0)), false, None, &hooks);
         assert!(!marker.exists());
-        finish_lock_cycle(Ok(ExitStatus::from_raw(0)), true, &hooks);
+        finish_lock_cycle(Ok(ExitStatus::from_raw(0)), true, None, &hooks);
         assert!(marker.is_file());
         std::fs::remove_file(marker).unwrap();
     }

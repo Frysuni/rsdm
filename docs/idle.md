@@ -45,6 +45,9 @@ on_unlock = [["notify-send", "rsdm unlocked"]]
   termination and exit checks. A timed-out hook and its owned group receive SIGKILL,
   remaining hooks in that phase are skipped, and a later cycle can run normally.
   Keep hooks in the foreground; explicitly detached processes leave that group.
+  Slow hooks do not keep an exited locker marked active: a later idle threshold
+  can start a new lock while the previous cycle's hooks finish. Within each
+  cycle, `on_unlock` still waits for `on_lock` to finish.
 
 The daemon never unlocks on pointer movement or resume. Activity only resets
 the next idle timeout; authentication still belongs to `rsdm lock`.

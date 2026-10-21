@@ -25,7 +25,6 @@ use wayland_protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtId
 mod hooks;
 mod readiness;
 mod seats;
-use hooks::run_hooks;
 
 static SCOPE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -196,11 +195,11 @@ fn run_lock_cycle(
         }
         Ok(None) => {
             tracing::info!(pid = child.id(), "idle locker is active");
-            run_hooks("on_lock", &config.on_lock);
             true
         }
     };
 
+    let lock_hooks = hooks::start_lock_hooks(config.on_lock);
     let result = child.wait();
     if !result.as_ref().is_ok_and(|status| status.success()) {
         retry_requested.store(true, Ordering::Release);
@@ -209,7 +208,7 @@ fn run_lock_cycle(
     // The locker has already exited; hook completion must not keep the idle
     // cycle marked active and block a later lock attempt.
     drop(_reset);
-    hooks::finish_lock_cycle(result, lock_confirmed, &config.on_unlock);
+    hooks::finish_lock_cycle(result, lock_confirmed, lock_hooks, &config.on_unlock);
 }
 
 fn spawn_locker(config: &IdleConfig, config_path: PathBuf) -> Option<(Child, Option<String>, Option<UnixStream>)> {
