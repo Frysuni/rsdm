@@ -33,11 +33,12 @@ pub(super) async fn start(generation: &str, unit: &str, actions: ActionGate) -> 
     let records = runtime::blocking(move || Runtime::open(&generation)?.ok_or_else(|| SessionError::State("application generation is missing".into()))).await?;
     let runtime = records.clone();
     let name = unit.to_owned();
-    let (app, config_path, executable) = runtime::blocking(move || Ok((runtime.app(&name)?, runtime.session()?.config_path, std::env::current_exe()?))).await?;
+    let (app, config_path) = runtime::blocking(move || Ok((runtime.app(&name)?, runtime.session()?.config_path))).await?;
     if app.original_process.is_none() { return Ok(()); }
     let actions = actions.with_generation(records.clone());
     actions.check_generation_async().await?;
-    let mut command = tokio::process::Command::new(executable);
+    // Keep the running image reachable after a package update replaces its path.
+    let mut command = tokio::process::Command::new("/proc/self/exe");
     if let Some(path) = config_path { command.arg("--config").arg(path); }
     command.args(["session", "app-watch", "--generation", &records.generation, "--unit", unit]);
     command.stdin(std::process::Stdio::null());

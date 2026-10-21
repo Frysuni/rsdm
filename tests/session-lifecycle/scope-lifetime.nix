@@ -3,6 +3,9 @@
 let
   controller = import ./controller.nix { inherit pkgs; };
   python = pkgs.python3.withPackages (packages: [ packages.dbus-python ]);
+  pauseAppExec = pkgs.runCommand "pause-app-exec" { nativeBuildInputs = [ pkgs.stdenv.cc ]; } ''
+    $CC -shared -fPIC ${./pause-app-exec.c} -o $out
+  '';
   application = pkgs.writeShellScript "test-scope-lifetime-app" ''
     exec ${python}/bin/python3 ${./scope-lifetime-app.py} "$@"
   '';
@@ -12,6 +15,7 @@ in pkgs.testers.runNixOSTest {
   nodes.machine = { ... }: {
     virtualisation.memorySize = 1024;
     security.polkit.enable = true;
+    systemd.tmpfiles.rules = [ "C /run/test-lifetime/rsdm 0755 root root - ${rsdm}/bin/rsdm" ];
     users.users.alice = { isNormalUser = true; uid = 1000; group = "alice"; };
     users.groups.alice = {};
     services.getty.autologinUser = "alice";
@@ -26,7 +30,7 @@ in pkgs.testers.runNixOSTest {
     environment.variables = { WLR_BACKENDS = "headless"; WLR_RENDERER = "pixman"; };
     programs.bash.loginShellInit = ''
       if [ "$(tty)" = /dev/tty1 ] && [ -z "''${RSDM_SESSION_GENERATION:-}" ]; then
-        ${rsdm}/bin/rsdm session start -- ${pkgs.sway}/bin/sway -c /etc/rsdm-sway.conf > /tmp/rsdm-scope-session.log 2>&1
+        /run/test-lifetime/rsdm session start -- ${pkgs.sway}/bin/sway -c /etc/rsdm-sway.conf > /tmp/rsdm-scope-session.log 2>&1
         touch /tmp/rsdm-scope-session-exited
       fi
     '';
@@ -81,7 +85,12 @@ in pkgs.testers.runNixOSTest {
     assert machine.succeed(user + "systemctl --user show " + compositor + " -p MainPID -p InvocationID") == before
 
     machine.succeed("rm -f /run/user/1000/scope-app-ready /run/user/1000/scope-app-stopped /run/user/1000/scope-app-unit")
-    machine.succeed(control + "rsdm app --shutdown-method term --shutdown-timeout 3 --on-timeout cancel -- ${application} tree")
+    machine.succeed(control + "env LD_PRELOAD=${pauseAppExec} RSDM_PAUSE_APP_EXEC=1 rsdm app --shutdown-method term --shutdown-timeout 3 --on-timeout cancel -- ${application} tree")
+    machine.wait_for_file("/run/user/1000/app-exec-paused")
+    paused = machine.succeed("cat /run/user/1000/app-exec-paused").strip()
+    machine.succeed("install -m755 ${rsdm}/bin/rsdm /run/test-lifetime/rsdm.next; mv -f /run/test-lifetime/rsdm.next /run/test-lifetime/rsdm")
+    machine.succeed("readlink /proc/" + paused + "/exe | grep -F '(deleted)'")
+    machine.succeed("kill -CONT " + paused)
     machine.wait_for_file("/run/user/1000/scope-child-ready")
     machine.wait_until_succeeds("grep -q '^\\[migrated_scope\\]$' " + directory + "/apps/*.toml")
     child = int(machine.succeed("cat /run/user/1000/scope-child-ready"))
