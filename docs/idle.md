@@ -34,6 +34,8 @@ on_unlock = [["notify-send", "rsdm unlocked"]]
   It must stay in the foreground until unlock; daemonizing commands make it
   impossible for rsdm to know when the lock ends. rsdm cannot observe another
   locker's protocol state, so `on_lock` runs after the foreground process starts.
+  Arguments remain literal in both direct and service-managed launches;
+  dollar signs do not request environment-variable expansion.
 - `on_lock` and `on_unlock` are argv commands, run in order as the desktop
   user. They never invoke a shell. `on_unlock` runs only for a lock cycle whose activation reached the
   configured readiness point and whose locker exited successfully. It also runs

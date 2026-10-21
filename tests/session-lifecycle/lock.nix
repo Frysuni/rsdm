@@ -9,6 +9,9 @@ let
     fi
     exec ${rsdm}/bin/rsdm lock
   '';
+  literalLocker = pkgs.writeShellScript "test-idle-argv" ''
+    printf '%s\n' "$@" > "$XDG_RUNTIME_DIR/rsdm-idle-argv"
+  '';
 in
 pkgs.testers.runNixOSTest {
   name = "rsdm-lock-power";
@@ -61,6 +64,12 @@ pkgs.testers.runNixOSTest {
       [lock]
       enable = true
     '';
+    environment.etc."rsdm-idle-literal.toml".text = ''
+      [idle]
+      enable = true
+      timeout = 1
+      lock_command = ["${literalLocker}", "$HOME", "$$", "two words"]
+    '';
     programs.bash.loginShellInit = ''
       if [ "$(tty)" = /dev/tty1 ]; then
         sway > /tmp/rsdm-sway.log 2>&1
@@ -90,6 +99,18 @@ pkgs.testers.runNixOSTest {
     machine.screenshot("desktop-before-lock")
     desktop = Image.open(machine.out_dir / "desktop-before-lock.png").convert("RGB")
     assert desktop.getpixel((desktop.width // 2, desktop.height // 2)) == (255, 0, 255)
+
+    with subtest("service-managed Idle preserves literal locker arguments"):
+        expected = "$HOME\n$$\ntwo words\n"
+        machine.succeed(user + "${literalLocker} '$HOME' '$$' 'two words'")
+        assert machine.succeed("cat /run/user/1000/rsdm-idle-argv") == expected
+        machine.succeed("rm /run/user/1000/rsdm-idle-argv")
+        machine.send_key("spc")
+        machine.succeed(user + "systemd-run --user --unit=rsdm-test-idle-literal --collect --setenv=WAYLAND_DISPLAY=wayland-1 -- rsdm --config /etc/rsdm-idle-literal.toml idle")
+        machine.wait_for_file("/run/user/1000/rsdm-idle-argv", timeout=10)
+        machine.succeed(user + "systemctl --user stop rsdm-test-idle-literal.service")
+        actual = machine.succeed("cat /run/user/1000/rsdm-idle-argv")
+        assert actual == expected, (expected, actual)
 
     machine.succeed(user + "systemd-run --user --unit=rsdm-test-lock --collect --setenv=WAYLAND_DISPLAY=wayland-1 -- rsdm lock")
     machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: pid '")

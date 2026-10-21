@@ -1,6 +1,41 @@
 use super::*;
 
 #[test]
+fn scoped_lockers_preserve_arguments_with_old_and_new_runners() {
+    use std::{ffi::OsStr, fs, os::unix::fs::PermissionsExt};
+
+    const CHILD: &str = "RSDM_IDLE_ARGUMENT_TEST";
+    let Ok(mode) = std::env::var(CHILD) else {
+        let directory = std::env::temp_dir().join(format!("rsdm-idle-runner-{}", std::process::id()));
+        for mode in ["supported", "unsupported", "missing"] {
+            let status = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "tests::scoped_lockers_preserve_arguments_with_old_and_new_runners", "--nocapture"])
+                .env(CHILD, mode).env("INVOCATION_ID", "fixture")
+                .env("RSDM_SYSTEMD_RUN", directory.join(mode))
+                .status().unwrap();
+            assert!(status.success(), "{mode}");
+        }
+        fs::remove_dir_all(directory).unwrap();
+        return;
+    };
+    let runner = PathBuf::from(std::env::var_os("RSDM_SYSTEMD_RUN").unwrap());
+    if mode != "missing" {
+        fs::create_dir_all(runner.parent().unwrap()).unwrap();
+        fs::write(&runner, "#!/bin/sh\ntest \"$1\" = --expand-environment=no && test \"$2\" = --version || exit 9\ntest \"$RSDM_IDLE_ARGUMENT_TEST\" = supported\n").unwrap();
+        fs::set_permissions(&runner, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    let argv = ["locker", "$HOME", "$$", "two words"].map(Into::into);
+    let result = lock_command(&argv);
+    if mode == "missing" { assert!(result.is_none()); return; }
+    let (command, scope) = result.unwrap();
+    assert!(scope.is_some());
+    let arguments = command.get_args().collect::<Vec<_>>();
+    assert_eq!(arguments.contains(&OsStr::new("--expand-environment=no")), mode == "supported");
+    assert_eq!(&arguments[arguments.len() - argv.len()..], argv.iter().map(|arg| arg.as_os_str()).collect::<Vec<_>>());
+}
+
+#[test]
 fn lock_worker_guard_resets_activity() {
     let active = Arc::new(AtomicBool::new(true));
     {

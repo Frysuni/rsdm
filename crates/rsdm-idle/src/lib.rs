@@ -5,12 +5,13 @@ use std::{
     os::fd::AsRawFd,
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
-    process::{Child, Command},
+    process::{Child, Command, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result};
@@ -223,7 +224,7 @@ fn spawn_locker(config: &IdleConfig, config_path: PathBuf) -> Option<(Child, Opt
     } else {
         config.lock_command.iter().map(Into::into).collect()
     };
-    let (mut command, scope) = lock_command(&argv);
+    let (mut command, scope) = lock_command(&argv)?;
     let notification = if config.lock_command.is_empty() {
         match readiness::prepare(&mut command) {
             Ok(notification) => Some(notification),
@@ -245,25 +246,41 @@ fn spawn_locker(config: &IdleConfig, config_path: PathBuf) -> Option<(Child, Opt
 /// A service-managed idle monitor places its locker in a distinct transient
 /// scope. Stopping/restarting rsdm-idle can then use systemd's safe default
 /// KillMode=control-group without killing the session-lock owner.
-fn lock_command(argv: &[std::ffi::OsString]) -> (Command, Option<String>) {
+fn lock_command(argv: &[std::ffi::OsString]) -> Option<(Command, Option<String>)> {
     if std::env::var_os("INVOCATION_ID").is_some() {
         let sequence = SCOPE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let unit = format!("rsdm-lock-{}-{sequence}.scope", std::process::id());
         let runner = std::env::var_os("RSDM_SYSTEMD_RUN")
             .unwrap_or_else(|| std::ffi::OsString::from("systemd-run"));
+
+        // Older runners neither expand scope arguments nor support this flag.
+        let mut probe = Command::new(&runner);
+        probe.args(["--expand-environment=no", "--version"])
+            .stdout(Stdio::null()).stderr(Stdio::null());
+        let expansion_control = match rsdm_infra::unix::run_command_until(
+            &mut probe, Instant::now() + Duration::from_secs(1),
+        ) {
+            Ok(status) => status.success(),
+            Err(error) => {
+                tracing::error!(%error, "failed to check systemd-run argument expansion");
+                return None;
+            }
+        };
+
         let mut command = Command::new(runner);
+        if expansion_control { command.arg("--expand-environment=no"); }
         command
             .args(["--user", "--scope", "--quiet", "--collect", "--unit"])
             .arg(&unit)
             .arg("--");
         command.args(argv);
         command.process_group(0);
-        (command, Some(unit))
+        Some((command, Some(unit)))
     } else {
         let mut command = Command::new(&argv[0]);
         command.args(&argv[1..]);
         command.process_group(0);
-        (command, None)
+        Some((command, None))
     }
 }
 
