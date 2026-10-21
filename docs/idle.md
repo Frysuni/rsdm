@@ -27,6 +27,9 @@ on_unlock = [["notify-send", "rsdm unlocked"]]
 - An empty `lock_command` starts the current rsdm binary with `lock` and the
   same config path. This mode has a readiness handshake: `on_lock` runs only
   after the compositor confirms that the session is securely locked.
+  Confirmation uses a private inherited socket, independently of the runtime
+  file used for status and emergency unlock. A failed state-file write does
+  not make the monitor terminate an already confirmed locker.
 - A non-empty `lock_command` is an argv array, for example `["swaylock"]`.
   It must stay in the foreground until unlock; daemonizing commands make it
   impossible for rsdm to know when the lock ends. rsdm cannot observe another

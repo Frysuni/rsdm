@@ -63,7 +63,10 @@ enum Command {
     Dm,
     /// Lock the current Wayland session.
     #[command(after_help = "Examples:\n  rsdm lock\n  rsdm lock --config /etc/rsdm.toml")]
-    Lock,
+    Lock {
+        #[arg(long, hide = true)]
+        ready_fd: Option<i32>,
+    },
     /// Monitor Wayland activity and lock after the idle timeout.
     #[command(after_help = "Examples:\n  rsdm idle\n  rsdm logs --component idle --follow")]
     Idle,
@@ -148,7 +151,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
             runtime::run(async { Ok(rsdm_system::logind::request_direct(action).await?) })
         }
         Command::Dm => return run_dm(&cli.config),
-        Command::Lock => run_lock(&cli.config),
+        Command::Lock { ready_fd } => run_lock(&cli.config, ready_fd),
         Command::Idle => run_idle(&cli.config),
         Command::Unlock { user, uid } => unlock::run(user.as_deref(), uid),
         Command::Logs {
@@ -165,9 +168,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
     result.map(|()| ExitCode::SUCCESS)
 }
 
-fn run_lock(path: &Path) -> Result<()> {
+fn run_lock(path: &Path, ready_fd: Option<i32>) -> Result<()> {
     let config = load_lock_config(path)?;
-    rsdm_lock::run(&config, path).context("running the lock screen")
+    rsdm_lock::run(&config, path, ready_fd).context("running the lock screen")
 }
 
 fn run_idle(path: &Path) -> Result<()> {

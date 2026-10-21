@@ -17,6 +17,7 @@ use super::App;
 impl SessionLockHandler for App {
     fn locked(&mut self, _conn: &Connection, qh: &QueueHandle<Self>, _lock: SessionLock) {
         tracing::info!("Wayland compositor confirmed session lock");
+        crate::readiness::confirm(self.readiness.take());
         match rsdm_infra::lock_control::register_lock() {
             Ok(guard) => self.lock_state = Some(guard),
             Err(error) => tracing::error!(%error, "lock runtime state is unavailable"),

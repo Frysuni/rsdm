@@ -6,6 +6,7 @@ mod auth_helper;
 mod auth_process;
 mod auth_protocol;
 mod model;
+mod readiness;
 mod render;
 mod wayland;
 
@@ -27,7 +28,9 @@ pub fn run_auth_helper(fd: i32) -> std::process::ExitCode {
 }
 
 /// Lock every output until the seated user authenticates.
-pub fn run(config: &AppConfig, config_path: &Path) -> anyhow::Result<()> {
+pub fn run(config: &AppConfig, config_path: &Path, ready_fd: Option<i32>) -> anyhow::Result<()> {
+    let readiness = ready_fd.map(readiness::take_sender).transpose()
+        .context("adopting lock readiness descriptor")?;
     if !config.lock.enable {
         anyhow::bail!("lock screen is disabled by [lock].enable = false");
     }
@@ -37,7 +40,7 @@ pub fn run(config: &AppConfig, config_path: &Path) -> anyhow::Result<()> {
         wallpaper = ?config.lock.design.wallpaper,
         "starting lock screen"
     );
-    wayland::run(config, config_path)
+    wayland::run(config, config_path, readiness)
 }
 
 /// Paint the wallpaper/effect base and report whether a wallpaper was present.

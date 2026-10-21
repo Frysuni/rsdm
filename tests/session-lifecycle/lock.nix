@@ -189,6 +189,28 @@ pkgs.testers.runNixOSTest {
         machine.send_key("ret")
         machine.wait_until_succeeds(user + "rsdm status | grep 'active lock: none '")
 
+    with subtest("an unavailable state file cannot make Idle kill a confirmed locker"):
+        machine.succeed("mkdir /run/user/1000/rsdm/lock.toml")
+        machine.send_key("spc")
+        machine.succeed(user + "systemd-run --user --unit=rsdm-test-idle-state --collect --setenv=WAYLAND_DISPLAY=wayland-1 -- rsdm --config /etc/rsdm-idle-update.toml idle")
+        machine.wait_until_succeeds("journalctl --no-pager -b | grep 'lock runtime state is unavailable'")
+        locker = machine.succeed("pgrep -u alice -f '^/proc/[0-9]+/exe lock --config /etc/rsdm-idle-update.toml( |$)'").strip()
+        assert locker.isdecimal(), locker
+        machine.sleep(11)
+        try:
+            machine.succeed("kill -0 " + locker)
+        except Exception:
+            print(machine.succeed(user + "journalctl --user --no-pager -u rsdm-test-idle-state"))
+            raise
+        machine.succeed(user + "systemctl --user stop rsdm-test-idle-state.service")
+        machine.send_chars("test-password")
+        machine.send_key("ret")
+        machine.wait_until_fails("kill -0 " + locker)
+        machine.succeed("rmdir /run/user/1000/rsdm/lock.toml")
+        machine.screenshot("desktop-after-unpublished-lock")
+        unlocked = Image.open(machine.out_dir / "desktop-after-unpublished-lock.png").convert("RGB")
+        assert unlocked.getpixel((unlocked.width // 2, unlocked.height // 2)) == (255, 0, 255)
+
     with subtest("disabled SM with a stale generation still sends Lock power requests to logind"):
         machine.succeed("printf '[session_manager]\\nenabled = false\\n[lock]\\nenable = true\\n' > /run/rsdm-lock-disabled.toml")
         bus = "unix:path=/run/user/1000/lock-power-bus"

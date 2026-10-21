@@ -1,4 +1,6 @@
 use std::{
+    io::{self, Read},
+    os::{fd::AsRawFd, unix::{net::UnixStream, process::CommandExt}},
     process::{Child, Command, ExitStatus},
     thread,
     time::{Duration, Instant},
@@ -6,23 +8,42 @@ use std::{
 
 use anyhow::{Context, Result};
 
+pub(super) fn prepare(command: &mut Command) -> io::Result<UnixStream> {
+    let (reader, sender) = UnixStream::pair()?;
+    reader.set_nonblocking(true)?;
+    command.args(["--ready-fd", &sender.as_raw_fd().to_string()]);
+    // SAFETY: only fcntl runs after fork, on the sender kept alive by this closure.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::fcntl(sender.as_raw_fd(), libc::F_SETFD, 0) < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    Ok(reader)
+}
+
 /// `Ok(None)` means ready; `Ok(Some(status))` means it exited first.
 pub(super) fn wait_until_ready(
     child: &mut Child,
-    scope: Option<&str>,
+    notification: &mut UnixStream,
 ) -> Result<Option<ExitStatus>> {
     let deadline = Instant::now() + Duration::from_secs(10);
-    let uid = rsdm_infra::lock_control::current_uid();
     while Instant::now() < deadline {
+        let mut message = [0];
+        let received = notification.read(&mut message);
+        if matches!(received, Ok(1)) && message[0] == b'R' {
+            return Ok(None);
+        }
         if let Some(status) = child.try_wait().context("checking idle locker status")? {
             return Ok(Some(status));
         }
-        if rsdm_infra::lock_control::lock_state(uid)
-            .ok()
-            .flatten()
-            .is_some_and(|state| owns_lock(state.pid, child.id(), scope))
-        {
-            return Ok(None);
+        match received {
+            Err(error) if matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => {}
+            Err(error) => return Err(error).context("reading lock readiness notification"),
+            Ok(0) => anyhow::bail!("locker closed its readiness socket without confirmation"),
+            Ok(_) => anyhow::bail!("invalid lock readiness notification"),
         }
         thread::sleep(Duration::from_millis(50));
     }
@@ -59,56 +80,24 @@ fn kill_scope(scope: &str, deadline: Instant, command: &mut Command) -> std::io:
     rsdm_infra::unix::run_command_until(command, deadline)
 }
 
-fn owns_lock(pid: u32, child_pid: u32, scope: Option<&str>) -> bool {
-    let Some(scope) = scope else {
-        return pid == child_pid;
-    };
-    // systemd-run may supervise a different PID. Only accept a lock from the
-    // scope we started, never a manual lock that won the startup race.
-    std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
-        .is_ok_and(|cgroups| belongs_to_scope(&cgroups, scope))
-}
-
-fn belongs_to_scope(cgroups: &str, scope: &str) -> bool {
-    cgroups.lines().any(|line| {
-        let mut fields = line.splitn(3, ':');
-        let (Some(hierarchy), Some(controllers), Some(path)) =
-            (fields.next(), fields.next(), fields.next())
-        else {
-            return false;
-        };
-        let systemd = (hierarchy == "0" && controllers.is_empty())
-            || controllers.split(',').any(|name| name == "name=systemd");
-        systemd && path.split('/').any(|component| component == scope)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::{BufRead, BufReader, Read}, os::{fd::OwnedFd, unix::{net::UnixStream, process::CommandExt}}};
+    use std::{io::{BufRead, BufReader, Write}, os::fd::OwnedFd};
 
     #[test]
-    fn readiness_rejects_another_lock_process() {
-        assert!(owns_lock(42, 42, None));
-        assert!(!owns_lock(43, 42, None));
-        let scope = "rsdm-lock-42-1.scope";
-        assert!(belongs_to_scope(
-            "0::/user.slice/user-1000.slice/app.slice/rsdm-lock-42-1.scope",
-            scope
-        ));
-        assert!(belongs_to_scope(
-            "1:name=systemd:/user.slice/rsdm-lock-42-1.scope/child",
-            scope
-        ));
-        for cgroups in [
-            "0::/user.slice/app-manual-lock.scope",
-            "0::/user.slice/rsdm-lock-42-10.scope",
-            "0::/user.slice/prefix-rsdm-lock-42-1.scope",
-            "2:memory:/user.slice/rsdm-lock-42-1.scope",
-            "malformed",
-        ] {
-            assert!(!belongs_to_scope(cgroups, scope), "{cgroups}");
+    fn readiness_requires_confirmation_from_the_private_socket() {
+        for message in [b"R".as_slice(), b"X".as_slice(), b"".as_slice()] {
+            let (mut reader, mut sender) = UnixStream::pair().unwrap();
+            reader.set_nonblocking(true).unwrap();
+            sender.write_all(message).unwrap();
+            drop(sender);
+            let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+            let result = wait_until_ready(&mut child, &mut reader);
+            child.kill().unwrap();
+            child.wait().unwrap();
+            if message == b"R" { assert!(matches!(result, Ok(None))); }
+            else { assert!(result.is_err()); }
         }
     }
 

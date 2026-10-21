@@ -121,9 +121,10 @@ struct App {
     exit: bool,
     unlocked: bool,
     lock_state: Option<rsdm_infra::lock_control::LockStateGuard>,
+    readiness: Option<std::os::unix::net::UnixStream>,
 }
 
-pub fn run(config: &AppConfig, config_path: &Path) -> Result<()> {
+pub fn run(config: &AppConfig, config_path: &Path, readiness: Option<std::os::unix::net::UnixStream>) -> Result<()> {
     rsdm_infra::unix::install_emergency_unlock_handler();
     let context = build_context(config, config_path)?;
     let mut menu = Menu::new();
@@ -172,6 +173,7 @@ pub fn run(config: &AppConfig, config_path: &Path) -> Result<()> {
         exit: false,
         unlocked: false,
         lock_state: None,
+        readiness,
     };
 
     let lock = app

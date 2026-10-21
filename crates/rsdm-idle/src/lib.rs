@@ -3,6 +3,7 @@
 use std::{
     os::unix::process::CommandExt,
     os::fd::AsRawFd,
+    os::unix::net::UnixStream,
     path::{Path, PathBuf},
     process::{Child, Command},
     sync::{
@@ -169,12 +170,12 @@ fn run_lock_cycle(
 ) {
     let _reset = ResetActive(active);
 
-    let Some((mut child, scope)) = spawn_locker(&config, config_path) else {
+    let Some((mut child, scope, mut notification)) = spawn_locker(&config, config_path) else {
         retry_requested.store(true, Ordering::Release);
         return;
     };
-    let ready = if config.lock_command.is_empty() {
-        readiness::wait_until_ready(&mut child, scope.as_deref())
+    let ready = if let Some(notification) = &mut notification {
+        readiness::wait_until_ready(&mut child, notification)
     } else {
         // A custom locker has no rsdm readiness handshake. Starting it is the
         // strongest guarantee available, and this limitation is documented.
@@ -210,7 +211,7 @@ fn run_lock_cycle(
     hooks::finish_lock_cycle(result, lock_confirmed, &config.on_unlock);
 }
 
-fn spawn_locker(config: &IdleConfig, config_path: PathBuf) -> Option<(Child, Option<String>)> {
+fn spawn_locker(config: &IdleConfig, config_path: PathBuf) -> Option<(Child, Option<String>, Option<UnixStream>)> {
     let argv = if config.lock_command.is_empty() {
         // An explicit PID keeps the running inode reachable through systemd-run.
         vec![
@@ -223,8 +224,17 @@ fn spawn_locker(config: &IdleConfig, config_path: PathBuf) -> Option<(Child, Opt
         config.lock_command.iter().map(Into::into).collect()
     };
     let (mut command, scope) = lock_command(&argv);
+    let notification = if config.lock_command.is_empty() {
+        match readiness::prepare(&mut command) {
+            Ok(notification) => Some(notification),
+            Err(error) => {
+                tracing::error!(%error, "failed to prepare lock readiness notification");
+                return None;
+            }
+        }
+    } else { None };
     match command.spawn() {
-        Ok(child) => Some((child, scope)),
+        Ok(child) => Some((child, scope, notification)),
         Err(error) => {
             tracing::error!(%error, command = ?config.lock_command, "failed to start idle locker");
             None
