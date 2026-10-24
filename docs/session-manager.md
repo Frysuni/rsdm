@@ -802,6 +802,10 @@ may be retried after outstanding work finishes. Slots remain held through
 queued/worker work and replies, including when a caller disconnects. Stop
 acknowledgements retain their slot until the coordinator receives them.
 
+XSMP stop hooks retry explicit admission refusals within the existing request
+timeout and shared shutdown deadline. Accepted requests and ambiguous transport
+failures are never replayed.
+
 `org.rsdm.Session1.Handshake` returns the generation after checking the caller's
 bus credentials, live process and logind session. A process without a logind
 session must belong to a live user service or scope, with pinned process and

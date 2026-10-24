@@ -81,9 +81,18 @@ pub(super) async fn prepare_xsmp(
         let connection = manager.connection();
         let proxy = zbus::Proxy::new(&connection, crate::control::BUS_NAME,
             crate::control::OBJECT_PATH, crate::control::BUS_NAME).await?;
-        if control.cancelled() { return Ok(Vec::new()); }
-        let selected = proxy.call("XsmpPrepare", &(&runtime.generation, control.transaction_id.as_deref().unwrap_or(""), units, !control.noncancelable.load(Ordering::SeqCst))).await?;
-        Ok::<Vec<String>, SessionError>(selected)
+        let timeout = connection.method_timeout().unwrap_or(Duration::from_secs(5));
+        let selected = tokio::time::timeout(timeout, async {
+            loop {
+                if control.cancelled() { return Ok(Vec::new()); }
+                let result: zbus::Result<Vec<String>> = proxy.call("XsmpPrepare", &(&runtime.generation, control.transaction_id.as_deref().unwrap_or(""), units, !control.noncancelable.load(Ordering::SeqCst))).await;
+                match result {
+                    Err(error) if crate::control::request_refused(&error) => tokio::time::sleep(Duration::from_millis(50)).await,
+                    result => return result,
+                }
+            }
+        }).await.map_err(|_| zbus::Error::from(zbus::fdo::Error::TimedOut("session coordinator request timed out".into())))?;
+        selected.map_err(SessionError::from)
     })).await?
 }
 

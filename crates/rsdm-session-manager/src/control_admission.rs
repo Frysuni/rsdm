@@ -8,6 +8,9 @@ pub(crate) const MAX_REGULAR_REQUESTS: usize = 64;
 const MAX_STOP_REQUESTS: usize = 4;
 const MAX_CANCEL_REQUESTS: usize = 2;
 const MAX_XSMP_REQUESTS: usize = 2;
+pub(super) const BUSY: &str = "session coordinator is busy; retry the request";
+pub(super) const AUTHORIZATION_BUSY: &str = "session authorization is busy; retry the request";
+pub(super) const QUEUE_FULL: &str = "session coordinator queue is full";
 pub(super) const QUEUE_CAPACITY: usize = MAX_REGULAR_REQUESTS
     + MAX_STOP_REQUESTS + MAX_CANCEL_REQUESTS + MAX_XSMP_REQUESTS;
 
@@ -60,11 +63,16 @@ impl Admission {
         pending.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
             if count >= limit { return None; }
             Some(count + 1)
-        }).map_err(|_| zbus::fdo::Error::LimitsExceeded("session coordinator is busy; retry the request".into()))?;
+        }).map_err(|_| zbus::fdo::Error::LimitsExceeded(BUSY.into()))?;
         let permit = Arc::new(Permit { pending: pending.clone() });
         self.check_open()?;
         Ok(permit)
     }
+}
+
+pub(crate) fn request_refused(error: &zbus::Error) -> bool {
+    matches!(error, zbus::Error::FDO(error) if matches!(&**error,
+        zbus::fdo::Error::LimitsExceeded(message) if matches!(message.as_str(), BUSY | AUTHORIZATION_BUSY | QUEUE_FULL)))
 }
 
 pub(crate) struct Permit {

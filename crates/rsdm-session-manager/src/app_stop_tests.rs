@@ -10,6 +10,9 @@ use super::*;
 #[cfg(feature = "xsmp")]
 #[path = "app_stop_batch_tests.rs"]
 mod batch;
+#[cfg(feature = "xsmp")]
+#[path = "app_stop_admission_tests.rs"]
+mod admission;
 use rsdm_core::domain::ShutdownPolicy;
 use zbus::OwnedObjectPath;
 

@@ -65,7 +65,7 @@ impl StopOutcome {
 #[path = "control_admission.rs"]
 mod admission;
 use admission::{Admission, Class, Permit};
-pub(super) use admission::Reply;
+pub(super) use admission::{Reply, request_refused};
 
 pub(super) enum Request {
     Launch(LaunchRequest, Reply<String>),
@@ -114,7 +114,7 @@ impl Endpoint {
         let (sender, mut result) = mpsc::channel(1);
         let reply = Reply::new(sender, permit.clone());
         self.requests.try_send(make_request(reply)).map_err(|error| match error {
-            TrySendError::Full(_) => zbus::fdo::Error::LimitsExceeded("session coordinator queue is full".into()),
+            TrySendError::Full(_) => zbus::fdo::Error::LimitsExceeded(admission::QUEUE_FULL.into()),
             TrySendError::Closed(_) => zbus::fdo::Error::Failed("session coordinator stopped".into()),
         })?;
         let outcome = result.recv().await
@@ -125,7 +125,7 @@ impl Endpoint {
 
     async fn authorize(&self, connection: &Connection, header: &Header<'_>) -> zbus::fdo::Result<String> {
         let _slot = self.authorization_slots.try_acquire()
-            .map_err(|_| zbus::fdo::Error::LimitsExceeded("session authorization is busy; retry the request".into()))?;
+            .map_err(|_| zbus::fdo::Error::LimitsExceeded(admission::AUTHORIZATION_BUSY.into()))?;
         let verified = tokio::select! {
             biased;
             _ = self.admission.wait_closed() => return Err(zbus::fdo::Error::Failed("session manager is disabled".into())),
