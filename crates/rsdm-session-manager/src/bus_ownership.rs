@@ -9,6 +9,17 @@ pub(super) struct UnitOwner {
 }
 
 impl UserManager {
+    pub async fn retain(&self, unit: &str, invocation: &[u8]) -> Result<(), SessionError> {
+        let mut reference = self.transport.stage_reference(unit, None);
+        self.transport.remember(unit, invocation);
+        self.with_owner(unit, invocation).request(async {
+            let proxy = self.proxy().await?;
+            reference.submitted();
+            proxy.call::<_, _, ()>("RefUnit", &(unit,)).await
+        }).await?;
+        Ok(())
+    }
+
     pub(crate) fn with_owner(&self, unit: &str, invocation: &[u8]) -> Self {
         let mut manager = self.clone();
         manager.owner = Some(UnitOwner { unit: unit.into(), invocation: invocation.into() });

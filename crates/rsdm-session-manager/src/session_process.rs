@@ -15,6 +15,7 @@ pub(super) struct SessionProcess {
     pub(super) submitted: Arc<std::sync::atomic::AtomicBool>,
     pub booting: bool,
     child_exit: Option<i32>,
+    pub(super) unit_exit: Option<i32>,
     native_unit_seen: bool,
     launched: std::time::Instant,
 }
@@ -30,40 +31,41 @@ impl SessionProcess {
     ) -> Result<Self, SessionError> {
         if provider.kind == ProviderKind::Managed {
             return Ok(Self { unit: Some(managed_unit), invocation: Vec::new(), child: None, compositor: Default::default(), submitted: Default::default(), booting: true,
-                child_exit: None, native_unit_seen: false, launched: std::time::Instant::now() });
+                child_exit: None, unit_exit: None, native_unit_seen: false, launched: std::time::Instant::now() });
         }
         let child = Command::new(argv.first().ok_or(SessionError::EmptyCommand)?)
             .args(&argv[1..]).env_clear().envs(environment.iter().map(|(key, value)| (key, value)))
             .current_dir(directory).spawn().map_err(SessionError::Spawn)?;
         Ok(Self { unit: provider.native_unit.clone(), invocation: Vec::new(), child: Some(Arc::new(tokio::sync::Mutex::new(child))), compositor: Default::default(), submitted: Default::default(), booting: false,
-            child_exit: None, native_unit_seen: false, launched: std::time::Instant::now() })
+            child_exit: None, unit_exit: None, native_unit_seen: false, launched: std::time::Instant::now() })
     }
 
     pub async fn exited(&mut self, manager: &UserManager) -> Result<Option<i32>, SessionError> {
         if self.booting { return Ok(None); }
+        if self.unit_exit.is_some() { return Ok(self.unit_exit); }
         if let Some(child) = &self.child {
             let mut child = child.lock().await;
             if self.child_exit.is_none() { self.child_exit = child.try_wait().map_err(SessionError::Wait)?.map(exit_status_code); }
-            let Some(unit) = &self.unit else { return Ok(self.child_exit); };
-            if manager.active(unit).await? {
-                self.native_unit_seen = true;
-                if self.invocation.is_empty() { self.invocation = manager.invocation_id(unit).await?; }
-                self.pin_compositor(manager, unit).await?;
-                return Ok(None);
-            }
-            if self.native_unit_seen || self.launched.elapsed() > Duration::from_secs(10) {
-                return Ok(self.child_exit.or_else(|| self.native_unit_seen.then_some(0)));
-            }
-            return Ok(None);
         }
-        let Some(unit) = &self.unit else { return Ok(None); };
+        let Some(unit) = &self.unit else { return Ok(self.child_exit); };
         if manager.active(unit).await? {
+            if self.child.is_some() && !self.native_unit_seen {
+                self.invocation = manager.invocation_id(unit).await?;
+                // RefUnit counts calls per peer; never replay an uncertain reply.
+                self.native_unit_seen = true;
+                manager.retain(unit, &self.invocation).await?;
+            }
             self.pin_compositor(manager, unit).await?;
             return Ok(None);
         }
-        let code: i32 = manager.unit_property(unit, "org.freedesktop.systemd1.Service", "ExecMainCode").await?;
-        let status: i32 = manager.unit_property(unit, "org.freedesktop.systemd1.Service", "ExecMainStatus").await?;
-        Ok(Some(if code == libc::CLD_EXITED { status } else { 128 + status }))
+        if self.child.is_some() && !self.native_unit_seen {
+            return Ok(if self.launched.elapsed() > Duration::from_secs(10) { self.child_exit } else { None });
+        }
+
+        self.unit_exit = manager.read(|| async {
+            super::session_exit::read(&manager.connection(), unit, &self.invocation).await
+        }).await?.map(|code| if code == 0 { self.child_exit.unwrap_or(0) } else { code });
+        Ok(self.unit_exit)
     }
 
     async fn pin_compositor(&self, manager: &UserManager, unit: &str) -> Result<(), SessionError> {
@@ -99,7 +101,9 @@ impl SessionProcess {
                     self.invocation = super::processes::generation_invocation(manager, unit, generation).await?.unwrap_or_default();
                 }
                 super::processes::stop_invocation(manager, unit, &self.invocation).await?;
-                if provider.kind == ProviderKind::Managed { manager.with_owner(unit, &self.invocation).unref(unit).await?; }
+                if provider.kind == ProviderKind::Managed || self.native_unit_seen {
+                    manager.with_owner(unit, &self.invocation).unref(unit).await?;
+                }
                 Ok(())
             }.await;
             if let Err(error) = result { failure = Some(error); }

@@ -37,7 +37,7 @@ pub(super) async fn start(
             }
             manager.actions.check().map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
             reference = if new_unit && properties.iter().any(|(name, value)| *name == "AddRef" && matches!(value, Variant::Bool(true))) {
-                generation.as_ref().map(|generation| manager.transport.stage_reference(unit, generation.clone()))
+                generation.as_ref().map(|generation| manager.transport.stage_reference(unit, Some(generation.clone())))
             } else { None };
             if let Some(reference) = &mut reference { reference.submitted(); }
             submitted.store(true, Ordering::Relaxed);

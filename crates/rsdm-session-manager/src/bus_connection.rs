@@ -26,7 +26,7 @@ impl Drop for ConnectionGuard {
 
 #[derive(Clone)]
 struct Reference {
-    generation: String,
+    generation: Option<String>,
     invocation: Option<Vec<u8>>,
     pending: usize,
     retained: bool,
@@ -34,7 +34,7 @@ struct Reference {
 }
 
 impl Reference {
-    fn new(generation: String) -> Self {
+    fn new(generation: Option<String>) -> Self {
         Self { generation, invocation: None, pending: 0, retained: false, claim: Arc::new(()) }
     }
 }
@@ -91,7 +91,7 @@ impl Transport {
         self.0.lock().unwrap().references.contains_key(unit)
     }
 
-    pub fn stage_reference(&self, unit: &str, generation: String) -> ReferenceIntent {
+    pub fn stage_reference(&self, unit: &str, generation: Option<String>) -> ReferenceIntent {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         let epoch = state.epoch;
         let reference = state.references.entry(unit.into()).or_insert_with(|| Reference::new(generation));
@@ -259,12 +259,15 @@ async fn restore_reference(connection: &Connection, unit: &str, reference: &Refe
         .interface("org.freedesktop.systemd1.Unit").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
     let id: Vec<u8> = proxy.get_property("InvocationID").await?;
     if id.iter().all(|byte| *byte == 0) || reference.invocation.as_ref().is_some_and(|expected| *expected != id)
-        || proxy.get_property::<String>("Id").await? != unit || !proxy.get_property::<bool>("Transient").await?
+        || proxy.get_property::<String>("Id").await? != unit
     { return Ok(()); }
-    let service = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination(DESTINATION).path(path)
-        .interface("org.freedesktop.systemd1.Service").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
-    let environment: Vec<String> = service.get_property("Environment").await?;
-    if !environment.contains(&format!("RSDM_SESSION_GENERATION={}", reference.generation)) { return Ok(()); }
+    if let Some(generation) = &reference.generation {
+        if !proxy.get_property::<bool>("Transient").await? { return Ok(()); }
+        let service = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination(DESTINATION).path(path)
+            .interface("org.freedesktop.systemd1.Service").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+        let environment: Vec<String> = service.get_property("Environment").await?;
+        if !environment.contains(&format!("RSDM_SESSION_GENERATION={generation}")) { return Ok(()); }
+    } else if reference.invocation.is_none() { return Ok(()); }
 
     manager.call::<_, _, ()>("RefUnit", &(unit,)).await?;
     if proxy.get_property::<Vec<u8>>("InvocationID").await? != id {

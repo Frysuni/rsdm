@@ -47,30 +47,23 @@ pub(super) async fn wait(process: SessionProcess, record: &SessionRecord, provid
 }
 
 async fn finish(process: &SessionProcess, record: &SessionRecord, connection: Option<&Connection>) -> Result<i32, SessionError> {
-    if process.child.is_some() { return finish_child(process).await; }
+    if process.unit.is_none() { return finish_child(process).await; }
+    if let Some(code) = process.unit_exit {
+        return if code == 0 && process.child.is_some() { finish_child(process).await } else { Ok(code) };
+    }
     let unit = process.unit.as_ref().ok_or_else(|| SessionError::State("launcher has no process or compositor unit".into()))?;
     let connection = connection.ok_or_else(|| SessionError::State("compositor exited but its status cannot be read".into()))?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    let invocation = if process.invocation.is_empty() { &record.compositor_invocation } else { &process.invocation };
+    let code = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let reply = connection.call_method(Some(DESTINATION), "/org/freedesktop/systemd1",
-                Some("org.freedesktop.systemd1.Manager"), "GetUnit", &(unit,)).await?;
-            let path: OwnedObjectPath = reply.body().deserialize()?;
-            let id: Vec<u8> = property(connection, &path, UNIT, "InvocationID").await?;
-            if id.iter().any(|byte| *byte != 0) && id != record.compositor_invocation {
-                return Err(SessionError::State("compositor exit status belongs to another invocation".into()));
-            }
-            let state: String = property(connection, &path, UNIT, "ActiveState").await?;
-            if matches!(state.as_str(), "inactive" | "failed") {
-                let code: i32 = property(connection, &path, SERVICE, "ExecMainCode").await?;
-                let status: i32 = property(connection, &path, SERVICE, "ExecMainStatus").await?;
-                if property::<Vec<u8>>(connection, &path, UNIT, "InvocationID").await? != id {
-                    return Err(SessionError::State("compositor invocation changed while its exit status was read".into()));
-                }
-                return Ok(if code == libc::CLD_EXITED { status } else { 128 + status });
+            if let Some(code) = super::session_exit::read(connection, unit, invocation).await? {
+                return Ok::<_, SessionError>(code);
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-    }).await.map_err(|_| SessionError::State("compositor exited but its status remains unconfirmed".into()))?
+    }).await.map_err(|_| SessionError::State("compositor exited but its status remains unconfirmed".into()))??;
+    if code == 0 && process.child.is_some() { return finish_child(process).await; }
+    Ok(code)
 }
 
 async fn finish_child(process: &SessionProcess) -> Result<i32, SessionError> {

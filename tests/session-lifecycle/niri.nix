@@ -134,5 +134,6 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_fails(user + "systemctl --user is-active --quiet niri.service")
         machine.wait_for_file("/tmp/rsdm-niri-exited")
   '' + (import ./niri-hot-disable.nix { inherit application; })
-     + (import ./niri-bare.nix { inherit (windows) command; });
+     + (import ./niri-bare.nix { inherit (windows) command; })
+     + (import ./niri-crash.nix);
 }

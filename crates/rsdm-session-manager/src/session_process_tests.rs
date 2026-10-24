@@ -4,6 +4,9 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::*;
 
+#[path = "session_process_exit_tests.rs"]
+mod exit;
+
 struct Launcher(Child);
 
 impl Launcher {

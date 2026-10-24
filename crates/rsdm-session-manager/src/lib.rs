@@ -65,6 +65,7 @@ mod runtime;
 mod runtime_deadline;
 mod session_lease;
 mod session_process;
+mod session_exit;
 mod session_wait;
 mod shutdown_transaction;
 mod signals;

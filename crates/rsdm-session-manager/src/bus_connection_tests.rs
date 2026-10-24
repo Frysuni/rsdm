@@ -90,10 +90,24 @@ fn state() -> UnitState {
 #[tokio::test]
 async fn reconnect_restores_a_reference_to_the_original_owned_invocation() {
     let (connection, _server, state) = fixture(state()).await;
-    let reference = Reference { invocation: Some(vec![1; 16]), ..Reference::new("ours".into()) };
+    let reference = Reference { invocation: Some(vec![1; 16]), ..Reference::new(Some("ours".into())) };
     restore_reference(&connection, "example.service", &reference).await.unwrap();
     assert_eq!(state.refs.load(Ordering::SeqCst), 1);
     assert_eq!(state.unrefs.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn reconnect_restores_only_the_pinned_native_invocation_without_transient_environment() {
+    for invocation in [Some(vec![1; 16]), Some(vec![2; 16]), None] {
+        let mut initial = state();
+        initial.transient = false;
+        initial.generation = "unrelated";
+        let (connection, _server, state) = fixture(initial).await;
+        let expected = usize::from(invocation == Some(vec![1; 16]));
+        let reference = Reference { invocation, ..Reference::new(None) };
+        restore_reference(&connection, "example.service", &reference).await.unwrap();
+        assert_eq!(state.refs.load(Ordering::SeqCst), expected);
+    }
 }
 
 #[tokio::test]
@@ -107,7 +121,7 @@ async fn foreign_replaced_unstarted_and_non_transient_units_are_never_referenced
             _ => initial.transient = false,
         }
         let (connection, _server, state) = fixture(initial).await;
-        let reference = Reference { invocation: Some(vec![1; 16]), ..Reference::new("ours".into()) };
+        let reference = Reference { invocation: Some(vec![1; 16]), ..Reference::new(Some("ours".into())) };
         restore_reference(&connection, "example.service", &reference).await.unwrap();
         assert_eq!(state.refs.load(Ordering::SeqCst), 0);
     }
@@ -118,7 +132,7 @@ async fn an_invocation_replaced_during_ref_unit_is_immediately_unreferenced() {
     let mut initial = state();
     initial.replaced = true;
     let (connection, _server, state) = fixture(initial).await;
-    let reference = Reference { invocation: Some(vec![1; 16]), ..Reference::new("ours".into()) };
+    let reference = Reference { invocation: Some(vec![1; 16]), ..Reference::new(Some("ours".into())) };
     restore_reference(&connection, "example.service", &reference).await.unwrap();
     assert_eq!(state.refs.load(Ordering::SeqCst), 1);
     assert_eq!(state.unrefs.load(Ordering::SeqCst), 1);
@@ -129,7 +143,7 @@ async fn cloned_workers_keep_the_original_reference_identity_and_share_release()
     let (connection, _server, _) = fixture(state()).await;
     let owner = Transport::new(connection);
     let worker = owner.clone();
-    owner.stage_reference("example.service", "ours".into()).submitted();
+    owner.stage_reference("example.service", Some("ours".into())).submitted();
     worker.remember("example.service", &[1; 16]);
     owner.remember("example.service", &[2; 16]);
     assert_eq!(worker.0.lock().unwrap().references["example.service"].invocation, Some(vec![1; 16]));
@@ -147,7 +161,7 @@ fn manager_reexec_does_not_require_replacing_a_live_bus_connection() {
 async fn slow_restoration_does_not_lock_state_or_publish_a_forgotten_reference() {
     let (original, _original_server, _) = fixture(state()).await;
     let owner = Transport::new(original);
-    owner.stage_reference("example.service", "ours".into()).submitted();
+    owner.stage_reference("example.service", Some("ours".into())).submitted();
     owner.remember("example.service", &[1; 16]);
     let ready = Arc::new(tokio::sync::Notify::new());
     let resume = Arc::new(tokio::sync::Notify::new());
@@ -180,7 +194,7 @@ async fn reference_restoration_uses_bounded_parallel_batches() {
     let (connection, _server, state) = fixture(initial).await;
     let transport = Transport::new(connection.clone());
     let references: Vec<_> = (0..24)
-        .map(|_| ("example.service".to_string(), Reference { invocation: Some(vec![1; 16]), ..Reference::new("ours".into()) }))
+        .map(|_| ("example.service".to_string(), Reference { invocation: Some(vec![1; 16]), ..Reference::new(Some("ours".into())) }))
         .collect();
     let entries: Vec<_> = references.iter().map(|(unit, reference)| (unit, reference)).collect();
     for batch in entries.chunks(REFERENCE_RESTORE_BATCH) {

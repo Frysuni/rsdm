@@ -193,6 +193,11 @@ binds {
 
 RSDM does not rewrite WM configs. Direct compositor quit, compositor crash,
 SIGKILL and power loss can remove the display before applications finish saving.
+For a recorded compositor service, RSDM reports the terminal result of its
+captured systemd InvocationID, including failures when the native launcher
+exits successfully. A user-bus reference retains native service status through
+cleanup; active management and detached observation use the same result checks.
+Successful cleanup does not turn a compositor crash into a successful session.
 
 ## Registering applications
 
