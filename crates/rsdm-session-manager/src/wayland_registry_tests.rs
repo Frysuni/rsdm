@@ -15,7 +15,7 @@ pub(crate) fn advertisement(id: u32, interface: &str, version: u32) -> Vec<u8> {
     body.extend_from_slice(&(interface.len() as u32 + 1).to_ne_bytes());
     body.extend_from_slice(interface.as_bytes());
     body.push(0);
-    while body.len() % 4 != 0 { body.push(0xff); }
+    while !body.len().is_multiple_of(4) { body.push(0xff); }
     body.extend_from_slice(&version.to_ne_bytes());
     event(2, 0, &body)
 }

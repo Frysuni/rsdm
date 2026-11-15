@@ -2,8 +2,7 @@ use std::{fs, os::unix::fs::PermissionsExt, sync::atomic::Ordering};
 
 use super::*;
 
-#[path = "window_dispatch_fixture.rs"]
-mod fixture;
+use crate::window_dispatch_fixture as fixture;
 
 #[path = "app_scope_process_tests.rs"]
 mod children;

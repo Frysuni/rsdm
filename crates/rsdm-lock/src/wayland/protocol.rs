@@ -23,7 +23,6 @@ impl SessionLockHandler for App {
             Err(error) => tracing::error!(%error, "lock runtime state is unavailable"),
         }
         self.choose_primary_output();
-        self.power_off_secondary_outputs();
         self.create_surfaces(qh);
         self.needs_redraw = true;
     }

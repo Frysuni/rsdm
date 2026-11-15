@@ -9,7 +9,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use rsdm_core::{
     domain::{AppConfig, Session},
-    ports::{LoginUi, LoginUiEvent, LoginUiModel, UserStore},
+    ports::{LoginAttemptOutcome, LoginUi, LoginUiEvent, LoginUiModel, UserStore},
 };
 use rsdm_infra::{
     security::MemoryLoginAttemptLimiter,
@@ -88,16 +88,21 @@ fn run_greeter_loop(
                 terminate: terminate_flag(),
             },
             &mut |attempt, conversation| {
-                login::begin(
+                match login::begin(
                     &config,
                     &mut vt,
                     &wrapper,
                     &limiter,
                     &sessions,
-                    &mut parked,
                     attempt,
                     conversation,
-                )
+                ) {
+                    Ok(session) => {
+                        parked = Some(session);
+                        LoginAttemptOutcome::SessionReady
+                    }
+                    Err(outcome) => outcome,
+                }
             },
         )?;
 

@@ -88,7 +88,6 @@ impl OutputHandler for App {
         tracing::debug!("Wayland output added");
         if self.session_lock.is_some() {
             self.choose_primary_output();
-            self.power_off_secondary_outputs();
             self.create_surfaces(qh);
             self.needs_redraw = true;
         }
@@ -96,7 +95,6 @@ impl OutputHandler for App {
 
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {
         self.choose_primary_output();
-        self.power_off_secondary_outputs();
         self.needs_redraw = true;
     }
 
@@ -110,7 +108,6 @@ impl OutputHandler for App {
         self.surfaces.retain(|surface| surface.output != output);
         if self.primary_output.as_ref() == Some(&output) {
             self.choose_primary_output();
-            self.power_off_secondary_outputs();
             self.needs_redraw = true;
         }
     }

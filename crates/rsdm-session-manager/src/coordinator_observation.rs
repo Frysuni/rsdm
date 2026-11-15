@@ -7,29 +7,36 @@ use rsdm_core::domain::SessionPhase;
 use super::{
     SessionError,
     coordinator::{Coordinator, Work},
-    coordinator_probe::{ObservationResult, BootCheck, observe_external},
+    coordinator_probe::{ObservationResult, ObservationState, BootCheck, observe_external},
     processes::monotonic_usec,
     provider::ProviderKind,
 };
 
 impl Coordinator {
+    fn observation_state(&self) -> ObservationState {
+        ObservationState {
+            reaped_apps: self.lifecycle.phase == SessionPhase::Running
+                && self.last_reap.elapsed() >= Duration::from_secs(1),
+            phase: self.lifecycle.phase,
+            ready_once: self.ready_once,
+            ready_busy: self.ready_busy,
+            ready_deadline: self.ready_deadline,
+            pending_boot: self.pending_boot,
+            pending_ready: self.pending_ready,
+            anchor_unit: self.record.anchor_unit.clone(),
+        }
+    }
+
     #[cfg(test)]
     pub async fn observe(&mut self) -> Result<(), SessionError> {
+        let state = self.observation_state();
         let process = self.process.take();
         let result = observe_external(
             &self.manager,
             &self.runtime,
             &self.provider,
             process,
-            self.lifecycle.phase == SessionPhase::Running
-                && self.last_reap.elapsed() >= Duration::from_secs(1),
-            self.lifecycle.phase,
-            self.ready_once,
-            self.ready_busy,
-            self.ready_deadline,
-            self.pending_boot,
-            self.pending_ready,
-            &self.record.anchor_unit,
+            state,
         ).await;
         self.observation_completed(result).await
     }
@@ -49,19 +56,11 @@ impl Coordinator {
             return;
         }
 
-        let reaped_apps = self.lifecycle.phase == SessionPhase::Running
-            && self.last_reap.elapsed() >= Duration::from_secs(1);
+        let state = self.observation_state();
         let process = self.process.take();
         let manager = self.manager.clone();
         let runtime = self.runtime.clone();
         let provider = self.provider.clone();
-        let phase = self.lifecycle.phase;
-        let ready_once = self.ready_once;
-        let ready_busy = self.ready_busy;
-        let ready_deadline = self.ready_deadline;
-        let pending_boot = self.pending_boot;
-        let pending_ready = self.pending_ready;
-        let anchor_unit = self.record.anchor_unit.clone();
         let events = self.events.clone();
         self.observation_busy = true;
         self.workers += 1;
@@ -72,14 +71,7 @@ impl Coordinator {
                 &runtime,
                 &provider,
                 process,
-                reaped_apps,
-                phase,
-                ready_once,
-                ready_busy,
-                ready_deadline,
-                pending_boot,
-                pending_ready,
-                &anchor_unit,
+                state,
             ).await;
             let _ = events.send(Work::Observed(result));
         });

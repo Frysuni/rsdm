@@ -56,9 +56,8 @@ fn query_user_unit_state(unit: &str) -> io::Result<String> {
     // ActiveState is a short scalar. Inherited stdout must not hold the report
     // open after systemctl exits, and unexpected output must stay bounded.
     let mut bytes = Vec::new();
-    if let Err(error) = reader.take(256).read_to_end(&mut bytes) {
-        if error.kind() != io::ErrorKind::WouldBlock { return Err(error); }
-    }
+    if let Err(error) = reader.take(256).read_to_end(&mut bytes)
+        && error.kind() != io::ErrorKind::WouldBlock { return Err(error); }
     Ok(String::from_utf8_lossy(&bytes).trim().to_string())
 }
 

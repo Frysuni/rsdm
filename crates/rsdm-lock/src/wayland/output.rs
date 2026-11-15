@@ -7,7 +7,6 @@ impl App {
     pub(super) fn choose_primary_output(&mut self) {
         let outputs: Vec<_> = self.output_state.outputs().collect();
         if outputs.is_empty() {
-            self.restore_secondary_outputs();
             self.primary_output = None;
             return;
         }
@@ -47,7 +46,6 @@ impl App {
             .map(|output| self.output_name(output))
             .unwrap_or_else(|| "<none>".to_string());
         tracing::info!(output = %name, "selected primary lock output");
-        self.restore_secondary_outputs();
         self.primary_output = selected;
     }
 
@@ -65,29 +63,8 @@ impl App {
             .unwrap_or(120)
     }
 
-    pub(super) fn power_off_secondary_outputs(&mut self) {
-        if self.ctx.secondary_output != SecondaryOutput::Off {
-            return;
-        }
-        if !self
-            .session_lock
-            .as_ref()
-            .is_some_and(|lock| lock.is_locked())
-        {
-            return;
-        }
-    }
-
-    pub(super) fn restore_secondary_outputs(&mut self) {
-    }
-
     pub(super) fn apply_secondary_output_policy(&mut self, policy: SecondaryOutput) {
         self.ctx.secondary_output = policy;
-        if policy == SecondaryOutput::Off {
-            self.power_off_secondary_outputs();
-        } else {
-            self.restore_secondary_outputs();
-        }
         self.needs_redraw = true;
     }
 

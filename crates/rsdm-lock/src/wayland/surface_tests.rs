@@ -138,7 +138,7 @@ fn read_request(server: &mut UnixStream) -> (u32, u32, Vec<u32>) {
     let word = u32::from_ne_bytes(header[4..].try_into().unwrap());
     let mut payload = vec![0; (word >> 16) as usize - 8];
     server.read_exact(&mut payload).unwrap();
-    let args = payload.chunks_exact(4)
-        .map(|word| u32::from_ne_bytes(word.try_into().unwrap())).collect();
+    let args = payload.as_chunks::<4>().0.iter()
+        .map(|word| u32::from_ne_bytes(*word)).collect();
     (id, word & 0xffff, args)
 }

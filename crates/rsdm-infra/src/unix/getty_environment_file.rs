@@ -13,7 +13,7 @@ pub(super) fn parse(text: &str) -> io::Result<BTreeMap<String, String>> {
     let mut environment = BTreeMap::new();
     let mut remaining = text;
     while !remaining.is_empty() {
-        remaining = remaining.trim_start_matches(|ch| matches!(ch, ' ' | '\t' | '\r' | '\n'));
+        remaining = remaining.trim_start_matches([' ', '\t', '\r', '\n']);
         let end = remaining.find(['\n', '\r']).unwrap_or(remaining.len());
         let line = &remaining[..end];
         if line.starts_with(['#', ';']) || !line.contains('=') {

@@ -14,10 +14,10 @@ impl Coordinator {
                 if let super::xsmp::Notice::Failed(reason) = notice {
                     tracing::warn!(%reason, "XSMP save failed");
                 }
-                if let Some(control) = &self.shutdown {
-                    if !control.noncancelable.load(Ordering::SeqCst) {
-                        control.cancelled.store(true, Ordering::SeqCst);
-                    }
+                if let Some(control) = &self.shutdown
+                    && !control.noncancelable.load(Ordering::SeqCst)
+                {
+                    control.cancelled.store(true, Ordering::SeqCst);
                 }
             }
         }

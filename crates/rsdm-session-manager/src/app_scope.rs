@@ -25,11 +25,10 @@ pub(super) fn registered_scope(app: &AppRecord) -> Result<Option<&MigratedScope>
     {
         return Err(SessionError::State("application scope has no authenticated origin".into()));
     }
-    if let Some(lineage) = &scope.lineage {
-        if lineage.iter().any(|process| process.pid == 0 || process.pidfd_id == 0)
-            || !lineage.contains(app.original_process.as_ref().expect("verified original process"))
-        { return Err(SessionError::State("application scope lineage has no authenticated origin".into())); }
-    }
+    if let Some(lineage) = &scope.lineage
+        && (lineage.iter().any(|process| process.pid == 0 || process.pidfd_id == 0)
+            || !lineage.contains(app.original_process.as_ref().expect("verified original process")))
+    { return Err(SessionError::State("application scope lineage has no authenticated origin".into())); }
     Ok(Some(scope))
 }
 

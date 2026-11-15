@@ -127,8 +127,7 @@ fn job_timeout(unit: &str) -> zbus::Error {
 
 fn generation(properties: &UnitProperties) -> Result<Option<String>, SessionError> {
     let Some((_, value)) = properties.iter().find(|(name, _)| *name == "Environment") else { return Ok(None); };
-    let environment: Vec<String> = Vec::try_from(OwnedVariant::try_from(value).map_err(zbus::Error::from)?)
-        .map_err(zbus::Error::from)?;
+    let environment: Vec<String> = Vec::try_from(OwnedVariant::try_from(value)?)?;
     Ok(environment.into_iter().find_map(|entry| {
         entry.strip_prefix("RSDM_SESSION_GENERATION=").map(str::to_string)
     }))
@@ -147,14 +146,12 @@ async fn complete(
     // Never start a second wait after the deadline or replay the mutation.
     loop {
         if Instant::now() >= deadline { return Err(job_timeout(unit).into()); }
-        if let Some(job) = &job {
-            if drain_job(signals, job).await? { return Ok(()); }
-        }
+        if let Some(job) = &job
+            && drain_job(signals, job).await? { return Ok(()); }
         let remaining = deadline.saturating_duration_since(Instant::now()).min(Duration::from_secs(5));
         let complete = manager.read_async(|| inspect(manager, unit, &operation), remaining).await;
-        if let Some(job) = &job {
-            if drain_job(signals, job).await? { return Ok(()); }
-        }
+        if let Some(job) = &job
+            && drain_job(signals, job).await? { return Ok(()); }
         match complete {
             Ok(true) => return Ok(()),
             Ok(false) => {},

@@ -7,8 +7,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super::*;
 
-#[path = "window_dispatch_fixture.rs"]
-mod fixture;
+use crate::window_dispatch_fixture as fixture;
 use fixture::Fixture;
 
 async fn prepared() -> (PreparedClose, BufReader<tokio::net::UnixStream>, tokio::net::UnixStream, crate::wayfire::tests::Fixture) {

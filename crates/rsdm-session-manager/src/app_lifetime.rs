@@ -22,9 +22,8 @@ pub(super) fn owns_process(app: &AppRecord, pid: u32, handle: &ProcessHandle) ->
 pub(super) fn exclude_process(app: &AppRecord, pids: &mut Vec<u32>) -> Result<(), SessionError> {
     let Some(lifetime) = &app.lifetime_process else { return Ok(()); };
     if !pids.contains(&lifetime.pid) { return Ok(()); }
-    if let Some(handle) = ProcessHandle::open(lifetime.pid)? {
-        if owns_process(app, lifetime.pid, &handle)? { pids.retain(|pid| *pid != lifetime.pid); }
-    }
+    if let Some(handle) = ProcessHandle::open(lifetime.pid)?
+        && owns_process(app, lifetime.pid, &handle)? { pids.retain(|pid| *pid != lifetime.pid); }
     Ok(())
 }
 
@@ -67,9 +66,8 @@ async fn wait_ready(records: &Runtime, app: &AppRecord, pid: u32, child: &mut to
         if saved.original_process != app.original_process || saved.invocation_id != app.invocation_id {
             return Err(SessionError::State("application changed before lifetime observation".into()));
         }
-        if let Some(handle) = ProcessHandle::open(pid)? {
-            if owns_process(&saved, pid, &handle)? && handle.alive()? { return Ok(()); }
-        }
+        if let Some(handle) = ProcessHandle::open(pid)?
+            && owns_process(&saved, pid, &handle)? && handle.alive()? { return Ok(()); }
         if child.try_wait()?.is_some() { return Err(SessionError::State("application lifetime process exited before readiness".into())); }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -138,10 +136,10 @@ impl Lifetime {
         if current.original_process != self.app.original_process || current.invocation_id != self.app.invocation_id {
             return Err(SessionError::State("application changed during lifetime observation".into()));
         }
-        if self.migrated.is_none() {
-            if let Some(identity) = current.migrated_scope.as_ref().and_then(|scope| scope.lifetime_group.as_ref()) {
-                self.migrated = Group::restore(identity)?;
-            }
+        if self.migrated.is_none()
+            && let Some(identity) = current.migrated_scope.as_ref().and_then(|scope| scope.lifetime_group.as_ref())
+        {
+            self.migrated = Group::restore(identity)?;
         }
         if original_alive {
             self.pin_migration()?;

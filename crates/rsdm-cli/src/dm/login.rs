@@ -33,10 +33,9 @@ pub(super) fn begin(
     wrapper: &[String],
     limiter: &(dyn LoginAttemptLimiter + Sync),
     sessions: &[Session],
-    parked: &mut Option<ParkedSession>,
     attempt: LoginAttempt,
     conversation: &mut dyn AuthConversation,
-) -> LoginAttemptOutcome {
+) -> Result<ParkedSession, LoginAttemptOutcome> {
     let LoginAttempt {
         username,
         mut password,
@@ -44,13 +43,13 @@ pub(super) fn begin(
     } = attempt;
     let Some(session) = sessions.iter().find(|session| session.id == session_id) else {
         tracing::warn!(%username, %session_id, "selected session disappeared");
-        return LoginAttemptOutcome::Failure("Selected session is unavailable".to_string());
+        return Err(LoginAttemptOutcome::Failure("Selected session is unavailable".to_string()));
     };
 
     let mut conversation = AttemptConversation::new(&username, limiter, conversation);
     if conversation.check_allowed().is_err() {
         tracing::warn!(%username, "login attempt rate limited");
-        return LoginAttemptOutcome::Failure("Too many failed attempts; please wait".to_string());
+        return Err(LoginAttemptOutcome::Failure("Too many failed attempts; please wait".to_string()));
     }
 
     tracing::info!(
@@ -67,14 +66,13 @@ pub(super) fn begin(
     match launch {
         LeaderLaunch::Ready(handle) => {
             conversation.record_success();
-            *parked = Some(ParkedSession {
+            Ok(ParkedSession {
                 handle,
                 username,
                 session_id: session.id.clone(),
-            });
-            LoginAttemptOutcome::SessionReady
+            })
         }
-        LeaderLaunch::Denied(report) => denied_outcome(&conversation, username, report),
+        LeaderLaunch::Denied(report) => Err(denied_outcome(&conversation, username, report)),
     }
 }
 

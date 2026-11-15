@@ -44,20 +44,26 @@ pub(super) struct Readiness {
     pub(super) provider_ready: Option<bool>,
 }
 
+pub(super) struct ObservationState {
+    pub(super) reaped_apps: bool,
+    pub(super) phase: SessionPhase,
+    pub(super) ready_once: bool,
+    pub(super) ready_busy: bool,
+    pub(super) ready_deadline: Instant,
+    pub(super) pending_boot: bool,
+    pub(super) pending_ready: bool,
+    pub(super) anchor_unit: String,
+}
+
 pub(super) async fn observe_external(
     manager: &super::bus::UserManager,
     runtime: &Runtime,
     provider: &Provider,
     process: Option<SessionProcess>,
-    reaped_apps: bool,
-    phase: SessionPhase,
-    ready_once: bool,
-    ready_busy: bool,
-    ready_deadline: Instant,
-    pending_boot: bool,
-    pending_ready: bool,
-    anchor_unit: &str,
+    state: ObservationState,
 ) -> ObservationResult {
+    let ObservationState { reaped_apps, phase, ready_once, ready_busy, ready_deadline,
+        pending_boot, pending_ready, anchor_unit } = state;
     let mut process = process;
     let result = async {
         if reaped_apps {
@@ -71,7 +77,7 @@ pub(super) async fn observe_external(
         };
         let readiness_check = if pending_ready {
             Some(if matches!(phase, SessionPhase::Starting | SessionPhase::Running) {
-                Ok(manager.active(anchor_unit).await?)
+                Ok(manager.active(&anchor_unit).await?)
             } else {
                 Ok(false)
             })
@@ -89,7 +95,7 @@ pub(super) async fn observe_external(
             && matches!(phase, SessionPhase::Starting | SessionPhase::Running)
         {
             (
-                Some(manager.active(anchor_unit).await?),
+                Some(manager.active(&anchor_unit).await?),
                 Some(manager.active(units::SESSION_TARGET).await?),
             )
         } else {

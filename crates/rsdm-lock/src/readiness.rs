@@ -26,10 +26,10 @@ pub(super) fn take_sender(fd: RawFd) -> io::Result<UnixStream> {
 }
 
 pub(super) fn confirm(sender: Option<UnixStream>) {
-    if let Some(mut sender) = sender {
-        if let Err(error) = sender.write_all(b"R") {
-            tracing::warn!(%error, "failed to notify the idle parent of lock readiness");
-        }
+    if let Some(mut sender) = sender
+        && let Err(error) = sender.write_all(b"R")
+    {
+        tracing::warn!(%error, "failed to notify the idle parent of lock readiness");
     }
 }
 

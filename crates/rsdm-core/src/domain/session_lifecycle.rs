@@ -157,8 +157,10 @@ mod tests {
 
     #[test]
     fn quit_argv_preserves_empty_arguments_but_requires_a_program() {
-        let mut policy = ShutdownPolicy::default();
-        policy.quit_command = vec!["program".into(), "".into()];
+        let mut policy = ShutdownPolicy {
+            quit_command: vec!["program".into(), "".into()],
+            ..ShutdownPolicy::default()
+        };
         assert!(policy.validate().is_ok());
         policy.quit_command[0].clear();
         assert!(policy.validate().is_err());

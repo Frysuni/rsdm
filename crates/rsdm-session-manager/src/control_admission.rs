@@ -60,10 +60,14 @@ impl Admission {
             Class::Cancel => (&self.cancel, MAX_CANCEL_REQUESTS),
             Class::Xsmp => (&self.xsmp, MAX_XSMP_REQUESTS),
         };
-        pending.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
-            if count >= limit { return None; }
-            Some(count + 1)
-        }).map_err(|_| zbus::fdo::Error::LimitsExceeded(BUSY.into()))?;
+        let mut count = pending.load(Ordering::Relaxed);
+        loop {
+            if count >= limit { return Err(zbus::fdo::Error::LimitsExceeded(BUSY.into())); }
+            match pending.compare_exchange_weak(count, count + 1, Ordering::Relaxed, Ordering::Relaxed) {
+                Ok(_) => break,
+                Err(current) => count = current,
+            }
+        }
         let permit = Arc::new(Permit { pending: pending.clone() });
         self.check_open()?;
         Ok(permit)

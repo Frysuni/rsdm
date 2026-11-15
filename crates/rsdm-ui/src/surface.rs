@@ -205,12 +205,8 @@ pub(crate) mod testing {
         }
 
         fn clear(&mut self, bg: Rgb) {
-            for pixel in &mut self.bg {
-                *pixel = bg;
-            }
-            for cell in &mut self.cells {
-                *cell = None;
-            }
+            self.bg.fill(bg);
+            self.cells.fill(None);
         }
 
         fn fill(&mut self, rect: Rect, bg: Rgb) {

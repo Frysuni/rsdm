@@ -133,7 +133,7 @@ async fn a_denied_read_is_not_retried() {
 async fn retry_deadline_also_bounds_a_read_that_never_replies() {
     let before = Instant::now();
     let result: zbus::Result<()> = retry_read(
-        || std::future::pending(), Duration::from_millis(30),
+        std::future::pending, Duration::from_millis(30),
     ).await;
     assert!(result.is_err());
     assert!(before.elapsed() < Duration::from_secs(1));

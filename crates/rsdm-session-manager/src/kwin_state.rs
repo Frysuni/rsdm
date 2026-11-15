@@ -69,7 +69,7 @@ impl State {
             let object = u32::from_ne_bytes(remaining[..4].try_into().expect("four-byte word"));
             let header = u32::from_ne_bytes(remaining[4..8].try_into().expect("four-byte word"));
             let size = (header >> 16) as usize;
-            if size < 8 || size % 4 != 0 || size > remaining.len() { return Err(invalid("incomplete queued event")); }
+            if size < 8 || !size.is_multiple_of(4) || size > remaining.len() { return Err(invalid("incomplete queued event")); }
             self.event(object, header as u16, &remaining[8..size])?;
             remaining = &remaining[size..];
         }
@@ -84,7 +84,7 @@ fn word(body: &[u8]) -> Result<u32, SessionError> {
 fn parse_string(body: &[u8]) -> Result<String, SessionError> {
     let length = word(body.get(..4).ok_or_else(|| invalid("incomplete UUID string"))?)? as usize;
     let end = 4 + length;
-    if length < 2 || length > 128 || body.len() != ((end + 3) & !3) || body.get(end - 1) != Some(&0) {
+    if !(2..=128).contains(&length) || body.len() != ((end + 3) & !3) || body.get(end - 1) != Some(&0) {
         return Err(invalid("invalid window UUID string"));
     }
     let value = &body[4..end - 1];
@@ -96,7 +96,7 @@ pub(super) fn string(value: &str) -> Vec<u8> {
     let mut body = (value.len() as u32 + 1).to_ne_bytes().to_vec();
     body.extend(value.as_bytes());
     body.push(0);
-    while body.len() % 4 != 0 { body.push(0); }
+    while !body.len().is_multiple_of(4) { body.push(0); }
     body
 }
 

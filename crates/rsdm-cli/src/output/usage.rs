@@ -46,14 +46,14 @@ fn help_line(line: &str) -> Line<'static> {
     if trimmed.starts_with("rsdm ") {
         return Line::styled(line, Style::new().fg(ACCENT).bold());
     }
-    if line.starts_with("  ") {
-        if let Some((command, description)) = line.trim_start().split_once("  ") {
-            return Line::from(vec![
-                Span::raw(" ".repeat(indent)),
-                Span::styled(command.to_string(), Style::new().fg(ACCENT).bold()),
-                Span::raw(format!("  {description}")),
-            ]);
-        }
+    if line.starts_with("  ")
+        && let Some((command, description)) = line.trim_start().split_once("  ")
+    {
+        return Line::from(vec![
+            Span::raw(" ".repeat(indent)),
+            Span::styled(command.to_string(), Style::new().fg(ACCENT).bold()),
+            Span::raw(format!("  {description}")),
+        ]);
     }
     if trimmed.starts_with('-') || trimmed.starts_with('<') {
         return Line::styled(line, Style::new().fg(ACCENT).bold());

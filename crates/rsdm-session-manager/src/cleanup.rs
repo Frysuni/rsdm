@@ -86,7 +86,7 @@ pub(super) async fn recover(manager: &UserManager, runtime: &Runtime) -> Result<
     if let Err(error) = super::runtime::blocking(move || records.save_session(&recovering)).await { failure = Some(error); }
     let records = runtime.clone();
     let applications = super::runtime::blocking(move || records.apps()).await?;
-    if let Err(error) = app_stop::prepare_apps(&manager, &runtime, applications, control).await {
+    if let Err(error) = app_stop::prepare_apps(manager, runtime, applications, control).await {
         failure = Some(error);
     }
 
@@ -94,7 +94,7 @@ pub(super) async fn recover(manager: &UserManager, runtime: &Runtime) -> Result<
     cleanup_manager.deadline = manager.deadline.reserving(Duration::from_secs(1))?;
     let records = runtime.clone();
     for app in super::runtime::blocking(move || records.apps()).await? {
-        if let Err(error) = apps::finish(&cleanup_manager, &runtime, &app).await { failure.get_or_insert(error); }
+        if let Err(error) = apps::finish(&cleanup_manager, runtime, &app).await { failure.get_or_insert(error); }
     }
 
     recover_infrastructure(manager, &cleanup_manager, runtime, &mut record, &mut failure).await;
@@ -147,9 +147,8 @@ async fn recover_infrastructure(
         if let Err(error) = super::processes::stop_invocation(&manager, &unit, &record.compositor_invocation).await { failure.get_or_insert(error); }
         if record.provider == "managed" { let _ = manager.unref(&unit).await; }
     }
-    if owns_environment {
-        if let Err(error) = env::clear_owned(&manager, &record.cleanup_environment()).await { failure.get_or_insert(error); }
-    }
+    if owns_environment
+        && let Err(error) = env::clear_owned(&manager, &record.cleanup_environment()).await { failure.get_or_insert(error); }
 }
 
 async fn verify_compositor(manager: &UserManager, runtime: &Runtime, record: &mut SessionRecord) -> Result<(), SessionError> {

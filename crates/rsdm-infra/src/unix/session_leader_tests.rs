@@ -13,6 +13,7 @@ fn cancellation_allows_the_owner_to_finish_cleanup_after_eof() {
     let mut output = child.stdout.take().unwrap();
     let pid = child.id() as libc::pid_t;
     drop(child.stdin.take());
+    drop(child);
 
     // The session-leader waitpid calls, rather than Child::wait, own this exit.
     terminate(pid);
@@ -27,6 +28,7 @@ fn cancellation_still_kills_an_unresponsive_owner() {
     let child = Command::new("sh").args(["-c", "kill -STOP $$"]).spawn().unwrap();
     let pid = child.id() as libc::pid_t;
     let handle = ProcessHandle::open(child.id()).unwrap().unwrap();
+    drop(child);
     let started = Instant::now();
     terminate(pid);
     reap(pid);

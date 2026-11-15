@@ -106,7 +106,7 @@ impl Server {
         self.grant_interaction().await?;
         let phases: Vec<_> = self.peers.iter().filter(|peer| peer.selected).map(|peer| peer.phase).collect();
         let followup = if protocol::phase2_ready(&phases) {
-            Some((Phase::Phase2Waiting, Request::Phase2))
+            Some((Phase::WaitingForPhase2, Request::Phase2))
         } else if protocol::die_ready(&phases) {
             Some((Phase::Saved, Request::Die))
         } else { None };

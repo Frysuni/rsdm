@@ -49,6 +49,29 @@ async fn cancelled_call_futures_cannot_release_queued_work_slots() {
 }
 
 #[test]
+fn concurrent_admission_never_exceeds_the_class_limit() {
+    let admission = Admission::default();
+    let barrier = std::sync::Barrier::new(9);
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..8).map(|_| scope.spawn(|| {
+            let permits: Vec<_> = (0..16).filter_map(|_| admission.acquire(Class::Regular).ok()).collect();
+            barrier.wait();
+            barrier.wait();
+            permits.len()
+        })).collect();
+        barrier.wait();
+        let pending = admission.regular.load(Ordering::Relaxed);
+        let full = admission.acquire(Class::Regular).is_err();
+        barrier.wait();
+        let granted: usize = workers.into_iter().map(|worker| worker.join().unwrap()).sum();
+        assert!(full);
+        assert_eq!(pending, MAX_REGULAR_REQUESTS);
+        assert_eq!(granted, MAX_REGULAR_REQUESTS);
+    });
+    assert_eq!(admission.regular.load(Ordering::Relaxed), 0);
+}
+
+#[test]
 fn stop_acknowledgements_hold_admission_until_received() {
     let (endpoint, mut received) = Endpoint::channel(0);
     let mut held: Vec<_> = (0..MAX_STOP_REQUESTS)

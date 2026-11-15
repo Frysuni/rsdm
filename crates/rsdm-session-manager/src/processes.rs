@@ -37,14 +37,12 @@ pub(super) async fn app_processes(manager: &UserManager, app: &AppRecord) -> Res
         pids.dedup();
     }
     super::app_lifetime::exclude_process(app, &mut pids)?;
-    if let Some(origin) = &app.original_process {
-        if !pids.contains(&origin.pid) {
-            if let Some(handle) = ProcessHandle::open(origin.pid)? {
-                if handle.id()? == Some(origin.pidfd_id) && handle.alive()? {
-                    return Err(SessionError::State("original application process has an unverified cgroup".into()));
-                }
-            }
-        }
+    if let Some(origin) = &app.original_process
+        && !pids.contains(&origin.pid)
+        && let Some(handle) = ProcessHandle::open(origin.pid)?
+        && handle.id()? == Some(origin.pidfd_id) && handle.alive()?
+    {
+        return Err(SessionError::State("original application process has an unverified cgroup".into()));
     }
     Ok(pids)
 }
@@ -124,9 +122,8 @@ fn owned_process_handles(processes: &[u32], groups: &[String], lineage: Option<&
             Err(error) => return Err(error.into()),
         };
         if !groups.iter().any(|group| belongs_to_cgroup(&membership, group)) { continue; }
-        if let Some((group, origins)) = lineage {
-            if belongs_to_cgroup(&membership, group) && !super::app_scope_lineage::owned(pid, &handle, origins)? { continue; }
-        }
+        if let Some((group, origins)) = lineage
+            && belongs_to_cgroup(&membership, group) && !super::app_scope_lineage::owned(pid, &handle, origins)? { continue; }
         owned.push(handle);
     }
     Ok(owned)
@@ -143,9 +140,8 @@ pub(super) async fn process_groups(manager: &UserManager, app: &AppRecord) -> Re
     if verify_invocation(manager, app).await? {
         groups.push(service_group(manager, &app.unit).await?);
     }
-    if let Some(scope) = super::app_scope::registered_scope(app)? {
-        if let Some(group) = super::app_scope::group(manager, scope).await? { groups.push(group); }
-    }
+    if let Some(scope) = super::app_scope::registered_scope(app)?
+        && let Some(group) = super::app_scope::group(manager, scope).await? { groups.push(group); }
     Ok(groups)
 }
 
@@ -193,9 +189,8 @@ pub(super) async fn terminate_main(manager: &UserManager, app: &AppRecord, contr
     let lineage = scope_lineage(manager, app).await?;
     let owned = super::runtime::blocking(move || owned_process_handles(&[main], &groups, lineage.as_ref())).await?;
     if owned.is_empty() || !handle.alive()? { return Ok(false); }
-    if let Some(origin) = original {
-        if handle.id()? != Some(origin.pidfd_id) { return Ok(false); }
-    }
+    if let Some(origin) = original
+        && handle.id()? != Some(origin.pidfd_id) { return Ok(false); }
     if app_processes(manager, app).await?.contains(&main) {
         manager.actions.check_generation_async().await?;
         if control.cancelled() { return Ok(false); }

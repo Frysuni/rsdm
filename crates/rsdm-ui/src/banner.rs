@@ -46,7 +46,9 @@ struct TitleCacheKey {
     font: String,
 }
 
-static TITLE_CACHE: OnceLock<Mutex<Option<(TitleCacheKey, Vec<String>)>>> = OnceLock::new();
+type CachedTitle = (TitleCacheKey, Vec<String>);
+
+static TITLE_CACHE: OnceLock<Mutex<Option<CachedTitle>>> = OnceLock::new();
 
 fn build_title_lines(design: &Design, text: &str) -> Vec<String> {
     if design.title_source == TitleSource::PresetLogo {

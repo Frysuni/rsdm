@@ -66,12 +66,12 @@ impl Coordinator {
     }
 
     pub async fn boot_completed(&mut self, result: Result<Vec<u8>, SessionError>) -> Result<(), SessionError> {
-        if let Err(SessionError::Bus(error)) = &result {
-            if super::bus::retryable_error(error) {
-                tracing::warn!(%error, "deferring compositor start verification while the user manager is unavailable");
-                self.pending_boot = true;
-                return Ok(());
-            }
+        if let Err(SessionError::Bus(error)) = &result
+            && super::bus::retryable_error(error)
+        {
+            tracing::warn!(%error, "deferring compositor start verification while the user manager is unavailable");
+            self.pending_boot = true;
+            return Ok(());
         }
         self.pending_boot = false;
         if let Some(process) = &mut self.process {

@@ -21,6 +21,8 @@ use super::{
 
 pub(super) const MAX_COORDINATOR_WORKERS: usize = 8;
 
+type EnvironmentRequest = (Vec<(String, String)>, Reply<()>);
+
 pub(super) enum Work {
     Observed(super::coordinator_probe::ObservationResult),
     Boot(Result<Vec<u8>, SessionError>),
@@ -51,7 +53,7 @@ pub(super) struct Coordinator {
     pub events: UnboundedSender<Work>,
     pub queued: VecDeque<(LaunchRequest, Reply<String>, Instant)>,
     pub finalize_replies: Vec<Reply<()>>,
-    pub pending_environment: VecDeque<(Vec<(String, String)>, Reply<()>)>,
+    pub pending_environment: VecDeque<EnvironmentRequest>,
     pub environment_reply: Option<(Vec<String>, Reply<()>)>,
     pub stop_replies: Vec<Reply<StopOutcome>>,
     pub stopping: Arc<AtomicBool>,

@@ -106,7 +106,7 @@ fn dispatch(manager: &UserManager, peer: &mut Peer, session: &SessionRecord,
     unsafe {
         match request {
             Request::Save => { peer.phase = Phase::Saving; ffi::SmsSaveYourself(peer.sms, 2, 1, 2, 0); }
-            Request::Phase2 => { peer.phase = Phase::Phase2Saving; ffi::SmsSaveYourselfPhase2(peer.sms); }
+            Request::Phase2 => { peer.phase = Phase::SavingPhase2; ffi::SmsSaveYourselfPhase2(peer.sms); }
             Request::Die => { peer.phase = Phase::Dying; ffi::SmsDie(peer.sms); }
             Request::Interact => { peer.interaction_requested = false; peer.interacting = true; ffi::SmsInteract(peer.sms); }
         }
@@ -117,7 +117,7 @@ fn dispatch(manager: &UserManager, peer: &mut Peer, session: &SessionRecord,
 pub(super) fn cancel(peer: &mut Peer) {
     if peer.selected && !peer.sms.is_null() {
         match peer.phase {
-            Phase::Saving | Phase::Phase2Waiting | Phase::Phase2Saving | Phase::TimedOut => {
+            Phase::Saving | Phase::WaitingForPhase2 | Phase::SavingPhase2 | Phase::TimedOut => {
                 unsafe { ffi::SmsShutdownCancelled(peer.sms); }
                 peer.phase = Phase::Cancelling;
             }

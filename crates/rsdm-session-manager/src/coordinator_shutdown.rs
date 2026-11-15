@@ -230,9 +230,8 @@ async fn finish(
     if let Some(unit) = &record.compositor_unit {
         cleanup_manager = cleanup_manager.with_owner(unit, &record.compositor_invocation);
     }
-    if !provider.logout_command.is_empty() {
-        if let Err(error) = run_logout_command(&cleanup_manager, record, provider, &directory).await { failure.get_or_insert(error); }
-    }
+    if !provider.logout_command.is_empty()
+        && let Err(error) = run_logout_command(&cleanup_manager, record, provider, &directory).await { failure.get_or_insert(error); }
     if record.owns_targets {
         for target in [units::AUTOSTART_TARGET, units::SESSION_TARGET, units::PRE_TARGET] {
             if let Err(error) = cleanup_manager.stop(target, Duration::from_secs(15)).await { failure.get_or_insert(error); }

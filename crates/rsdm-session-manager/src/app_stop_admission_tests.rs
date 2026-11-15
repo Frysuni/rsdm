@@ -52,7 +52,7 @@ async fn accepted_or_unrelated_xsmp_errors_are_never_replayed() {
     for failure in [Failure::NoReply, Failure::Denied, Failure::OtherLimit] {
         let fixture = Fixture::new().await;
         let calls = install(&fixture, 0, "", Some(failure)).await;
-        assert!(prepare_xsmp(&fixture.manager, &fixture.runtime, &[fixture.app.unit.clone()], &ShutdownControl::default()).await.is_err());
+        assert!(prepare_xsmp(&fixture.manager, &fixture.runtime, std::slice::from_ref(&fixture.app.unit), &ShutdownControl::default()).await.is_err());
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }
@@ -63,7 +63,7 @@ async fn busy_xsmp_admission_keeps_the_existing_shutdown_deadline() {
     install(&fixture, usize::MAX, "session coordinator is busy; retry the request", None).await;
     fixture.manager.deadline.set(monotonic_usec().unwrap() + 100_000);
     let before = Instant::now();
-    let result = prepare_xsmp(&fixture.manager, &fixture.runtime, &[fixture.app.unit.clone()], &ShutdownControl::default()).await;
+    let result = prepare_xsmp(&fixture.manager, &fixture.runtime, std::slice::from_ref(&fixture.app.unit), &ShutdownControl::default()).await;
     assert!(matches!(result, Err(SessionError::Bus(zbus::Error::FDO(error))) if matches!(*error, zbus::fdo::Error::TimedOut(_))));
     assert!(before.elapsed() < Duration::from_secs(1));
 }

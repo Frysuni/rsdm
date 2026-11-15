@@ -18,7 +18,6 @@ impl App {
         {
             return;
         }
-        self.restore_secondary_outputs();
         if let Some(lock) = self.session_lock.take() {
             lock.unlock();
             self.unlocked = true;

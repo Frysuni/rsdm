@@ -38,9 +38,8 @@ impl ActionGate {
 
     pub fn check_generation(&self) -> Result<(), SessionError> {
         self.check()?;
-        if let Some(runtime) = &self.generation {
-            if runtime.is_disabled()? { self.close(); }
-        }
+        if let Some(runtime) = &self.generation
+            && runtime.is_disabled()? { self.close(); }
         self.check()
     }
 

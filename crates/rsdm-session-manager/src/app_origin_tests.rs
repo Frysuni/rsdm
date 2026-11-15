@@ -4,8 +4,7 @@ use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, sync::atomic::Orderin
 
 use super::*;
 
-#[path = "window_dispatch_fixture.rs"]
-mod fixture;
+use crate::window_dispatch_fixture as fixture;
 
 struct Records { directory: PathBuf, runtime: Runtime }
 

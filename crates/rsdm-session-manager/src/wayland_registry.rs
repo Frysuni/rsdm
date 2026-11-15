@@ -56,7 +56,7 @@ impl Connection {
     pub(super) async fn request(&mut self, object: u32, opcode: u16, body: &[u8]) -> Result<(), SessionError> {
         if !self.peer.alive()? { return Err(invalid("socket owner has exited")); }
         let size = body.len() + 8;
-        if size > u16::MAX as usize || size % 4 != 0 { return Err(invalid("invalid request size")); }
+        if size > u16::MAX as usize || !size.is_multiple_of(4) { return Err(invalid("invalid request size")); }
         let mut frame = object.to_ne_bytes().to_vec();
         frame.extend_from_slice(&(((size as u32) << 16) | u32::from(opcode)).to_ne_bytes());
         frame.extend_from_slice(body);

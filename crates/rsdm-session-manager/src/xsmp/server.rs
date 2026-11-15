@@ -13,6 +13,7 @@ static INITIALIZED: AtomicBool = AtomicBool::new(false);
 pub(super) struct Server {
     pub manager: UserManager,
     pub runtime: Runtime,
+    #[expect(clippy::vec_box, reason = "libSM callbacks retain pointers to these stable allocations")]
     pub peers: Vec<Box<Peer>>,
     listeners: Listeners,
     _authority: Authority,

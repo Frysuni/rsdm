@@ -110,7 +110,7 @@ unsafe extern "C" fn save_request(
 unsafe extern "C" fn phase2(sms: SmsConn, data: Data) {
     with_peer(data, |peer| {
         if peer.actions.check().is_err() { return; }
-        if peer.phase == Phase::Saving { peer.phase = Phase::Phase2Waiting; }
+        if peer.phase == Phase::Saving { peer.phase = Phase::WaitingForPhase2; }
         else if peer.phase == Phase::InitialSave { unsafe { ffi::SmsSaveYourselfPhase2(sms); } }
     });
 }

@@ -120,11 +120,11 @@ impl Transport {
 
     pub fn remember(&self, unit: &str, invocation: &[u8]) {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
-        if let Some(reference) = state.references.get_mut(unit) {
-            if reference.invocation.is_none() {
-                reference.invocation = Some(invocation.to_vec());
-                state.revision += 1;
-            }
+        if let Some(reference) = state.references.get_mut(unit)
+            && reference.invocation.is_none()
+        {
+            reference.invocation = Some(invocation.to_vec());
+            state.revision += 1;
         }
     }
 
