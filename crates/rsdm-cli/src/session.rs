@@ -15,13 +15,8 @@ pub async fn power(path: &Path, action: PowerAction) -> Result<()> {
     let action = match action { PowerAction::Reboot => "reboot", PowerAction::Poweroff => "poweroff" };
     let cfg = load_config_async(path).await?.session_manager;
     let has_user_bus = std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some() || std::env::var_os("XDG_RUNTIME_DIR").is_some();
-    if cfg.enabled && has_user_bus && session_manager::is_running(&cfg).await? {
-        return print_outcome(session_manager::stop(action, &cfg).await?);
-    }
-    rsdm_system::logind::request_direct(action).await?;
-    print_outcome(session_manager::StopOutcome {
-        result: "accepted".into(), forced_units: Vec::new(), message: format!("logind accepted {action}"),
-    })
+    let coordinated = cfg.enabled && has_user_bus && session_manager::is_running(&cfg).await?;
+    crate::power::run(action, &cfg, coordinated).await
 }
 
 #[derive(Debug, Subcommand)]

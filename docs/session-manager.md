@@ -727,6 +727,24 @@ a timeout does not replay the request. Native DE power delegates once to its
 manager. Suspend and
 hibernate do not prepare logout. Greeter power actions call logind directly.
 
+In an interactive terminal, `rsdm power reboot` and `rsdm power poweroff` show
+an animated shutdown monitor. It reports application preparation, observed quit
+methods, per-app timeout policies, elapsed waits, shutdown inhibitors with their
+owners and reasons, and queued systemd jobs. Running jobs are executing; waiting
+jobs await systemd ordering. The stage bar covers applications, the power request
+and system services; it does not estimate total shutdown time. Counts cover only
+observed work: jobs that leave the queue are not assumed successful, and jobs
+shorter than the polling interval may be missed.
+
+The monitor reads status without acquiring an inhibitor or changing the shutdown
+policy. Ctrl+C stops watching; a dispatched power request may still continue.
+The last snapshot stays in terminal scrollback. Monitoring ends when the terminal
+closes, status becomes unavailable, or shutdown is no longer reported as active.
+If no active shutdown appears within five seconds after handoff, the command
+returns and points to desktop dialogs or the system console. A terminal inside
+the graphical session cannot display later stages after that session closes.
+Redirected output, `NO_COLOR`, and dumb terminals retain the one-shot output.
+
 The coordinator holds a delay inhibitor and listens for `PrepareForShutdown`.
 External shutdown cannot be cancelled by user requests, but logind can revoke it
 while preparation is running. Its published delay budget limits app timeouts,

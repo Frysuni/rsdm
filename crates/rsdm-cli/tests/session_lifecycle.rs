@@ -22,6 +22,8 @@ mod disabled;
 mod bootstrap_disable;
 #[path = "support/session_status.rs"]
 mod session_status;
+#[path = "support/power_progress.rs"]
+mod power_progress;
 type Calls = Arc<Mutex<Vec<String>>>;
 type Launch = (String, Vec<String>, Vec<(String, String)>, String, u64, String, String, Vec<String>);
 
@@ -260,7 +262,11 @@ async fn cancelled_session_and_power_requests_keep_failure_status_in_a_terminal(
         for expected in ["SESSION REQUEST", "cancelled", "FORCED SHUTDOWN", "earlier.service", "COMMAND FAILED"] {
             assert!(text.contains(expected), "missing {expected}: {text}");
         }
-        assert_only_styles(&text);
+        if action == "logout" {
+            assert_only_styles(&text);
+        } else {
+            power_progress::assert_restored(&text);
+        }
         assert!(tools.calls.lock().unwrap().contains(&format!("stop {GENERATION} {action}")));
     }
 }

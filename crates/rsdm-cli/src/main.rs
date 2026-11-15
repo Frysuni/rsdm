@@ -16,6 +16,8 @@ mod dm;
 mod logging;
 mod logs;
 mod output;
+mod power;
+mod power_state;
 mod runtime;
 mod session;
 mod session_exec;

@@ -3,6 +3,7 @@
 mod render;
 mod events;
 mod journal;
+pub(crate) mod power;
 mod session;
 mod usage;
 
