@@ -43,26 +43,33 @@ impl UserManager {
 }
 
 async fn verify(connection: &Connection, unit: &str, expected: &[u8]) -> zbus::Result<bool> {
-    let manager = Proxy::new(connection, DESTINATION, MANAGER_PATH, MANAGER_INTERFACE).await?;
-    let path: OwnedObjectPath = match manager.call("GetUnit", &(unit,)).await {
-        Ok(path) => path,
-        Err(error) if missing_unit(&error) => return Ok(false),
-        Err(error) => return Err(error),
-    };
-    let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination(DESTINATION).path(path)
-        .interface("org.freedesktop.systemd1.Unit").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
-    let current: Vec<u8> = proxy.get_property("InvocationID").await?;
-    if expected.iter().any(|byte| *byte != 0) && current == expected { return Ok(true); }
-    if current.iter().any(|byte| *byte != 0) { return Err(ownership_error(unit)); }
-    let state: String = proxy.get_property("ActiveState").await?;
-    if matches!(state.as_str(), "active" | "reloading") { return Err(ownership_error(unit)); }
-    let processes: Vec<(String, u32, String)> = manager.call("GetUnitProcesses", &(unit,)).await?;
-    if !processes.is_empty() { return Err(ownership_error(unit)); }
-    let latest: Vec<u8> = proxy.get_property("InvocationID").await?;
-    if latest.iter().all(|byte| *byte == 0) { return Ok(false); }
-    Err(ownership_error(unit))
+    let result = async {
+        let manager = Proxy::new(connection, DESTINATION, MANAGER_PATH, MANAGER_INTERFACE).await?;
+        let path: OwnedObjectPath = manager.call("GetUnit", &(unit,)).await?;
+        let proxy = zbus::proxy::Builder::<Proxy<'_>>::new(connection).destination(DESTINATION).path(path)
+            .interface("org.freedesktop.systemd1.Unit").cache_properties(zbus::proxy::CacheProperties::No).build().await?;
+        let current: Vec<u8> = proxy.get_property("InvocationID").await?;
+        if expected.iter().any(|byte| *byte != 0) && current == expected { return Ok(true); }
+        if current.iter().any(|byte| *byte != 0) { return Err(ownership_error(unit)); }
+        let state: String = proxy.get_property("ActiveState").await?;
+        if matches!(state.as_str(), "active" | "reloading") { return Err(ownership_error(unit)); }
+        let processes: Vec<(String, u32, String)> = manager.call("GetUnitProcesses", &(unit,)).await?;
+        if !processes.is_empty() { return Err(ownership_error(unit)); }
+        let latest: Vec<u8> = proxy.get_property("InvocationID").await?;
+        if latest.iter().all(|byte| *byte == 0) { return Ok(false); }
+        Err(ownership_error(unit))
+    }.await;
+    // A stopped transient unit can be collected between any two reads.
+    match result {
+        Err(error) if missing_unit(&error) => Ok(false),
+        other => other,
+    }
 }
 
 fn ownership_error(unit: &str) -> zbus::Error {
     zbus::fdo::Error::Failed(format!("{unit} invocation changed or was never verified")).into()
 }
+
+#[cfg(test)]
+#[path = "bus_ownership_tests.rs"]
+mod tests;
