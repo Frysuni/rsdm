@@ -15,6 +15,7 @@ in pkgs.testers.runNixOSTest {
     services.flatpak.enable = true;
     xdg.portal.enable = true;
     xdg.portal.extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
+    xdg.portal.config.common.default = [ "gtk" ];
     environment.systemPackages = [ rsdm pkgs.sway pkgs.flatpak ];
     environment.etc."rsdm.toml".text = "";
     environment.etc."rsdm-sway.conf".text = ''

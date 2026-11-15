@@ -19,7 +19,7 @@ in pkgs.testers.runNixOSTest {
     users.users.alice = { isNormalUser = true; uid = 1000; group = "alice"; };
     users.groups.alice = {};
     services.getty.autologinUser = "alice";
-    environment.systemPackages = [ rsdm pkgs.kdePackages.kwin pkgs.xwayland pkgs.xorg.xprop ];
+    environment.systemPackages = [ rsdm pkgs.kdePackages.kwin pkgs.xwayland pkgs.xprop ];
     environment.etc."rsdm.toml".text = "";
     environment.etc."xdg/menus/applications.menu".text = ''
       <!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN" "http://www.freedesktop.org/standards/menu-spec/1.0/menu.dtd">
