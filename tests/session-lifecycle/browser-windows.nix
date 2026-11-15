@@ -8,6 +8,7 @@ in pkgs.testers.runNixOSTest {
   globalTimeout = 300;
   nodes.machine = { ... }: {
     virtualisation.memorySize = 4096;
+    virtualisation.cores = 2;
     security.polkit.enable = true;
     users.users.alice = { isNormalUser = true; uid = 1000; group = "alice"; };
     users.groups.alice = {};
