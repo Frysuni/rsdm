@@ -117,7 +117,6 @@ fn run_prompt(
     let backend = CrosstermBackend::new(tty.try_clone()?);
     let _guard = TerminalGuard::enter(&model.config.dm.tty.path, tty)?;
     let mut terminal = Terminal::new(backend)?;
-    terminal.clear()?;
     let mut form = FormState::new(&model);
     let mut design = Design::from_config(&model.config.dm.design);
     let mut menu = Menu::new();

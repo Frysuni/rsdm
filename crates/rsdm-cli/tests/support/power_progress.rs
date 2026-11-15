@@ -5,6 +5,7 @@ use std::time::Duration;
 use super::*;
 
 pub(super) fn assert_restored(text: &str) {
+    assert!(!text.contains("\x1b[6n"), "full-screen startup must not request cursor replies");
     assert!(text.contains("\x1b[?1049h"), "alternate screen was not entered: {text}");
     let (_, summary) = text.rsplit_once("\x1b[?1049l").expect("alternate screen must be restored");
     assert!(text.contains("\x1b[?25h"), "cursor must be restored");

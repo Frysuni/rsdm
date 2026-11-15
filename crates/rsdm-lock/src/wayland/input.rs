@@ -4,7 +4,7 @@ use smithay_client_toolkit::{
         Connection, QueueHandle,
         protocol::{wl_keyboard, wl_surface},
     },
-    seat::keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers},
+    seat::keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
 };
 
 use super::App;
@@ -125,6 +125,17 @@ impl KeyboardHandler for App {
         self.handle_regular_key(event);
     }
 
+    fn repeat_key(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        _: u32,
+        _: KeyEvent,
+    ) {
+        // Repeats must not satisfy the second press used to confirm power actions.
+    }
+
     fn release_key(
         &mut self,
         _: &Connection,
@@ -142,6 +153,7 @@ impl KeyboardHandler for App {
         _: &wl_keyboard::WlKeyboard,
         _: u32,
         _: Modifiers,
+        _: RawModifiers,
         _: u32,
     ) {
     }

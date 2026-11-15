@@ -4,7 +4,7 @@ use std::{io::{self, Stdout}, time::Instant};
 
 use ratatui::{
     Frame, Terminal, backend::CrosstermBackend,
-    crossterm::{execute, terminal::{EnterAlternateScreen, LeaveAlternateScreen}},
+    crossterm::{execute, terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen}},
     layout::{Constraint, Layout}, style::Style, text::{Line, Span},
     widgets::{Block, BorderType, Gauge, Paragraph},
 };
@@ -20,8 +20,7 @@ pub(crate) struct PowerScreen {
 impl PowerScreen {
     pub fn open() -> io::Result<Self> {
         let mut screen = Self { terminal: Terminal::new(CrosstermBackend::new(io::stdout()))? };
-        execute!(screen.terminal.backend_mut(), EnterAlternateScreen)?;
-        screen.terminal.clear()?;
+        execute!(screen.terminal.backend_mut(), EnterAlternateScreen, Clear(ClearType::All))?;
         Ok(screen)
     }
 

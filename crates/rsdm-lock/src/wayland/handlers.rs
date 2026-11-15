@@ -7,8 +7,7 @@
 
 use smithay_client_toolkit::{
     compositor::CompositorHandler,
-    delegate_compositor, delegate_keyboard, delegate_output, delegate_registry, delegate_seat,
-    delegate_session_lock, delegate_shm,
+    delegate_dispatch2, delegate_registry,
     output::{OutputHandler, OutputState},
     reexports::client::{
         Connection, Proxy, QueueHandle,
@@ -185,10 +184,5 @@ impl ProvidesRegistryState for App {
     registry_handlers![OutputState, SeatState];
 }
 
-delegate_compositor!(App);
-delegate_output!(App);
-delegate_seat!(App);
-delegate_keyboard!(App);
-delegate_shm!(App);
-delegate_session_lock!(App);
+delegate_dispatch2!(App);
 delegate_registry!(App);

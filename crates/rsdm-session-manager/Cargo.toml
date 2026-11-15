@@ -28,4 +28,4 @@ zbus_macros.workspace = true
 zbus = { workspace = true, features = ["p2p"] }
 
 [build-dependencies]
-pkg-config = "0.3.32"
+pkg-config = "0.3.34"
