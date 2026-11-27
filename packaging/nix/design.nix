@@ -133,8 +133,8 @@ let
         default = true;
         description = ''
           Whether the runtime design switcher (F1) is available on this front.
-          Changes made through it apply live but are never persisted - every
-          launch starts from this config.
+          Changes apply live. Greeter changes last only for the current instance;
+          Lock can save supported personal visual overrides through Save settings.
         '';
       };
       showClock = lib.mkOption {

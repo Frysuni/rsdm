@@ -93,7 +93,6 @@ export const ru: LocaleConfig<DefaultTheme.Config>[string] = {
           { text: 'Безопасность', link: '/ru/SECURITY' },
           { text: 'Бэкенды сеанса', link: '/ru/reference/session-backends' },
           { text: 'Жизненный цикл сеанса', link: '/ru/reference/session-lifecycle' },
-          { text: 'История аудита', link: '/ru/audit-remediation' },
         ],
       },
     ],

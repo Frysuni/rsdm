@@ -39,8 +39,6 @@ features:
     link: /ru/troubleshooting
 ---
 
-[![Шесть экранов RSDM: вход в TTY и выбор сеанса, оформление Greeter, блокировка Wayland и Idle, настройки Lock, зарегистрированные приложения и ход перезагрузки](/rsdm-preview.png)](/rsdm-preview.png)
-
 ## Выберите дистрибутив {#choose-your-distribution}
 
 | Дистрибутив | Рекомендуемый способ установки |

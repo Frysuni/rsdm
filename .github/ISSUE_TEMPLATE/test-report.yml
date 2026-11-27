@@ -17,7 +17,7 @@ body:
     attributes:
       label: RSDM version
       description: Provide the release version or commit hash.
-      placeholder: "v0.1.0 or commit abc1234"
+      placeholder: "rsdm --version or commit abc1234"
     validations:
       required: true
 
@@ -25,7 +25,7 @@ body:
     id: distribution
     attributes:
       label: Distribution
-      placeholder: "NixOS 26.05, Fedora 43, Arch Linux..."
+      placeholder: "NixOS 26.05, Fedora 44, Arch Linux..."
     validations:
       required: true
 
@@ -33,7 +33,8 @@ body:
     id: compositor
     attributes:
       label: Wayland compositor or desktop environment
-      placeholder: "niri, Hyprland, KDE Plasma..."
+      description: Include the compositor or desktop version.
+      placeholder: "niri (version), Hyprland (version), KDE Plasma (version)..."
     validations:
       required: true
 
@@ -76,6 +77,8 @@ body:
         - label: Keyring unlocking
         - label: Idle handling
         - label: Screen locking
+        - label: Session Manager (full or attached)
+        - label: Registered application shutdown
         - label: Logout and session cleanup
         - label: Reboot and shutdown
 
@@ -109,7 +112,7 @@ body:
     id: logs
     attributes:
       label: Logs
-      description: Paste relevant logs after removing sensitive information.
+      description: Include relevant rsdm logs, rsdm session status, or journalctl output after removing sensitive information.
       render: shell
 
   - type: textarea

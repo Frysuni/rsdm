@@ -115,15 +115,7 @@ sudo nixos-rebuild switch --flake .#host
 ::: details Прямые пакеты и миграция
 Flake предоставляет rsdm-stable и rsdm-unstable (default — stable); rsdm-prebuilt и rsdm-source остаются псевдонимами. Сборка из исходного кода включает XSMP. Зависимости используют ваши существующие substituters или собираются локально.
 
-Удалите устаревший параметр `services.rsdm.binaryCache.enable` и вручную добавленные настройки кеша RSDM Pages. Удалите переопределения package, если хотите выбирать канал. Если работающий демон Nix всё ещё использует старый кеш, временно переопределите substituters на время миграции:
-
-```sh
-sudo nixos-rebuild switch --flake .#host \
-  --option substituters https://cache.nixos.org \
-  --option extra-substituters ""
-```
-
-При необходимости включите другие требуемые кеши в это временное переопределение. Стиль рамки none требует RSDM 2.0.0 или новее.
+При обновлении со старой конфигурации удалите `services.rsdm.binaryCache.enable` и старые настройки кеша RSDM Pages. Для выбора канала удалите переопределение `package`. При явном выборе старого пакета стиль рамки `none` требует RSDM 2.0.0 или новее.
 :::
 
 ## Восстановление или удаление {#recover-or-remove}

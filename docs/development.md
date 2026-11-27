@@ -85,4 +85,4 @@ GitHub Pages is built by the documentation workflow; PRs build the site and main
 
 Keep changes focused. Explain the behavior change and checks run in a pull request. Update the example configuration and relevant guides when a setting changes.
 
-For security-sensitive changes, read [security](SECURITY.md). The [historical audit](audit-remediation.md) records an older remediation effort.
+For security-sensitive changes, read [security](SECURITY.md).

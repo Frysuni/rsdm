@@ -115,15 +115,7 @@ Both channels use the same flake input. Stable is pinned by the release metadata
 ::: details Direct packages and migration
 The flake exposes rsdm-stable and rsdm-unstable (default is stable); rsdm-prebuilt and rsdm-source remain aliases. Source builds enable XSMP. Dependencies use your existing substituters or are built locally.
 
-Remove the obsolete `services.rsdm.binaryCache.enable` option and manually added RSDM Pages cache settings. Remove package overrides if you want channel selection. If the running Nix daemon still uses the old cache, temporarily override substituters during the migration:
-
-```sh
-sudo nixos-rebuild switch --flake .#host \
-  --option substituters https://cache.nixos.org \
-  --option extra-substituters ""
-```
-
-Include any other required caches in that temporary override. Border style none requires RSDM 2.0.0 or later.
+When upgrading an older configuration, remove `services.rsdm.binaryCache.enable` and old RSDM Pages cache settings. Remove the `package` override to use channel selection. When overriding the package with an older release, border style `none` requires RSDM 2.0.0 or later.
 :::
 
 ## Recover or remove

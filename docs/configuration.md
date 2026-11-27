@@ -123,7 +123,7 @@ Both `dm.design` and `lock.design` have independent defaults. NixOS uses the sam
 | Fonts | figrs/FIGlet font names |
 | Password | hidden, asterisks |
 
-Speed 0 freezes animation. Custom title mode uses title_text; preset-logo uses title_preset. Border none requires RSDM 2.0.0+. Menu enables F1.
+Speed 0 freezes animation. Custom title mode uses title_text; preset-logo uses title_preset. Menu enables F1.
 :::
 
 ### Lock wallpaper

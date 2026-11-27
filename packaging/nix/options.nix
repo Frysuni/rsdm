@@ -216,9 +216,8 @@
       default = "background";
       description = ''
         What secondary outputs show while locked. background keeps only the
-        wallpaper/effect, black paints opaque black, and off temporarily powers
-        them down through supported compositor IPC (currently niri; otherwise
-        it safely falls back to black).
+        wallpaper/effect, black paints opaque black, and off currently uses
+        the same opaque black fallback while keeping outputs enabled.
       '';
     };
 
@@ -271,13 +270,13 @@
     onLock = lib.mkOption {
       type = lib.types.listOf (lib.types.listOf lib.types.str);
       default = [ ];
-      description = "argv commands run after the idle lock is confirmed active.";
+      description = "argv commands run after built-in lock confirmation or custom locker process start.";
     };
 
     onUnlock = lib.mkOption {
       type = lib.types.listOf (lib.types.listOf lib.types.str);
       default = [ ];
-      description = "argv commands run after the idle-started locker exits.";
+      description = "argv commands run after the idle-started locker exits successfully following readiness.";
     };
   };
 

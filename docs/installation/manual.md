@@ -21,8 +21,8 @@ cargo build --release --locked -p rsdm
 
 ```sh [Release archive]
 # Download the matching .tar.gz and .tar.gz.sha256 from GitHub Releases.
-# Run in the directory containing those files; replace 2.5.0 as needed.
-archive=rsdm-2.5.0-x86_64-unknown-linux-gnu.tar.gz
+# Run in the directory containing those files; replace VERSION with the downloaded release version.
+archive=rsdm-VERSION-x86_64-unknown-linux-gnu.tar.gz
 sha256sum -c "$archive.sha256" && \
   mkdir rsdm-release && \
   tar -xzf "$archive" -C rsdm-release && \

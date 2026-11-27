@@ -123,7 +123,7 @@ Timeout принимает 1–4294967 секунд. Пустой lock_command �
 | Шрифты | имена шрифтов figrs/FIGlet |
 | Пароль | hidden, asterisks |
 
-Скорость 0 останавливает анимацию. Режим custom использует title_text; preset-logo использует title_preset. Рамка none требует RSDM 2.0.0+. Menu включает F1.
+Скорость 0 останавливает анимацию. Режим custom использует title_text; preset-logo использует title_preset. Menu включает F1.
 :::
 
 ### Обои Lock {#lock-wallpaper}

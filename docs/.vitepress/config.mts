@@ -96,7 +96,6 @@ export default defineConfig({
           { text: 'Security', link: '/SECURITY' },
           { text: 'Session backends', link: '/reference/session-backends' },
           { text: 'Session lifecycle', link: '/reference/session-lifecycle' },
-          { text: 'Historical audit', link: '/audit-remediation' },
         ],
       },
     ],
