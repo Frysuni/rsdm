@@ -1,49 +1,50 @@
 # Hyprland
 
-Hyprland installs a `hyprland.desktop` wayland session. Whether it raises
-`graphical-session.target` on its own depends on your setup; rsdm auto-detects
-and, for a bare compositor, anchors the target itself once the Wayland
-environment is published (see [session-manager.md](../session-manager.md)).
+Choose Hyprland in the Greeter, or set `dm.fixed_session = "hyprland"` (NixOS: `services.rsdm.dm.fixedSession`). Use the desktop entry installed by your package. RSDM detects whether the original session owns the graphical target.
 
-## Launch it from the greeter
+## Bind keys and launch apps
 
-Fixed session:
+Use the syntax for your installed Hyprland version. Merge these into your existing configuration and avoid duplicate bindings.
 
-```toml
-[dm]
-fixed_session = "Hyprland"     # or the .desktop id "hyprland"
+::: code-group
+
+```lua [hyprland.lua]
+hl.bind("SUPER + L", hl.dsp.exec_cmd("rsdm lock"))
+hl.bind("SUPER + SHIFT + E", hl.dsp.exec_cmd("rsdm session stop"))
+
+hl.on("hyprland.start", function()
+    hl.exec_cmd("rsdm app -- waybar")
+end)
 ```
 
-NixOS:
-
-```nix
-services.rsdm.dm.fixedSession = "Hyprland";
-```
-
-Or leave `fixed_session` unset and pick Hyprland from
-`/usr/share/wayland-sessions/hyprland.desktop`.
-
-## Lock binding
-
-```ini
-# ~/.config/hypr/hyprland.conf
+```ini [Legacy hyprland.conf]
 bind = SUPER, L, exec, rsdm lock
-```
-
-For idle locking, either keep hypridle and run `rsdm lock` from a listener, or
-enable rsdm's own `[idle]` block and `rsdm-idle.service`; do not enable both.
-
-## Apps as part of the session
-
-```ini
+bind = SUPER SHIFT, E, exec, rsdm session stop
 exec-once = rsdm app -- waybar
 ```
 
-## Finalizing (optional)
+:::
 
-If your Hyprland does not bring up the graphical session target itself, finalize
-it explicitly after startup:
+Enable [Lock](../lock.md). If you use hypridle, retain its existing lifecycle integration or switch to [RSDM Idle](../idle.md); avoid duplicate lockers.
 
-```ini
+## Readiness
+
+For a bare Hyprland session without native graphical target setup, add finalize after the compositor starts.
+
+::: code-group
+
+```lua [hyprland.lua]
+hl.on("hyprland.start", function()
+    hl.exec_cmd("rsdm session finalize")
+end)
+```
+
+```ini [Legacy hyprland.conf]
 exec-once = rsdm session finalize
 ```
+
+:::
+
+Current Lua IPC can provide verified app window close on supported versions. Older IPC falls back to the application policy. Check `rsdm session status`.
+
+See the [Hyprland wiki](https://wiki.hypr.land/) and [session backends](../reference/session-backends.md#hyprland-window-close).

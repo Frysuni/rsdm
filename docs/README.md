@@ -1,109 +1,89 @@
-# rsdm documentation
+---
+title: Commands
+description: Public RSDM CLI commands, options, terminal output and diagnostics.
+---
 
-`rsdm` is a standalone Rust display manager (TTY/TUI greeter) and screen locker
-for Wayland sessions. No greetd, GTK, Qt, webview, or Electron. One binary,
-`rsdm`, with a few subcommands:
+# Commands
 
-| command                 | what it does                                        |
-|-------------------------|-----------------------------------------------------|
-| `rsdm dm`               | the greeter, on the configured VT                   |
-| `rsdm lock`             | lock the current Wayland session                    |
-| `rsdm idle`             | lock after compositor-reported inactivity           |
-| `rsdm unlock`           | privileged emergency unlock of a live rsdm locker   |
-| `rsdm logs`             | show the system/user journal, optionally following new entries |
-| `rsdm status`           | show config and live lock state                     |
-| `rsdm session start`    | start coordination around the original session command |
-| `rsdm session finalize` | export env + activate the session from a compositor |
-| `rsdm session stop`     | prepare registered apps, then request logout         |
-| `rsdm session cancel`   | cancel preparation before session teardown           |
-| `rsdm session status`   | show the provider, phase and registered apps          |
-| `rsdm power reboot`     | prepare the session and request reboot                |
-| `rsdm power poweroff`   | prepare the session and request shutdown              |
-| `rsdm app -- <cmd>`     | register and launch an app with its shutdown policy   |
-| `rsdm validate-config`  | check `rsdm.toml`                                   |
+Use `rsdm --help` or append `--help` to any command for the installed version's
+exact syntax. Commands accept `--config <path>` (default
+`/etc/rsdm.toml`); the `RSDM_CONFIG` environment variable can set that path.
 
-All commands take a global `--config <path>` (default `/etc/rsdm.toml`,
-also `RSDM_CONFIG`).
+## Command reference
+
+| Command | Purpose |
+| --- | --- |
+| `rsdm dm` | Start DM and its Greeter on the configured VT (normally through systemd) |
+| `rsdm lock` | Lock the current Wayland session |
+| `rsdm idle` | Run compositor-driven idle monitoring |
+| `rsdm unlock [--user <name>]` | Root-authorized emergency unlock of a live RSDM locker |
+| `rsdm status` | Show configured features and live lock state |
+| `rsdm validate-config` | Check the administrative TOML file |
+| `rsdm logs` | Read RSDM journal entries for the current boot |
+| `rsdm session start -- <command>` | Launch a session under coordination |
+| `rsdm session attach` | Attach to an existing graphical login |
+| `rsdm session finalize [names...]` | Publish the compositor environment and complete readiness |
+| `rsdm session status` | Read manager scope, phase, apps and capabilities |
+| `rsdm session stop` | Prepare apps and request logout |
+| `rsdm session cancel` | Request cancellation before session teardown |
+| `rsdm app -- <command> [args...]` | Register and launch an application |
+| `rsdm power reboot` | Prepare the session and request reboot |
+| `rsdm power poweroff` | Prepare the session and request shutdown |
+
+For start modes, application policies and outcome meanings see
+[Session Manager](session-manager.md). Run session/app/lock/idle commands
+as the desktop user. The system service runs DM with the privilege needed
+for PAM and VT management.
+
+## Common tasks
+
+```sh
+rsdm --version
+rsdm validate-config --config ./rsdm.toml
+rsdm status
+rsdm session status
+rsdm logs --component dm --lines 50
+rsdm logs --follow
+```
+
+### Logs
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `-n, --lines <N>` | `200` | Number of recent entries |
+| `-f, --follow` | off | Stream new entries until Ctrl+C |
+| `--component <name>` | `all` | `all`, `dm`, `idle`, `lock` |
+
+Filters retain journal access permissions. For a custom DM instance use
+`journalctl -b -u rsdm@tty2.service` (replace the instance name).
+For the user coordinator and application units use `journalctl --user -b`.
 
 ## CLI output
 
-Help, system/session status and command results use rounded panels, section
-headings and colored badges in the terminal. Every command's help includes
-examples. Runtime diagnostics use the same palette with a level badge, source
-and timestamp. Reports stay in scrollback and the command returns normally.
-Long values wrap to the available width, including application unit names and
-configuration paths.
+Terminal reports use panels, status colors and normal scrollback.
+Redirected streams, nonempty `NO_COLOR`, `TERM=dumb` and terminals narrower
+than 28 columns use plain text. Warnings and errors remain on stderr.
 
 ```sh
-rsdm --help
-rsdm app --help
-rsdm status
-rsdm session status
-rsdm validate-config
-rsdm logs --component dm --lines 50
-rsdm logs --follow
 env NO_COLOR=1 rsdm status
 rsdm session status > session-status.txt
 ```
 
-Teal highlights commands and values, purple marks sections, green indicates
-success, yellow marks warnings/pending requests and rose indicates errors.
-Redirected streams keep the plain text format. A nonempty `NO_COLOR`,
-`TERM=dumb` or a terminal narrower than 28 columns selects plain output too.
-Errors and warnings remain on stderr, and command exit codes retain their
-meaning.
+::: details Journal formatting and scripting
+Styled logs decode journal entries with UTC timestamps, levels and sources
+without a pager. Plain output delegates to journalctl's short-precise
+format and its usual pager/follow behavior. Successful app launches,
+finalize and cancel requests may show a confirmation in styled output.
 
-Successful app launches, finalize and cancel requests show a confirmation when
-terminal styling is active; they stay quiet in scripts and autostart. The
-Greeter and Lock keep their existing interfaces.
+Use exit codes for automation. A cancellation or a failed/unknown session
+request is nonzero. A successful request can mean preparation or native
+delegation rather than completed logout; see
+[session outcomes](session-manager.md#status-and-outcomes).
+:::
 
-In a styled terminal, `rsdm logs` reads the journal through `journalctl` and
-prints entries directly into scrollback without a pager. Each entry shows a UTC
-timestamp, severity badge and service/source; multiline messages remain
-readable and long lines wrap. `--follow` prints entries as they arrive; press
-Ctrl+C to stop. The existing current-boot and component filters still apply.
-Journal access permissions and failure exit codes remain those of `journalctl`.
-When styling is disabled or stdout is redirected, logs use journalctl's
-original `short-precise` format and normal pager/follow behavior.
+## Further reading
 
-## Guides
-
-- [Installation: Arch](installation/arch.md)
-- [Installation: Fedora](installation/fedora.md)
-- [Installation: NixOS](installation/nixos.md)
-- [Installation: Ubuntu](installation/ubuntu.md)
-- [Configuration reference](configuration.md)
-- [Display manager (greeter)](display-manager.md)
-- [Lock screen](lock.md)
-- [Idle locking](idle.md)
-- [Keyrings](keyrings.md)
-- [Session manager](session-manager.md)
-- [Troubleshooting](troubleshooting.md)
-
-## Compositors
-
-`rsdm` is compositor-agnostic. Setup notes for the common ones:
-
-- [niri](compositors/niri.md)
-- [Hyprland](compositors/hyprland.md)
-
-## See also
-
-- [ARCHITECTURE.md](ARCHITECTURE.md) - crate layout and runtime paths
-- [SECURITY.md](SECURITY.md) - PAM, privilege handling, lock guarantees
-- [rsdm.toml](https://github.com/Frysuni/rsdm/blob/main/rsdm.toml) - practical commented configuration example
-
-## Building the documentation website
-
-The website uses these Markdown guides directly. From the repository root, with
-Node.js 24 and npm installed:
-
-```sh
-npm ci --prefix docs
-npm run --prefix docs dev
-npm run --prefix docs build
-npm run --prefix docs preview
-```
-
-The production build is written to `docs/.vitepress/dist`. The local development
-server and GitHub Pages both serve the site under `/rsdm/`.
+[Getting started](getting-started.md) ·
+[Configuration](configuration.md) ·
+[Troubleshooting](troubleshooting.md) ·
+[Build the documentation](development.md#documentation).

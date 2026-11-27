@@ -1,103 +1,74 @@
-# Installation: Arch Linux
+---
+description: Install RSDM from the Arch User Repository or build the Arch package.
+---
 
-## From the AUR
+# Arch Linux
 
-AUR packages are installed with an AUR helper (or a manual `git clone` +
-`makepkg -si`), not with `pacman -S`:
+Choose one AUR package:
 
-```sh
-# source package: builds rsdm from a tagged release with cargo
-yay -S rsdm
-# or the prebuilt binary package
+::: code-group
+
+```sh [Prebuilt]
 yay -S rsdm-bin
 ```
 
-(`paru`, `aurutils`, or a manual `makepkg -si` work the same.)
+```sh [Source]
+yay -S rsdm
+```
 
-## From this repo
+:::
 
+[`rsdm-bin`](https://aur.archlinux.org/packages/rsdm-bin) installs a release
+binary. [`rsdm`](https://aur.archlinux.org/packages/rsdm) builds a tagged
+release. You can use another AUR helper or clone the chosen AUR repository
+and run `makepkg -si` as a normal user.
+
+::: details Build the AUR package manually
 ```sh
-cd packaging/arch
+git clone https://aur.archlinux.org/rsdm.git
+cd rsdm
+less PKGBUILD
 makepkg -si
 ```
 
-Both paths install:
+The PKGBUILD templates under `packaging/arch` in the upstream source tree
+are used by release publishing; use the actual AUR repository for the
+published package version and hashes.
+:::
 
-| file                                    | purpose                              |
-|-----------------------------------------|--------------------------------------|
-| `/usr/bin/rsdm`                         | the binary                           |
-| `/usr/lib/systemd/system/rsdm.service`  | greeter unit (alias `display-manager`) |
-| `/usr/lib/systemd/user/rsdm-idle.service` | optional per-user idle monitor       |
-| `/etc/pam.d/rsdm`                       | greeter login PAM stack (unlocks the keyring) |
-| `/etc/pam.d/rsdm-lock`                  | locker PAM stack (auth/account only) |
-| `/etc/rsdm.toml`                 | configuration (a `backup` file)      |
-| `/etc/logrotate.d/rsdm`                 | log rotation (only used in file mode)|
+## Configure and activate
 
-## Enable
-
-1. Review and edit the config - the TTY and the session command especially:
-
-   ```sh
-   sudoedit /etc/rsdm.toml
-   rsdm validate-config
-   ```
-
-   Set `[dm] fixed_session` (or leave it unset for the picker), and make sure
-   `[dm.tty].path` is the VT you want the greeter to own. See
-   [configuration.md](../configuration.md).
-
-2. Enable the service (the default owns `tty1` and masks its `getty` and
-   `autovt` units while active):
-
-   ```sh
-sudo systemctl enable --now rsdm.service
-```
-
-For another VT, set `[dm.tty].path` to the matching `/dev/ttyN`, install
-`packaging/systemd/rsdm@.service` as `rsdm@.service`, and enable
-`rsdm@ttyN.service` instead.
-
-For built-in idle locking, set `[idle].enable = true` and enable its user unit
-inside the desktop session:
+The package installs the binary, administrative configuration, PAM stacks,
+system DM units and user Idle unit. It does not enable DM automatically.
 
 ```sh
-systemctl --user enable --now rsdm-idle.service
+sudoedit /etc/rsdm.toml
+rsdm validate-config
 ```
 
-3. Watch it:
+Continue with [Activation and recovery](activate.md) to switch from your
+previous display manager, choose a VT or run only Lock/Idle.
 
-   ```sh
-   journalctl -u rsdm.service -b
-   ```
+## Update or remove
 
-## Dependencies
+Use your AUR helper to update. Review any `.pacnew` files for the configuration
+and PAM policy, then start a new session with the updated package.
 
-Runtime: `pam`, `systemd>=250`, `systemd-libs`, `wayland`, `libxkbcommon`,
-`libsm`, `libice`, `gcc-libs`.
-Build: `cargo`, `pkgconf`.
+Before removing RSDM, follow [Disable DM](activate.md#disable-dm) and stop
+the Idle user service if enabled. Then remove whichever package you installed:
 
-The session manager uses a logind login session and a user D-Bus. XSMP is
-enabled by default; see [session-manager.md](../session-manager.md).
+```sh
+sudo pacman -R rsdm-bin
+# or: sudo pacman -R rsdm
+```
 
-A Wayland session must be installed and discoverable. Picker mode reads
-`.desktop` files from `/usr/share/wayland-sessions` (where compositors like niri,
-Hyprland, sway, KDE, GNOME drop their session files).
+::: details Package contents and dependencies
+Runtime: `pam`, `systemd>=250`, `wayland`, `libxkbcommon`, `libsm`,
+`libice`, `gcc-libs`. Source build additionally needs Cargo and pkgconf.
 
-## Keyrings
-
-The greeter `rsdm` is the login, so it unlocks the keyring in the same PAM stack
-that checks your password - just like `/etc/pam.d/login`. The shipped
-`/etc/pam.d/rsdm` already includes `system-login` plus `optional` gnome-keyring
-and kwallet lines, so those work as soon as the module is installed. For any
-other keyring, edit those lines. See [keyrings.md](../keyrings.md).
-
-## Notes
-
-- Setting `[dm] enable = false` makes `rsdm dm` exit with status 78. The
-  packaged unit accepts that status and stops without automatically restarting.
-  Its regular restart policy still returns to the Greeter after TTY fallback.
-- The systemd unit must keep `StandardOutput=journal` / `StandardError=journal`
-  so logs never land on the active TTY. `rsdm dm` refuses to start if stdout or
-  stderr points at the live terminal.
-- The lock screen is run from inside your session, not by the service. Bind
-  `rsdm lock` to a compositor key - see [lock.md](../lock.md).
+The package installs `/usr/bin/rsdm`, `/usr/lib/systemd/system/rsdm.service`,
+`rsdm@.service`, `/usr/lib/systemd/user/rsdm-idle.service`,
+`/etc/pam.d/rsdm`, `/etc/pam.d/rsdm-lock`, `/etc/rsdm.toml` and the
+logrotate rule, KWin authorization desktop file and packaged guide. See the [keyring guide](../keyrings.md) for Arch's optional
+GNOME Keyring and KWallet PAM entries.
+:::

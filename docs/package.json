@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vitepress dev .",
     "build": "vitepress build .",
+    "test": "node --test tests/*.test.mts",
     "preview": "vitepress preview ."
   },
   "devDependencies": {

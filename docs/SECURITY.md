@@ -1,3 +1,7 @@
+---
+description: Authentication, session lock, privilege boundaries and shutdown security.
+---
+
 # Security
 
 `rsdm` authenticates users through PAM and never implements password checking
@@ -8,8 +12,7 @@ Security boundaries:
 - PAM service: `rsdm`
 - Password buffers use `zeroize`
 - Passwords must not be logged
-- The session child drops privileges with supplementary groups, `setgid`,
-  `setuid`, and `chdir HOME` before `exec`
+- The gated session child starts a fresh rsdm image with a bounded sealed request, initializes supplementary groups, drops UID/GID and changes to HOME before executing the session
 - `XDG_SESSION_TYPE=wayland` is set for launched sessions
 - PAM environment is applied after validation
 - stdout/stderr must be connected to journald or another log sink, not the
@@ -72,8 +75,7 @@ of other names.
 - The compositor keeps the lock surface on top until `unlock` is sent, so the
   protocol - not the client - guarantees the screen stays covered
 - Secondary-output presentation never exposes session contents: background and
-  black are opaque lock surfaces, while `off` is used only after the compositor
-  has confirmed the session lock and falls back to opaque black if unsupported
+  black are opaque lock surfaces, and `off` currently uses opaque black while leaving outputs powered
 - Emergency `rsdm unlock` is root-only. It verifies the runtime file owner,
   target UID, executable name, `lock` argv and `/proc` start time, then pins the
   process with a pidfd and repeats process validation. It verifies the pinned
@@ -88,8 +90,7 @@ of other names.
 
 `idle.on_lock` and `idle.on_unlock` are argv commands executed as the desktop
 user. They never invoke a shell. With the built-in locker, `on_lock` is delayed
-until compositor lock confirmation; user activity never causes an automatic
-unlock.
+until compositor lock confirmation over a private readiness channel. A custom foreground locker only confirms process start. User activity never causes an automatic unlock. Hooks have a shared 30-second budget per phase; on_unlock requires a successful locker exit after readiness.
 
 ## Session coordination
 

@@ -1,289 +1,64 @@
+---
+description: Component boundaries, login lifecycle, rendering, session coordination and recovery.
+---
+
 # Architecture
 
-The production tree is intentionally narrow:
+RSDM uses a shared terminal-style UI with separate Linux VT and Wayland backends. Authentication, session lifecycle and rendering have distinct responsibilities.
 
-- `rsdm-core`: domain types, ports, config validation, login/runtime use cases
-- `rsdm-infra`: PAM, Unix user resolution, session discovery, state storage,
-  privilege dropping, and the DM session launcher
-- `rsdm-system`: shared Linux process handles, monotonic clocks, generation
-  identifiers, and logind transport; it contains no Session Manager policy
-- `rsdm-session-manager`: independent systemd `--user` session coordination,
-  application registration, shutdown, recovery, and optional libSM/libICE XSMP;
-  it depends on Core and System, without PAM, DM, Greeter, or Lock dependencies
-- `rsdm-ui`: the one, medium-independent design - theme palette, border styles,
-  animated backgrounds, banner/clock, the runtime design switcher, and the whole
-  screen composition. Everything draws against an abstract `Surface` (a grid of
-  styled glyph cells); it depends only on `rsdm-core` (no ratatui, no Wayland)
-- `rsdm-tui`: a thin greeter backend - a `Surface` over ratatui's cell buffer
-  plus the input loop; the look comes from `rsdm-ui`
-- `rsdm-lock`: a thin `ext-session-lock-v1` Wayland locker - a `Surface` over a
-  software framebuffer (the Greeter's console bitmap font and Unicode map, so it
-  draws the same frames and backgrounds as the TTY) plus PAM verification
-- `rsdm-idle`: an `ext-idle-notify-v1` client that supervises one lock process,
-  waits for its compositor-confirmed runtime state, and runs configured hooks
-- `rsdm-cli`: binary wiring for `dm`, `lock`, `idle`, emergency `unlock`, logs,
-  status, session commands, apps, and config validation; static terminal reports
-  live in its `output` module
+## Workspace
 
-CLI reports use ratatui widgets to lay out an in-memory buffer, then write rows
-and SGR styles to the current terminal. They never enter an alternate screen,
-change input mode or run an event loop. Each destination checks its own terminal
-width and selects plain output for redirects, `NO_COLOR`, `TERM=dumb` or very
-narrow terminals. The Greeter's ratatui backend and Lock's Wayland rendering are
-separate. CLI diagnostic events remain in file/journal logs; their terminal
-reports replace duplicate tracing lines while styling is active.
+| Crate | Responsibility |
+| --- | --- |
+| rsdm-core | Domain types, ports, configuration and login use cases |
+| rsdm-infra | PAM, user/session discovery, VT ownership, storage and DM launcher |
+| rsdm-system | Linux process handles, clocks, generation IDs and logind transport |
+| rsdm-ui | Shared cell-based design, palettes, animation, title and menus |
+| rsdm-tui | Ratatui Greeter backend and input |
+| rsdm-lock | Wayland session-lock surfaces, console-font renderer and authentication |
+| rsdm-idle | Wayland idle notifications, locker supervision and hooks |
+| rsdm-session-manager | User-side lifecycle, application units, recovery and XSMP |
+| rsdm-cli | Public command routing, diagnostics and power monitor |
 
-The CLI's `logs` module retains journalctl filters and access checks. Styled
-terminals request newline-delimited JSON, decode text/binary fields and render
-each record incrementally through `output/journal`. Runtime tracing events use
-`output/events` with the same layout; span context and event fields are retained.
-The CLI does not restyle file logs. Plain journal output delegates directly to
-journalctl as before.
+Core is independent of Linux OS APIs and rendering libraries. UI depends on Core. Session Manager depends on Core and System without depending on PAM or the frontends.
 
-Core does not depend on PAM, libc, ratatui, systemd, Wayland, or other OS APIs.
-There is no "skin" concept: a single composition in `rsdm-ui` renders on both
-fronts, so a theme/border/background/title means the same on the VT and on
-the pixel lock screen. Each backend only adapts cells to its medium and degrades
-truecolor as needed (the console quantizes; the framebuffer is exact). The
-runtime switcher (F1) mutates the live design in memory. The locker can
-explicitly persist its exposed fields through a comment-preserving, validated,
-atomic config update; the TTY greeter remains in-memory only.
+## Login lifecycle
 
-Greeter (`dm`) runtime path:
+1. DM validates configuration, resolves sessions and acquires its VT. It refuses a duplicate instance and waits for existing owners.
+2. Greeter presents the login form. A PAM-owning helper authenticates the user and enforces the final account policy.
+3. The helper establishes a logind session with its seat, TTY and Wayland desktop metadata. PAM can unlock the user's keyring.
+4. Greeter clears/releases its VT after authentication. The PAM owner starts a gated child with a fresh rsdm image and a sealed request containing the validated session setup.
+5. The child initializes groups, drops credentials, applies the environment, changes to HOME and execs the original command, normally wrapped in Session Manager.
+6. The root PAM owner observes the actual session lifetime, performs bounded recovery as the desktop UID and closes PAM. DM waits for the VT to be free before drawing again.
 
-1. Load and validate `/etc/rsdm.toml`
-2. Discover or resolve the selected Wayland session
-3. Acquire the configured VT: refuse a second rsdm outright; when a live
-   session still owns the VT (a compositor in graphics mode, a console login -
-   the restart-during-a-session case), wait for it to end rather than drawing
-   over it, so the fallback is never stacked onto a busy VT either. Only after
-   ownership is confirmed, restore a cooked line discipline before raw mode
-4. Render the TUI on the configured TTY
-5. On submit, fork the session-leader child and show "Authenticating..."
-   while it runs PAM in the background; a failure comes back inline (the
-   terminal is never torn down between attempts)
-6. In the child, exactly like login(1): authenticate, resolve the account,
-   set `PAM_TTY`/`XDG_VTNR`/`XDG_SEAT`/`XDG_SESSION_TYPE`/
-   `XDG_SESSION_DESKTOP`, then open the PAM session after `setsid()`: logind
-   binds the session to the right seat/VT and relocates the child into its own
-   `session-N.scope`, and a keyring module in the stack (if any) unlocks the
-   keyring with the just-typed password and publishes its agent variables into
-   the PAM environment
-7. The child parks once authorized; the greeter tears down and clears the
-   terminal, then releases it
-8. In the child: fork again; set environment, initialize groups, drop UID/GID,
-   chdir HOME, and exec the configured Wayland session. The root leader keeps
-   a running-session handle and shutdown delay FD while waiting, recovering
-   recorded units as the desktop UID, and closing/ending PAM. Stopping
-   `rsdm.service` cannot reach this child, so a
-   restart never logs the live session out
-9. The greeter waits for the child's final report, confirms the VT is free,
-   reclaims its foreground and cooked baseline, and redraws; on a fatal error
-   it hands the TTY to the fallback login (the
-   configured command first, then a built-in `agetty`/`login` chain) instead
-   of dying
+::: details Process and terminal boundaries
+The PAM owner lives in the logind session scope. Service restart does not intentionally terminate the live desktop. VT ownership checks cover controlling terminals and open VT descriptors; unreadable process state is treated as busy. Greeter temporarily suppresses console messages and restores the saved policy when leaving.
 
-Greeter power actions execute `rsdm logind-request` in a separate process.
-Its bus executor exits with the helper, so a denied request leaves no runtime
-threads in the Greeter before another PAM owner is forked.
-On terminal handover, the CLI creates a runtime after the Greeter has returned
-to query systemd's getty command; the fallback then replaces the process by exec.
+A start gate lets the PAM owner attempt its logind delay inhibitor before user-session setup; the gate closes if its parent fails. The root inhibitor remains held through user cleanup and PAM end. See [power and PAM lifetime](reference/session-lifecycle.md#power-and-pam-lifetime).
+:::
 
-Session, app, and power commands own their Tokio runtime at the CLI boundary.
-The PAM owner creates its inhibitor runtime after fork; Lock power workers
-create their own runtime while the Wayland event loop keeps running. Logind
-capability queries, request timeouts, and shutdown notifications use Tokio.
-Coordinator startup resolves its own PID through logind and checks the session
-owner UID. An `XDG_SESSION_ID` hint must match that verified session; it cannot
-select another login of the same user. Connection setup and session queries
-share one five-second budget.
-Validated disable updates interrupt bootstrap waits for identity verification
-and the lease worker. The launcher then runs the original command without
-waiting for logind's timeout or starting a control endpoint.
-GNOME and Plasma shutdown delegation runs in an asynchronous worker under the
-shared deadline; a failed or lost reply does not trigger a repeated request.
-Session Manager clients, stop hooks, and recovery await typed D-Bus requests.
-User-manager operations stay on the caller's runtime; compositor startup,
-application launches, preparation, observation, and teardown use Tokio tasks.
-Control endpoint registration and health checks run as Tokio tasks; dropping
-the server aborts its pending reconnection task.
-The workspace uses zbus 6's Tokio backend with explicit proxy, service and
-tracing features. Private bus fixtures hand owned Unix sockets to zbus and
-use asynchronous setup. User-manager
-jobs, reconnects, recovery leases, and shared deadlines use Tokio timers;
-Session Manager has no direct async-io, async-channel, or futures-lite dependency.
-Native session launchers use Tokio child processes. Cancelling an exit wait
-retains the owned child and its pidfd for escalation inside the shared deadline.
-XSMP keeps libSM/libICE on one dedicated thread with a current-thread runtime.
-Tokio channels carry its commands, startup and completion. Socket readiness uses
-AsyncFd registrations that restore blocking mode before any FFI call. Shutdown
-interrupts owned socket duplicates and awaits completion inside the shared
-deadline; dropping a handle never joins a possibly blocked thread.
+## Rendering and Lock
 
-When `session_manager.enabled` is set, step 8 wraps the original command in
-`rsdm session start`, with the selected config and desktop metadata. Its user
-coordinator owns one generation, separate from logind and desktop-entry IDs.
-Typed D-Bus handlers feed a serial lifecycle actor. Start/stop jobs, app
-preparation, control-bus maintenance and serialized finalize publication run in
-workers. The actor uses Tokio channels and `select!` for requests, completions,
-logind notices, termination signals, and periodic observation. SIGTERM/SIGINT use
-Tokio signal streams after session exec. Reply delivery and recovery worker
-draining share their original budgets through asynchronous waits.
-Deadline revisions use Tokio watch so every pending operation observes both
-shortening and revocation without retaining watchers after completion.
-The actor, startup, recovery and app workers await recovery record reads and writes
-on blocking filesystem tasks. A record lease, validation and mutation stay within
-one task; D-Bus waits do not retain that lease. Target ownership reads run in
-workers; the actor checks the current lifecycle and records ownership before
-allowing anchor activation. Pending reads leave status, stop and cancel available.
-Registration and recovery records precede side effects. InvocationID and pidfd
-checks keep cleanup/signals attached to the recorded processes.
-Executable lookup, procfs membership checks and XSMP record/credential files also
-use blocking filesystem tasks. Cookie registration stays on the libICE thread;
-unclaimed credential files are removed when a cancelled startup job completes.
-Cloned user-manager connections share four slots for short requests, including
-reference restoration. XSMP listener creation, accept, protocol dispatch and
-callback replies, checkpoints and cancellation use the same pool. Accept releases
-its slot before the separate user-manager admission checks. Cancellation releases
-an existing save even after disable or deadline expiry, with the worker's bounded
-cleanup grace. Local disconnect disables ICE shutdown negotiation and sends no
-new protocol requests. Job completion and application-exit waits release those
-slots; preparation starts for every application before collecting worker results.
+Both frontends render the same styled glyph cells using the shared UI Surface. Greeter adapts them to the VT's character grid; Lock rasterizes them with the published console font and applies output scaling. Each has an independent design configuration.
 
-Bare compositors use a transient service and a per-generation anchor. The
-official `niri-session` runs unchanged outside that service and owns its real
-notify `niri.service`. GNOME and Plasma retain their native session managers.
-RSDM publishes selected environment values, preserves native graphical-target
-ownership and creates graphical/autostart targets only for its managed lifecycle.
+Lock uses `ext-session-lock-v1`, creates opaque surfaces and waits for compositor confirmation. Authentication runs separately from the Wayland event loop. Emergency unlock is authenticated as described in [security](SECURITY.md#lock-screen). The personal overlay can persist only selected visual fields.
 
-Public Session Manager commands receive their configuration explicitly. When
-disabled at command entry, app and session start run the original command with
-its inherited environment and exit status. Finalize, stop hooks and recovery do
-nothing; status, stop and cancel report disabled without consulting a bus or
-runtime record. CLI configuration reads run on blocking workers. DM power uses
-logind directly; Lock reads the current policy on its power worker and also uses
-logind when SM is disabled, even with an old generation in its environment.
+Idle tracks each seat via ext-idle-notify-v1. Its built-in locker readiness is a private channel from the confirmed lock, while an external foreground locker supplies process-start readiness. Hooks run as the user.
 
-The configuration loader provides `watch_session_config`, a typed Tokio watch
-receiver for session policy. It reopens the path every 250 ms on blocking
-workers, so in-place edits, atomic replacement and recreation are observed.
-Invalid or missing updates retain the last validated policy. Unchanged session
-policy does not notify receivers; dropping all receivers ends monitoring.
-Updates retain a disable counter, so a receiver that skips intermediate values
-still observes a validated false-to-true transition as disabling its generation.
+## Session coordination
 
-Every user-bus control method verifies session membership. It checks
-bus UID/PID credentials, pins the caller, and verifies its actual logind login.
-Processes without a logind login must belong to a live user service or scope.
-Shared user units use the primary graphical login selected by logind's user
-`Display` property; no compositor-specific scope names or environment tokens
-establish membership. If that display does not match, only a registered
-application or compositor with its recorded InvocationID is accepted. Another
-actual login of the same UID is rejected. Authorization queries have a
-five-second total budget and share four concurrent slots. Disabling closes admission before verified requests
-can be queued. `Handshake` returns the generation after these same checks;
-CLI app, finalize, stop and cancel use that result instead of trusting an
-environment generation hint.
-The managed compositor's verified InvocationID is persisted when its start job
-completes, before readiness, so its Finalize request can prove membership.
-An early compositor caller waits for this publication within the same query
-budget. Closing admission interrupts pending authorization immediately.
+A per-UID coordinator owns one generation and a non-replaceable D-Bus service name. Typed requests feed a serial lifecycle actor; workers perform systemd operations, application preparation, readiness and recovery.
 
-Shutdown preparation publishes a durable transaction ID and original monotonic
-budget before workers can dispatch application requests. Ordinary requests use
-the maximum registered timeout (30 seconds without apps) plus 90 seconds.
-Retries reuse that identity and budget; logind can shorten it, and recovery
-retains the saved absolute deadline. Cancellation records its result before
-admitting a new preparation.
+Registered launches use transient user units. The coordinator records ownership before issuing side effects and verifies invocations, process handles and cgroups when acting. It preserves native desktop lifecycle where available. Application policies, readiness and cancellation are exposed through [Session Manager](session-manager.md).
 
-CLI attach starts a single independent transient user service. The private
-bootstrap socket is passed as its stdin; kernel credentials identify the actual
-originating process, whose UID, logind ID and graphical type are verified before
-the service acquires the UID lease. Its own unit and InvocationID are recorded
-for internal helper authorization. Partial coordination publishes no manager
-environment or graphical targets, creates no WM process and owns no PAM login.
-New applications receive the generation's private XSMP endpoint. After app
-preparation, logout discovery pins native peers on their original user bus and
-requires a broker-provided ProcessFD and their exact logind login identity.
-Numeric credentials alone cannot establish attached native ownership. The actor
-retains cancellation during discovery, then persists its dispatch phase before
-authorization. Dispatch repeats login, owner and process checks inside the shared
-IPC quota and checks the pending transaction and current budget. Unauthenticated
-or absent native peers return
-prepared; peers outside a logind session are unavailable and attached discovery
-never activates a native helper. Disabling drops the coordinator and retains the
-external session.
+::: details Async and recovery implementation
+Session, app and power CLI commands own a Tokio runtime. The PAM owner starts its inhibitor runtime after fork. Lock keeps its event loop running while power/authentication workers work. XSMP uses its own libSM/libICE thread with bounded shutdown. Recovery leases and records are private, and filesystem work is kept away from D-Bus waits.
 
-CLI start, stop hooks and recovery consume these updates. A disabled generation
-closes control admission and cancels pending manager calls and preparation. It
-persists its disabled marker, releases the shutdown inhibitor and interrupts the
-private XSMP worker. Already accepted external requests cannot be recalled.
-It leaves application units, WM, anchor and exported environment running.
-The launcher retains its child and compositor pidfd independently of coordinator
-workers and passively waits for the actual WM exit before returning to DM.
-For GNOME/Plasma it pins the process owning `org.gnome.Shell`/`org.kde.KWin`,
-after checking its bus credentials and stable unique owner. The desktop session
-manager exiting, or the WM releasing its bus name, does not release a pinned WM.
-Broker-provided `ProcessFD` takes precedence over the numeric PID. Older buses
-fall back to opening a pidfd for `ProcessID`; this cannot rule out reuse before
-the handle is opened. Without a compositor identity, the original launcher
-remains the lifetime fallback and does not prove the exit of a detached WM
-that never exposes either name.
-App stop commands preserve the coordinator's configuration path in their argv.
-Before closing XSMP peers, disabling cancels their pending saves and interactions.
-Worker shutdown allows up to 100 ms for this cleanup, then interrupts stalled
-sockets within the same 500 ms completion budget; the caller's deadline can
-shorten either wait. It never sends a new SaveYourself, phase 2 or Die after disable.
+Request slots, absolute deadlines, saved dispatch intent and live ownership checks prevent stale requests from affecting later generations. User-manager reexec and bus reconnection are observed without treating them as logout. Read [lifecycle internals](reference/session-lifecycle.md) for precise guarantees, limits and recovery behavior.
+:::
 
-Each generation reserves a private one-byte retirement file before publishing
-its session record. Disabling updates that file independently of atomic record
-replacement, so denied directory writes cannot revive the old generation.
-Record errors still allow worker draining, inhibitor release and XSMP shutdown.
-Hooks check retirement before dispatch and while waiting, even if their own
-configuration watcher missed the disable transition. Retirement is checked
-before parsing a damaged or missing session record.
+## CLI output
 
-Recovery records can permanently mark a generation disabled. Once marked, app
-stop hooks and recovery leave its applications, compositor, anchor and exported
-environment untouched, even when the current configuration enables SM again.
-An attempt to save that generation as enabled is rejected. Older records without
-the retirement file retain their original recovery behavior and disabled field.
+Styled reports use in-memory Ratatui widgets and write rows to ordinary scrollback. Terminal detection selects plain output on redirects, `NO_COLOR`, dumb or narrow terminals. Styled journal reads decode records incrementally; plain output delegates to journalctl.
 
-Orderly logout closes the launch gate, drains accepted jobs and prepares
-registered `rsdm app` processes in parallel before infrastructure teardown.
-Each app also has a synchronous ExecStop backstop sharing the saved deadline.
-Optional libSM/libICE support implements authenticated local XSMP, phase-2
-barriers, interaction, cancel and Die; native DE XSMP is preserved. Save replies
-and helper success never replace actual cgroup exit. See
-[session-manager.md](session-manager.md) for provider/policy boundaries.
-
-Locker (`lock`) runtime path:
-
-1. Load config and resolve the seated user, theme, ASCII title, and wallpaper
-2. Bind `ext-session-lock-v1`, `fractional-scale-v1`, and `viewporter`; select
-   the configured primary output (or the largest current mode), and create one
-   lock surface per active output
-3. Reuse one physical-pixel software canvas and at most two shm buffers per
-   output, writing only released buffers and retaining redraw requests while
-   both are busy. The primary receives the full
-   interactive scene; secondary outputs receive background-only or black.
-   `off` currently uses the black fallback and leaves output power unchanged
-4. Verify typed passwords through the `rsdm-lock` PAM service (auth only),
-   rate limited
-5. On success send `unlock`, round-trip so the compositor acknowledges it, then
-   exit (an unflushed unlock leaves the compositor stuck on an abandoned lock)
-
-Lock power requests run in a separate worker while the Wayland event loop keeps
-servicing opaque surfaces. Cancellation and request failure never invoke unlock.
-
-Idle (`idle`) runtime path:
-
-1. Bind the compositor's idle notifier to every advertised seat with the
-   configured timeout and inhibitor policy, following seat additions/removals
-2. Track `idled`/`resumed` per seat. When all connected seats are idle, refuse
-   duplicate cycles or an already-active rsdm lock, then spawn the current
-   executable as `rsdm lock`
-3. Observe the verified runtime state written only after compositor lock
-   confirmation, then run `on_lock`
-4. Wait for authentication or emergency unlock, run `on_unlock`, and re-arm for
-   the next compositor idle event
+See [development](development.md) for build and test commands and [security](SECURITY.md) for trust boundaries.

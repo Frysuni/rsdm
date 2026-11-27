@@ -1,50 +1,78 @@
+---
+description: Diagnose failed login, session startup, Lock, Idle and shutdown safely.
+---
+
 # Troubleshooting
 
-## Lock screen cannot be unlocked
+Keep an alternate working VT before changing DM or PAM. Run desktop commands as the logged-in user.
 
-Switch to another VT (for example `Ctrl+Alt+F3`), log in, then run:
+## Collect diagnostics
 
 ```sh
+rsdm --version
+rsdm validate-config
 rsdm status
-rsdm unlock
+rsdm session status
+rsdm logs --lines 100
 ```
 
-`rsdm unlock` resolves the current user before elevation and invokes itself via
-sudo; if sudo is not installed it tries pkexec. When already root, use
-`rsdm unlock --user alice` if more than one user has an active lock. The command
-does not kill the locker: it validates its PID/UID/start time and asks that live
-Wayland client to perform the protocol unlock. A completely crashed lock client
-cannot be recovered by another client; the Wayland protocol intentionally keeps
-an abandoned session locked, so restart the compositor/session in that case.
-
-Use `rsdm logs --follow` for the combined system and user journal, or
-`rsdm logs --component dm|idle|lock` to narrow it.
-
-| symptom | cause / fix |
-|---|---|
-| Logs bleed onto the greeter screen | the unit lacks `StandardOutput=journal` / `StandardError=journal`. `rsdm dm` also refuses to start if stdout/stderr is the active TTY. |
-| Compositor will not start / no GPU access | logind did not bind the session to the VT. Check the `rsdm` PAM service includes `pam_systemd` (automatic on NixOS) and that `[dm.tty].path`/`seat` are correct. |
-| `rsdm lock` says "could not find wayland compositor" | it was not run inside a Wayland session (`$WAYLAND_DISPLAY` unset). Bind it to a compositor key. |
-| Lock screen never unlocks | check `/etc/pam.d/rsdm-lock` (auth/account only). You can still switch VT and log in. |
-| Keyring not unlocked | The keyring module must be in the `rsdm` login stack. NixOS: set `services.rsdm.keyring`. Arch: check the keyring lines in `/etc/pam.d/rsdm`. Confirm the keyring package is installed. See [keyrings.md](keyrings.md). |
-| User services (panel/launcher) do not start | confirm they are `WantedBy=graphical-session.target` and enabled in `systemctl --user`; read `journalctl --user -b`. If the compositor manages its own session (niri/sway), rsdm does not touch its targets. |
-| `another rsdm ... owns` | a second rsdm greeter holds the same VT; rsdm refuses to start twice on one terminal - fix `[dm.tty].path`. |
-| `VT is owned by a live session; waiting` | a compositor or console login still holds the VT (typically a greeter restart during a running session). rsdm waits for that session to end instead of drawing over it; this is normal after `systemctl restart rsdm` or a rebuild. |
-| `rsdm app` says `graphical-session.target is not active` | the app was launched outside a running graphical session (or the session manager never anchored the target). `rsdm app` units are stopped via that target, so launching without it would leak the app past logout. Check `systemctl --user status graphical-session.target`. |
-| Greeter never appears at boot | the system did not reach `graphical.target`. Check `systemctl get-default`; the NixOS module sets `systemd.defaultUnit = "graphical.target"`. |
-| Lock font or size differs from the Greeter | Remove an explicit `lock.size` override, use the same `dm.tty.path`, and start the updated DM before logging in so it can publish the console font. Without the snapshot Lock uses a fallback 8x16 font. Title art also needs matching design settings. |
-| Wallpaper not visible behind the lock box | the wallpaper shows through only when `[lock.design].wallpaper` is set; check the path and that `wallpaper_dim` is not `0` (which blacks it out). |
-| Lock UI appears on the wrong monitor | set `[lock].primary_output` to the connector name shown by `niri msg outputs` (or the compositor equivalent). Without it rsdm selects the largest current pixel mode. |
-| Lock looks blurry at scale 1.5 | use a compositor with `fractional-scale-v1` and `viewporter` support and check debug logs for the advertised `scale_120`; rsdm otherwise uses a crisp integer-scale fallback. |
-| TTY greeter is cloned or small on a larger monitor | fbcon exposes one global VT grid, not per-output surfaces. Disable the unwanted connector for the console with a kernel `video=<connector>:d` parameter; see [display-manager.md](display-manager.md#multiple-monitors). |
-
-## Useful commands
-
+::: details Systemd logs and services
 ```sh
-rsdm validate-config --config /etc/rsdm.toml   # check config, print warnings
-journalctl -u rsdm.service -b                          # greeter logs
-journalctl --user -b                                   # session/user-service logs
+systemctl status rsdm.service
+journalctl -b -u rsdm.service
+systemctl --user status graphical-session.target
+systemctl --user status rsdm-idle.service
+journalctl --user -b
 ```
 
-Raise verbosity with `[logging] level = "debug"` (or `trace`), or temporarily
-`RUST_LOG=rsdm=debug`.
+For a template instance replace `rsdm.service` with `rsdm@tty2.service` or the actual unit. The CLI DM filter covers the standard unit. Use `logging.level` = "debug" or `RUST_LOG`=rsdm=debug for more detail at the next safe launch.
+:::
+
+## Login and Greeter
+
+| Symptom | Check |
+| --- | --- |
+| No Greeter at boot | Enabled unit, `graphical.target`, TTYPath and display-manager alias |
+| VT already owned / waiting | An active login still holds that VT; wait or use another console |
+| No sessions listed | Installed Wayland desktop files and `dm.session_dirs`; check fixed_session |
+| Authentication fails | PAM stack, account/group policy and attempt limit |
+| Garbled TTY | Use the packaged unit with journal output; check kernel console and font |
+| Keyring remains locked | [PAM keyring setup](keyrings.md) |
+| Greeter cloned across displays | Linux fbcon exposes one shared VT grid |
+
+If login fails, use another VT to inspect configuration and logs. See [activation and recovery](installation/activate.md) or roll back the NixOS configuration. Do not restart services holding an active session just to collect logs.
+
+## Lock and Idle
+
+| Symptom | Check |
+| --- | --- |
+| Lock refuses to start | `lock.enable`, Wayland session-lock protocol, current user, personal overlay |
+| Wrong monitor | `lock.primary_output`; use the compositor's output list |
+| Font differs from Greeter | Remove size override and republish the console font at the next DM start |
+| Wallpaper invisible | Absolute readable PNG/JPEG path and wallpaper_dim above zero |
+| Blurry fractional scale | `fractional-scale-v1` and viewporter support; check scale_120 in debug logs |
+| Idle never locks | `idle.enable`, running user service, protocol globals and idle inhibitors |
+| Hook missing | Built-in confirmation, custom locker exit status and hook logs |
+
+Use [emergency unlock](lock.md#emergency-unlock) only from an authenticated administrator session if a live locker cannot authenticate. A crashed locker may require terminating the affected graphical session.
+
+## Session Manager
+
+| Symptom | Check |
+| --- | --- |
+| inactive / disabled | Start or attach inside the correct graphical login; check enabled policy |
+| starting persists | Compositor readiness; run finalize inside the desktop |
+| partial | Read the capability reasons; external sessions intentionally have limited lifecycle control |
+| App absent from status | Register the first instance through rsdm app; existing processes are not adopted |
+| App forced | Use its documented quit method, increase timeout or use cancel where supported |
+| prepared | Native control unavailable or attached lifecycle; exit the original desktop separately |
+| delegated | Check native logout dialog; request acceptance is not final completion |
+| Cancellation rejected | Preparation may already have committed teardown |
+
+See [status and outcomes](session-manager.md#status-and-outcomes) and [backend limitations](reference/session-backends.md).
+
+## Report an issue
+
+Include the RSDM version, distribution, compositor/version, relevant configuration (remove sensitive values), session status, and a short journal excerpt. Mention the reproduction steps and expected behavior. Never include passwords, tokens or private authentication material.
+
+[Open an issue](https://github.com/Frysuni/rsdm/issues/new/choose).

@@ -1,79 +1,77 @@
+---
+description: Set automatic Wayland idle locking, inhibitor behavior and lock/unlock hooks.
+---
+
 # Idle locking
 
-`rsdm idle` is a small Wayland idle daemon built into rsdm. It uses
-[`ext-idle-notify-v1`](https://wayland.app/protocols/ext-idle-notify-v1), so the
-compositor decides when the seat is idle; rsdm does not capture global keyboard
-or pointer input.
+Idle tracks compositor input inactivity and starts a locker after the configured delay. It works independently of DM.
 
-The monitor follows every seat advertised by this Wayland connection, including
-hotplugged seats, and starts locking only when all of them are idle. Activity on
-any connected seat prevents a different idle seat from locking the session.
+## Enable
+
+::: code-group
+
+```toml [TOML]
+[lock]
+enable = true
+
+[idle]
+enable = true
+timeout = 300
+```
+
+```nix [NixOS]
+services.rsdm.lock.enable = true;
+services.rsdm.idle = {
+  enable = true;
+  timeout = 300;
+};
+```
+
+:::
+
+The NixOS module installs the graphical user service. On other distributions, enable the packaged service from your graphical session:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now rsdm-idle.service
+```
+
+For a compositor without `graphical-session.target` integration, launch `rsdm idle` from its startup configuration instead. Use one idle monitor. Stop any duplicate automatic locker. For foreground diagnostics, run `RUST_LOG=rsdm_idle=debug,rsdm_lock=debug rsdm idle` instead of the service.
+
+## Inhibitors
+
+By default, application idle inhibitors are respected, for example during video playback. Set `ignore_inhibitors = true` under `[idle]` to track raw input inactivity instead. This requires `ext-idle-notify-v1` version 2; version 1 falls back to respecting inhibitors.
+
+All seats must become idle before locking. Activity resets the timer but never unlocks the screen. A failed locker is retried while every monitored seat remains idle.
+
+## Run commands when locking or unlocking
 
 ```toml
 [idle]
 enable = true
 timeout = 300
-ignore_inhibitors = false
-lock_command = []
-on_lock = [["notify-send", "rsdm lock active"]]
-on_unlock = [["notify-send", "rsdm unlocked"]]
+on_lock = [["notify-send", "Screen locked"]]
+on_unlock = [["notify-send", "Screen unlocked"]]
 ```
 
-- `timeout` is measured in seconds.
-- With `ignore_inhibitors = false` (the default), visible applications may
-  inhibit idle locking during video playback or a presentation. `true` asks
-  protocol version 2 to consider input activity only; a version 1 compositor
-  logs a warning and continues honoring inhibitors.
-- An empty `lock_command` starts the current rsdm binary with `lock` and the
-  same config path. This mode has a readiness handshake: `on_lock` runs only
-  after the compositor confirms that the session is securely locked.
-  Confirmation uses a private inherited socket, independently of the runtime
-  file used for status and emergency unlock. A failed state-file write does
-  not make the monitor terminate an already confirmed locker.
-- A non-empty `lock_command` is an argv array, for example `["swaylock"]`.
-  It must stay in the foreground until unlock; daemonizing commands make it
-  impossible for rsdm to know when the lock ends. rsdm cannot observe another
-  locker's protocol state, so `on_lock` runs after the foreground process starts.
-  Arguments remain literal in both direct and service-managed launches;
-  dollar signs do not request environment-variable expansion.
-- `on_lock` and `on_unlock` are argv commands, run in order as the desktop
-  user. They never invoke a shell. `on_unlock` runs only for a lock cycle whose activation reached the
-  configured readiness point and whose locker exited successfully. It also runs
-  after a privileged emergency unlock, but never after a crash, signal, nonzero
-  exit, or wait failure. Do not put untrusted config text in these fields.
-  Each phase has one 30-second budget for all its hooks, including forced
-  termination and exit checks. A timed-out hook and its owned group receive SIGKILL,
-  remaining hooks in that phase are skipped, and a later cycle can run normally.
-  Keep hooks in the foreground; explicitly detached processes leave that group.
-  Slow hooks do not keep an exited locker marked active: a later idle threshold
-  can start a new lock while the previous cycle's hooks finish. Within each
-  cycle, `on_unlock` still waits for `on_lock` to finish.
+The example requires `[lock].enable = true`. Hooks run as the desktop user, in order, as literal argv arrays. Use explicit `sh -c` only if you intentionally need shell syntax.
 
-The daemon never unlocks on pointer movement or resume. Activity only resets
-the next idle timeout; authentication still belongs to `rsdm lock`.
-If the locker cannot start or exits abnormally, the daemon retries while all
-monitored seats remain idle.
+::: details Hook timing
+The built-in locker reports compositor-confirmed lock over a private readiness channel. `on_lock` runs after that confirmation. With a custom foreground locker, readiness means the process started. `on_unlock` runs only after a successful exit following readiness (including emergency unlock). It does not run after a crash, signal or nonzero exit. Each hook phase shares a 30-second budget; timed-out hook process groups are killed and later hooks in that phase are skipped. A new lock cycle can start while previous hooks finish. Under the user service, managed locks have their own transient scope so restarting the monitor does not kill a live lock.
+:::
 
-## Starting the daemon
+## Use another locker
 
-NixOS enables `rsdm-idle.service` automatically when
-`services.rsdm.idle.enable = true`. With a packaged user unit:
-
-```sh
-systemctl --user enable --now rsdm-idle.service
-systemctl --user status rsdm-idle.service
+```toml
+[idle]
+enable = true
+lock_command = ["swaylock"]
 ```
 
-It can also run directly in the foreground for debugging:
+Use a foreground command that stays alive until unlock. The built-in Lock component can remain disabled when a custom locker is configured.
 
-```sh
-RUST_LOG=rsdm_idle=debug,rsdm_lock=debug rsdm idle
-```
+::: warning Suspend
+Idle reacts to compositor inactivity. It does not by itself guarantee the screen is locked before every system suspend. If you need pre-suspend locking, use your compositor/desktop's supported readiness-aware integration and test it separately.
+:::
 
-The service is tied to `graphical-session.target`, so it stops with the Wayland
-session. The built-in locker also requires `[lock].enable = true`; an alternate
-`lock_command` does not. The compositor must implement `ext-idle-notify-v1`.
-When service-managed, each locker runs in its own transient user scope. Thus
-stopping/restarting the idle monitor cannot kill an active session-lock owner
-and strand the compositor on an abandoned lock; systemd still tracks both
-process lifecycles normally.
+See [configuration](configuration.md#idle) and [troubleshooting](troubleshooting.md).

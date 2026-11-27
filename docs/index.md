@@ -1,16 +1,16 @@
 ---
 layout: home
 title: Rust Display Manager for Wayland
-description: Learn how to install, configure and use RSDM, a standalone Rust display manager, TTY greeter and Wayland screen locker.
+description: Install, configure and use RSDM on Linux. PAM login, a terminal greeter, Wayland locking and systemd session management.
 
 hero:
   name: RSDM
   text: Rust Display Manager
-  tagline: PAM login, a terminal greeter, Wayland screen locking, idle handling and orderly session shutdown in one binary.
+  tagline: A terminal Greeter, secure Wayland Lock and orderly session shutdown. One binary, independent components.
   actions:
     - theme: brand
-      text: Installation guides
-      link: '#choose-your-distribution'
+      text: Get started
+      link: /getting-started
     - theme: alt
       text: Configuration
       link: /configuration
@@ -19,23 +19,23 @@ hero:
       link: https://github.com/Frysuni/rsdm
 
 features:
-  - title: Install RSDM
-    details: Follow distribution-specific instructions for NixOS, Arch Linux, Fedora and Ubuntu.
-    link: '#choose-your-distribution'
-  - title: DM and Greeter
-    details: Configure the virtual terminal, PAM login, session selection and terminal appearance.
+  - title: Install
+    details: NixOS module, Arch AUR and manual installation for Fedora or Ubuntu.
+    link: /getting-started#choose-your-distribution
+  - title: DM & Greeter
+    details: Choose a session, authenticate with PAM and customize your terminal login.
     link: /display-manager
-  - title: Lock and idle
-    details: Secure a compatible Wayland session and lock automatically after inactivity.
+  - title: Lock & Idle
+    details: Lock compatible Wayland desktops, configure displays and automate inactivity handling.
     link: /lock
-  - title: Session management
-    details: Launch applications and coordinate orderly logout, reboot and poweroff through systemd.
+  - title: Session Manager
+    details: Register apps, preserve save dialogs and coordinate logout, reboot and poweroff.
     link: /session-manager
-  - title: Configuration reference
-    details: Find TOML settings, design options and examples for each component.
+  - title: Configuration
+    details: Every TOML field, its default, accepted values and NixOS equivalents.
     link: /configuration
   - title: Troubleshooting
-    details: Inspect logs, validate settings and recover from common login and locking issues.
+    details: Diagnose startup, authentication, session readiness and lock problems.
     link: /troubleshooting
 ---
 
@@ -43,9 +43,12 @@ features:
 
 ## Choose your distribution
 
-- [NixOS](installation/nixos.md) — flake module with stable and unstable channels.
-- [Arch Linux](installation/arch.md) — AUR source and binary packages.
-- [Fedora](installation/fedora.md) — dependencies and installation instructions.
-- [Ubuntu](installation/ubuntu.md) — dependencies and installation instructions.
+| Distribution | Recommended installation |
+| --- | --- |
+| [NixOS](installation/nixos.md) | Flake module with stable and unstable channels |
+| [Arch Linux](installation/arch.md) | AUR source or prebuilt package |
+| [Fedora](installation/fedora.md) | Build from source or install a release |
+| [Ubuntu](installation/ubuntu.md) | Build from source or install a release |
 
-RSDM is experimental. See the [project compatibility table](https://github.com/Frysuni/rsdm#compatibility) for the current testing status and [security documentation](SECURITY.md) for runtime guarantees.
+RSDM is experimental. Check [compatibility](compatibility.md) before switching
+your login stack.

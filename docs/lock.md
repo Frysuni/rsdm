@@ -1,176 +1,102 @@
-# Lock screen
+---
+description: Enable and customize the Wayland screen locker, including multi-monitor behavior.
+---
 
-`rsdm lock` is an `ext-session-lock-v1` Wayland client. It runs inside an already
-running Wayland session, covers every output, and unlocks only when the seated
-user types their password. It renders the same design as the greeter, drawn onto
-a software framebuffer.
+# Lock
 
-```sh
-rsdm lock --config /etc/rsdm.toml
-```
+Lock is a Wayland client using ext-session-lock-v1. It can run with or without RSDM DM.
 
-It must run inside your session (it needs `$WAYLAND_DISPLAY`), so bind it to a
-key in your compositor or enable rsdm's user-session idle service.
+## Enable and try
 
-## Binding it
+::: code-group
 
-```ini
-# Hyprland (~/.config/hypr/hyprland.conf)
-bind = SUPER, L, exec, rsdm lock
-```
-
-```kdl
-// niri (~/.config/niri/config.kdl)
-binds { Super+L { spawn "rsdm" "lock"; } }
-```
-
-Built-in idle locking:
-
-```toml
-[idle]
+```toml [TOML]
+[lock]
 enable = true
-timeout = 300
-on_lock = []
-on_unlock = []
 ```
 
-See [idle.md](idle.md). External idle daemons remain supported:
+```nix [NixOS]
+services.rsdm.lock.enable = true;
+```
+
+:::
+
+Inside your graphical session as your normal user:
 
 ```sh
-# sway/wlroots
-swayidle -w timeout 300 'rsdm lock' before-sleep 'rsdm lock'
-# Hyprland
-hypridle   # with a listener that runs `rsdm lock`
+rsdm lock
 ```
 
-See [compositors/niri.md](compositors/niri.md) and
-[compositors/hyprland.md](compositors/hyprland.md).
+Enter your account password to unlock. An empty field can start a PAM conversation (for example fingerprint or token authentication). Later prompts request their own credentials. Your compositor must support and permit the session-lock protocol; see [compatibility](compatibility.md).
 
-Set `[lock].enable = true` to allow locking; with it `false`, `rsdm lock`
-refuses to lock (so an idle daemon can be wired up without ever blanking).
+## Keyboard shortcuts
 
-## Multiple outputs and scaling
+| Key | Action |
+| --- | --- |
+| Enter | Submit credentials |
+| Esc | Clear input or cancel PAM conversation |
+| F1 | Appearance menu, if enabled |
+| F9 / F10 | Hibernate / sleep, if available |
+| F11 / F12 | Reboot / power off |
 
-The unlock UI is rendered on exactly one output. Other outputs remain securely
-covered but contain no clock, form, status, menu, or keyboard hints:
+Power actions require two presses. A different key cancels the confirmation. The screen remains locked on rejection or cancellation.
+
+Add rsdm lock to a key binding in [niri](compositors/niri.md), [Hyprland](compositors/hyprland.md) or [Sway](compositors/sway.md).
+
+## Multiple displays and scaling
 
 ```toml
 [lock]
-enable = true
-primary_output = "DP-1"       # omit to select the largest connected output
-secondary_output = "background" # background | black | off
-# size = 2                       # 1..12; omit for TTY-like automatic sizing
+primary_output = "DP-1"
+secondary_output = "black"
+size = 2
 ```
 
-`background` keeps only `[lock.design]` wallpaper/effects. `black` paints opaque
-black. `off` currently uses the same opaque black fallback on every compositor;
-outputs remain enabled and their topology stays unchanged.
-Find niri names with `niri msg outputs`.
+The largest connected output by pixel area is selected if `primary_output` is omitted. The unlock form, menu, clock and status appear only on the primary output. Secondary outputs show the background or opaque black. The `off` setting currently behaves like `black` and keeps displays powered.
 
-Wallpaper scaling is cached separately for each output at its physical buffer
-size. Resizing or changing output scale replaces that output's cache; animation,
-text size, and dim changes reuse the prepared image. If cache allocation fails,
-Lock still renders by resampling the original image.
+Omit `size` (or set it to 1) to use the Greeter's native physical console glyph dimensions. Values 2–12 enlarge the font. Fractional desktop scaling is handled separately.
 
-Each output reuses its software canvas and at most two SHM buffers. Buffers held
-by the compositor remain read-only until `wl_buffer.release`, including during
-resize; when both are busy, the latest redraw stays pending. Unchanged black
-secondary frames are skipped. Rendering still copies each submitted software
-frame into SHM; it does not introduce borrowed pixel storage or GPU rendering.
-With a static background, the visible clock requests a redraw when its displayed
-minute/date changes, without waiting for keyboard or compositor events.
+::: details Matching the Greeter's font
+DM publishes the console font to `/run/rsdm/console-font-<tty>.bin`. Lock reads it and falls back to 8×16 if it is unavailable. Restart DM at the next safe login after changing the console font.
+:::
 
-Sleep and Hibernate shortcuts are offered only when logind's `CanSuspend` or
-`CanHibernate` reports `yes` or `challenge` for the locker user. The snapshot is
-queried in a background worker with a five-second deadline covering connection
-setup and both calls; until it succeeds, these shortcuts are hidden. The actual
-request still goes through logind with interactive authorization enabled, so a
-policy change or unavailable authorization agent can reject the action without
-unlocking the screen.
+## Appearance and personal settings
 
-The locker renders a separate physical-pixel buffer for every output. On
-fractionally scaled outputs (for example niri `scale 1.5`) it follows
-`fractional-scale-v1` and `viewporter`, preserving the TTY-like density and crisp
-pixel glyphs instead of asking the compositor to enlarge a logical-size buffer.
+```toml
+[lock.design]
+theme = "catppuccin"
+wallpaper = "/etc/rsdm-wallpaper.png"
+wallpaper_dim = 6
+background = "rain"
+background_opacity = 8
+```
 
-With `[lock].size` omitted, Lock uses the Greeter console font's native physical
-pixel dimensions, the same as `size = 1`, independently of output resolution and
-desktop scaling. Set `size` from `1` through `12` to multiply both glyph
-dimensions by that integer. Both size and the secondary-output policy can be
-previewed immediately through `F1`.
+Use an absolute PNG or JPEG path readable by the desktop user. The wallpaper is cover-fit and center-cropped. Its dim level is applied first, followed by the animation and login card. The F1 menu previews supported visual options. Select **Save settings** to store personal overrides in the user's configuration directory. Wait for the save confirmation before unlocking. These override the corresponding system visual settings on the next launch; see [configuration](configuration.md#personal-lock-settings) for the exact fields and reset procedure.
 
-## Look
+::: details Rendering and background behavior
+Full-field effects (plasma, fire) remain visible behind the card and text. Sparse effects (matrix, rain, starfield) retain the theme background behind the card. With wallpaper and no animation the card is transparent. Lock caches scaled wallpaper per output and reuses up to two shared-memory buffers per output. Without fractional-scale and viewporter support, it uses an integer-scale fallback.
+:::
 
-The locker design is `[lock.design]` - the same fields as the greeter, set
-independently. A field left unset uses its own default, not the greeter's value.
-`F1` opens the runtime switcher (when `menu = true`). Besides the shared design
-controls, the lock screen has Lock size, Secondary outputs, and Save settings.
-
-## Wallpaper, dim, and opacity
-
-`[lock.design]` adds three locker-only fields on top of the shared design (the
-greeter has no wallpaper and ignores them):
-
-| key                  | effect                                                            |
-|----------------------|-------------------------------------------------------------------|
-| `wallpaper`          | a PNG/JPEG drawn as the base layer (cover-fit, center-cropped)    |
-| `wallpaper_dim`      | how dark the wallpaper is drawn: `0` blacks it out, `10` leaves it untouched |
-| `background_opacity` | opacity of the animated background where it draws over the wallpaper, `0` (wallpaper only) .. `10` (opaque) |
-
-Layering, from back to front:
-
-1. wallpaper (or the solid theme background if none), darkened by `wallpaper_dim`,
-2. the animated `background` (matrix, fire, ...) at `background_opacity`,
-3. the login box and status/footer.
-
-On a secondary output in `background` mode, layer 3 is intentionally omitted.
-
-How the box treats the layer behind it depends on the background:
-
-- **Full-field backgrounds** (`plasma`, `fire`) own the whole field, so they
-  show through everything - the box frame, the banner, and the text. Only the
-  glyph shapes themselves are opaque; the field shows through their cells. There
-  is no black fill anywhere.
-- **Sparse backgrounds** (`matrix`, `rain`, `starfield`) are dots over the theme
-  background, so the box matches that background behind its text rather than
-  punching a hole.
-- **With a wallpaper and no animated background**, the box is transparent and the
-  wallpaper shows through directly.
-
-`wallpaper_dim` and `background_opacity` are also adjustable at runtime via `F1`
-(Wallpaper dim, Background opacity) when a wallpaper is configured. Select Save
-settings to persist the lock visual fields in
-`$XDG_CONFIG_HOME/rsdm/lock.toml` (or `$HOME/.config/rsdm/lock.toml`). The file
-contains no DM, PAM, or security settings and is loaded as a user-owned overlay
-on the next Lock start. Other commands do not load this file.
-Saving runs in the background so slow storage does not block authentication or
-emergency unlock. Wait for "Personal lock settings saved" before unlocking if
-you want to keep the changes.
-
-## Authentication
-
-The password is verified through the `[lock].pam_service` PAM stack (default
-`rsdm-lock`), which runs only `auth`/`account` - it never opens a session or
-changes tokens. Only the current user can unlock: the username comes from the
-process owner, not from input. Failed attempts are rate limited. If PAM is
-misconfigured you can still switch to another VT and log in. From that VT,
-`rsdm unlock` uses sudo (or pkexec when sudo is unavailable) to request a
-verified emergency unlock from the live locker. This deliberately bypasses PAM
-and therefore always requires root authorization.
-
-Enter starts PAM authentication even with an empty password field, allowing
-configured fingerprint or token modules to run. PAM decides whether the attempt
-succeeds, and failed attempts remain rate limited.
-
-Cancelling after credentials have been sent to PAM also counts toward the retry
-limit. Cancelling before submission does not consume an attempt.
-
-## Preview without a compositor
-
-Render the locker look to a PNG (handy for tuning themes/wallpaper):
+::: details Render a preview without locking
+From a source checkout with the [build dependencies](development.md):
 
 ```sh
-cargo run -p rsdm-lock --example preview -- \
-  /tmp/lock.png <theme> "" <border> <background> <frame> [wallpaper|none] [bg_opacity]
-xdg-open /tmp/lock.png
+cargo run --locked -p rsdm-lock --example preview -- \
+  /tmp/rsdm-lock-preview.png nord rsdm modern rain 15 none 8
+xdg-open /tmp/rsdm-lock-preview.png
 ```
+
+The positional arguments are output, theme, preset logo, border, background, frame number, optional wallpaper (or none), and background opacity. The example uses representative credentials and does not lock the desktop.
+:::
+
+## Emergency unlock
+
+If the locker is still running but authentication is unavailable, switch to another VT, authenticate as an administrator and run:
+
+```sh
+sudo rsdm unlock
+# For multiple users:
+# sudo rsdm unlock --user alice
+```
+
+You can also run `rsdm unlock` directly; it requests authorization through sudo, or pkexec if sudo is unavailable. A crashed locker may require ending the affected compositor session. Never rely on killing a lock process to unlock. See [security](SECURITY.md#lock-screen) and [troubleshooting](troubleshooting.md).
