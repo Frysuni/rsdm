@@ -78,7 +78,7 @@ Statuses: pending, fixed, not reproduced, policy exception.
 | 57 | Correct obsolete first-seat documentation | fixed |
 
 Finding 48 conflicts with the explicit policy in
-[CONTRIBUTING.md](../.github/CONTRIBUTING.md). The policy remains in force;
+[CONTRIBUTING.md](https://github.com/Frysuni/rsdm/blob/main/.github/CONTRIBUTING.md). The policy remains in force;
 concurrency fixes and regression tests do not require changing it.
 
 Work order: recovery records and leases; shutdown deadlines and helpers; idle

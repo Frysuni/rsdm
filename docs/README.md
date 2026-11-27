@@ -91,4 +91,19 @@ original `short-precise` format and normal pager/follow behavior.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - crate layout and runtime paths
 - [SECURITY.md](SECURITY.md) - PAM, privilege handling, lock guarantees
-- [rsdm.toml](../rsdm.toml) - practical commented configuration example
+- [rsdm.toml](https://github.com/Frysuni/rsdm/blob/main/rsdm.toml) - practical commented configuration example
+
+## Building the documentation website
+
+The website uses these Markdown guides directly. From the repository root, with
+Node.js 24 and npm installed:
+
+```sh
+npm ci --prefix docs
+npm run --prefix docs dev
+npm run --prefix docs build
+npm run --prefix docs preview
+```
+
+The production build is written to `docs/.vitepress/dist`. The local development
+server and GitHub Pages both serve the site under `/rsdm/`.

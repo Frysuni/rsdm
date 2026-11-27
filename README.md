@@ -144,6 +144,7 @@ See [docs/installation/nixos.md](docs/installation/nixos.md).
 
 ## Documentation
 
+- [RSDM Wiki](https://frysuni.github.io/rsdm/) - documentation website with search
 - [docs/](docs/README.md) - full guide index
 - Installation: [NixOS](docs/installation/nixos.md), [Arch](docs/installation/arch.md),
   [Fedora](docs/installation/fedora.md), [Ubuntu](docs/installation/ubuntu.md)
