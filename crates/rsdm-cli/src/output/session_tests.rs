@@ -11,20 +11,12 @@ fn details() -> SessionStatusDetails {
 }
 
 #[test]
-fn plain_status_preserves_legacy_prefix_and_reports_optional_capability_failure_as_full() {
+fn plain_status_reports_optional_capability_failure_as_full() {
     let report = details_report(&details());
     assert!(report.plain.starts_with("managed: running (login login, desktop desktop, generation generation)\n"));
     assert!(report.plain.contains("app.service: registered, command, 5s\n"));
     assert!(report.plain.contains("manager: full\n"));
     assert!(report.plain.contains("capability: window-close: unavailable (No supported IPC endpoint)\n"));
-}
-
-#[test]
-fn legacy_fallback_preserves_the_complete_old_report() {
-    let mut details = details();
-    details.capabilities.clear();
-    details.limitations.push("Older coordinator".into());
-    assert_eq!(details_report(&details).plain, status_report(&details.status).plain);
 }
 
 #[test]

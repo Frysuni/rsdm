@@ -17,7 +17,6 @@ fn status_report(status: &SessionStatus) -> Report {
         badge(&status.phase, state_color(&status.phase)),
         Span::styled(format!("  /  {}", safe_text(&status.provider)), Style::new().fg(ACCENT)),
     ])]);
-    // The plain status format is kept intact for pipes and existing callers.
     let details = [
         ("login", status.login_session_id.as_str()),
         ("desktop", status.desktop_entry_id.as_str()),
@@ -56,7 +55,7 @@ pub fn session_status_details(details: &SessionStatusDetails) -> io::Result<()> 
 }
 
 fn details_report(details: &SessionStatusDetails) -> Report {
-    if !details.enabled || (details.capabilities.is_empty() && details.status.phase != "inactive") { return status_report(&details.status); }
+    if !details.enabled { return status_report(&details.status); }
     if details.state == "inactive" {
         return super::notice("SESSION STATUS", "inactive: no session manager coordinator is running\n", MUTED);
     }

@@ -53,8 +53,8 @@ pkgs.testers.runNixOSTest {
       package = rsdm;
       keyring = "none";
       dm.fixedSession = "available";
-      config.security.failure_delay_ms = 0;
-      config.dm.session_dirs = [ "/etc/rsdm-test-sessions" ];
+      extraConfig.security.failure_delay_ms = 0;
+      extraConfig.dm.session_dirs = [ "/etc/rsdm-test-sessions" ];
     };
     systemd.services.rsdm.preStart = ''
       ${pkgs.coreutils}/bin/mkdir -p /run/rsdm_noexec

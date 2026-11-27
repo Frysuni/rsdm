@@ -17,7 +17,6 @@ async fn assert_all_requests_denied(endpoint: Endpoint, receiver: tokio::sync::m
         let results = [
             proxy.call::<_, _, String>("Handshake", &()).await.map(|_| ()),
             proxy.call::<_, _, SessionStatus>("Attach", &()).await.map(|_| ()),
-            proxy.call::<_, _, SessionStatus>("Status", &()).await.map(|_| ()),
             proxy.call::<_, _, SessionStatusDetails>("StatusDetails", &()).await.map(|_| ()),
             proxy.call::<_, _, String>("Launch", &(launch(),)).await.map(|_| ()),
             proxy.call::<_, _, ()>("Finalize", &(launch().generation, Vec::<(String, String)>::new())).await,
@@ -62,7 +61,7 @@ async fn closing_admission_interrupts_a_hung_logind_authorization() {
     let admission = endpoint.admission.clone();
     let (_server, connection, _received) = connect_endpoint(endpoint, received).await;
     let worker = tokio::spawn(async move {
-        proxy(&connection).await.unwrap().call::<_, _, SessionStatus>("Status", &()).await
+        proxy(&connection).await.unwrap().call::<_, _, SessionStatusDetails>("StatusDetails", &()).await
     });
     tokio::time::timeout(Duration::from_secs(2), context.login_entered.notified()).await.unwrap();
     admission.close();

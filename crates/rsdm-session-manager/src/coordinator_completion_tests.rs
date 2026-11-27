@@ -227,7 +227,8 @@ async fn resuming_waits_for_the_record_lease_without_blocking_timers() {
         unit: crate::unit_name::app_unit_name("test", GENERATION), invocation_id: vec![1; 16],
         policy: Default::default(), deadline_usec: Some(monotonic_usec().unwrap() + 30_000_000),
         quit_started: true,
-        dispatch: None,
+        dispatch: Some(crate::app_dispatch::Dispatch { transaction_id: None, invocation_id: vec![1; 16],
+            method: crate::app_dispatch::Method::Term, state: crate::app_dispatch::State::Sent, xsmp_die_state: crate::app_dispatch::State::NotSent }),
         window_close_sent: false, original_process: None, migrated_scope: None, lifetime_process: None, preparation: None,
     };
     fixture.coordinator.runtime.save_app(&app).unwrap();

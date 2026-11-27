@@ -43,7 +43,7 @@ pub enum SessionAction {
     #[command(after_help = "Examples:\n  rsdm session cancel\n\nApps that already closed are not restarted.")]
     Cancel,
     /// Show manager scope, capabilities and recent application preparation results.
-    #[command(after_help = "Examples:\n  rsdm session status\n  rsdm session status > session-status.txt\n\nReading status never starts the coordinator. Older coordinators use the legacy status response.")]
+    #[command(after_help = "Examples:\n  rsdm session status\n  rsdm session status > session-status.txt\n\nReading status never starts the coordinator.")]
     Status,
     /// Coordinate applications in the current external graphical login.
     Attach,

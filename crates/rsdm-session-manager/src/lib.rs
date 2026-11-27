@@ -93,7 +93,7 @@ mod disabled_generation_tests;
 use rsdm_core::domain::{SessionManagerConfig, SessionManagerUpdate, ShutdownPolicy};
 use thiserror::Error;
 
-pub use client::{cancel, generation, is_running, status, status_details, stop};
+pub use client::{cancel, generation, is_running, status_details, stop};
 pub use cleanup::recovery_config_path;
 pub use control::{SessionStatus, StopOutcome};
 pub use status::{Capability, PreparationStatus, SessionStatusDetails};

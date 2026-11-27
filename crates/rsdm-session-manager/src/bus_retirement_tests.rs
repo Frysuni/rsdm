@@ -18,7 +18,7 @@ impl Records {
         let mut record = crate::helper_start_fixture::record();
         // SAFETY: geteuid has no preconditions.
         record.identity.uid = unsafe { libc::geteuid() };
-        let runtime = Runtime { path: directory.clone(), generation: record.identity.generation.clone() };
+        let runtime = Runtime::for_test(directory.clone(), record.identity.generation.clone());
         runtime.save_session(&record).unwrap();
         Self { directory, runtime }
     }

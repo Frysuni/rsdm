@@ -260,6 +260,8 @@ async fn cancellation_does_not_reset_a_replacement_invocation() {
     let mut replacement = prepared.clone();
     replacement.invocation_id = vec![2; 16];
     replacement.quit_started = true;
+    replacement.dispatch = Some(crate::app_dispatch::Dispatch { transaction_id: None, invocation_id: replacement.invocation_id.clone(),
+        method: crate::app_dispatch::Method::Term, state: crate::app_dispatch::State::Sent, xsmp_die_state: crate::app_dispatch::State::NotSent });
     fixture.runtime.save_app(&replacement).unwrap();
     reset_preparation(&fixture.runtime, &prepared, &Deadline::default()).await.unwrap();
     let saved = fixture.runtime.app(&fixture.app.unit).unwrap();

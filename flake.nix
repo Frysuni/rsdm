@@ -105,11 +105,9 @@
     in
     {
       packages = forAllSystems (system: rec {
-        rsdm-source = mkUnstable system;
-        rsdm-prebuilt = mkStable system;
-        rsdm-unstable = rsdm-source;
-        rsdm-stable = rsdm-prebuilt;
-        default = rsdm-prebuilt;
+        rsdm-unstable = mkUnstable system;
+        rsdm-stable = mkStable system;
+        default = rsdm-stable;
       });
 
       apps = forAllSystems (system: rec {
@@ -124,7 +122,7 @@
       checks = forAllSystems (system:
         let
           pkgs = pkgsFor system;
-          rsdm = self.packages.${system}.rsdm-source;
+          rsdm = self.packages.${system}.rsdm-unstable;
         in {
           module = import ./packaging/nix/check.nix { inherit self nixpkgs system; };
           session-lifecycle = import ./tests/session-lifecycle { inherit pkgs rsdm; };

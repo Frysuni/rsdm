@@ -1,8 +1,9 @@
-//! Wire compatibility and service activation boundaries on a private bus.
+//! Detailed status and service activation boundaries on a private bus.
 
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 use super::*;
+use crate::SessionStatus;
 use zbus::{message::Header, object_server::Interface};
 
 #[derive(Default)]
@@ -43,7 +44,8 @@ impl Current {
         assert_eq!(header.destination().unwrap().as_str(), ":1.42");
         self.calls.details.fetch_add(1, Ordering::SeqCst);
         if self.denied { return Err(zbus::fdo::Error::AccessDenied("another login".into())); }
-        let mut details = SessionStatusDetails::legacy(old_status());
+        let mut details = SessionStatusDetails { enabled: true, state: "partial".into(), status: old_status(),
+            capabilities: Vec::new(), limitations: Vec::new(), preparations: Vec::new() };
         details.capabilities.push(crate::status::Capability::new("xsmp", "unavailable", "not built"));
         Ok(details)
     }
@@ -95,15 +97,11 @@ async fn details_are_requested_from_the_existing_unique_owner() {
 }
 
 #[tokio::test]
-async fn only_unknown_method_falls_back_to_legacy_status_on_the_same_owner() {
+async fn missing_details_method_does_not_query_legacy_status() {
     let calls = Arc::new(Calls::default());
     let (_server, client) = connect(calls.clone(), true, Legacy(calls.clone())).await;
-    let details = query_details(&client).await.unwrap();
-    assert_eq!(details.state, "partial");
-    assert_eq!(details.status.apps, old_status().apps);
-    assert!(details.capabilities.is_empty());
-    assert!(details.limitations[0].contains("does not report"));
-    assert_calls(&calls, 0, 1);
+    assert!(query_details(&client).await.is_err());
+    assert_calls(&calls, 0, 0);
 }
 
 #[tokio::test]
@@ -127,11 +125,4 @@ async fn absent_owner_is_inactive_without_any_coordinator_call_or_activation() {
     assert_eq!(details.state, "inactive");
     assert!(details.status.generation.is_empty());
     assert_calls(&calls, 0, 0);
-}
-
-#[test]
-fn legacy_wire_signatures_are_unchanged() {
-    use zbus::Type;
-    assert_eq!(SessionStatus::SIGNATURE.to_string(), "(sssssba(ssts))");
-    assert_eq!(crate::StopOutcome::SIGNATURE.to_string(), "(sass)");
 }

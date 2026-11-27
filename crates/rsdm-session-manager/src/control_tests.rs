@@ -63,7 +63,7 @@ async fn another_uid_cannot_submit_session_requests() {
     // SAFETY: geteuid has no preconditions.
     let other_uid = unsafe { libc::geteuid() }.wrapping_add(1);
     let (_server, connection, mut requests) = connect(other_uid).await;
-    let result = proxy(&connection).await.unwrap().call::<_, _, SessionStatus>("Status", &()).await;
+    let result = proxy(&connection).await.unwrap().call::<_, _, crate::SessionStatusDetails>("StatusDetails", &()).await;
     assert!(result.unwrap_err().to_string().contains("another user"));
     assert!(requests.try_recv().is_err());
 }

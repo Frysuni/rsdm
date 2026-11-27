@@ -128,15 +128,14 @@ fn recreating_a_directory_cannot_reset_a_retired_generation() {
 }
 
 #[test]
-fn legacy_records_use_their_disabled_field_without_a_retirement_slot() {
+fn missing_retirement_slot_is_rejected() {
     let records = Records::new();
-    fs::remove_file(records.runtime.path.with_extension("disabled")).unwrap();
-    assert!(!records.runtime.is_disabled().unwrap());
-    let mut record = records.record.clone();
-    record.disabled = true;
-    fs::write(records.runtime.path.join("session.toml"), toml::to_string(&record).unwrap()).unwrap();
-    assert!(records.runtime.is_disabled().unwrap());
-    assert!(records.runtime.save_session(&records.record).is_err());
+    let path = records.runtime.path.with_extension("disabled");
+    fs::remove_file(&path).unwrap();
+    assert!(records.runtime.is_disabled().is_err());
+    assert!(records.runtime.session().is_err());
+    assert!(mark(&records.runtime).is_err());
+    assert!(!path.exists());
 }
 
 #[test]

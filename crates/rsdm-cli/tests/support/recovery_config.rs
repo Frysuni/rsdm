@@ -8,11 +8,14 @@ fn write_record(tools: &SessionTools, generation: &str) {
     for path in [tools.root.join("rsdm"), tools.root.join("rsdm/sessions"), directory.clone(), directory.join("apps")] {
         fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
     }
+    let marker = directory.with_extension("disabled");
+    fs::write(&marker, [0]).unwrap();
+    fs::set_permissions(&marker, fs::Permissions::from_mode(0o600)).unwrap();
     let config = tools.root.join("recorded.toml");
     fs::write(&config, "[session_manager]\nenabled = false\n").unwrap();
     let record = format!(
         "anchor_unit = \"rsdm-session-{GENERATION}.service\"\n\
-         compositor_invocation = []\nprovider = \"managed\"\nowns_targets = false\nphase = \"closed\"\n\
+         compositor_invocation = []\nprovider = \"managed\"\nowns_targets = false\nphase = \"closed\"\ndisabled = false\nexported_environment = []\nprevious_environment = []\n\
          config_path = {config:?}\n[identity]\ngeneration = {generation:?}\n\
          login_session_id = \"test\"\nuid = {}\n",
         // SAFETY: geteuid has no preconditions.

@@ -59,7 +59,7 @@ disabled; attaching to an external WM reports `partial`, with the specific
 lifecycle limitations.
 
 The authorized `org.rsdm.Session1.StatusDetails` method returns `enabled`,
-`state`, the existing status fields in `status`, `capabilities`, `limitations`
+`state`, the session summary in `status`, `capabilities`, `limitations`
 and `preparations`. Capabilities have a name, state (`available`, `unavailable`,
 `not-applicable` or `unknown`) and reason. A missing optional window-close
 backend does not change a full session into partial. Window-close capability
@@ -73,9 +73,7 @@ without starting it. Status queries do not request shutdown or show native dialo
 an ownership failure is unavailable and a transport failure is unknown.
 
 GNOME and Plasma report `partial` when this necessary lifecycle capability is
-unavailable or unknown, with the probe's reason in the limitations. The provider
-and legacy status fields stay unchanged; optional window backends still do not
-affect the manager's scope.
+unavailable or unknown, with the probe's reason in the limitations. Optional window backends do not affect the manager's scope.
 
 For a recorded compositor unit, status verifies that the captured InvocationID
 is still active and remains unchanged through the query. A missing, stopped or
@@ -112,12 +110,12 @@ flag. Retired app records remain visible for the current generation. `clean`
 means no escalation was recorded; it does not certify that an app saved its data.
 Escalation records distinguish a saved signal intent from a signal accepted by
 the kernel. `escalated` confirms at least one accepted escalation signal; an
-unconfirmed intent remains `unknown` after recovery. Older escalation flags
-without that confirmation are also treated as uncertain.
-The original Status and Stop wire formats remain unchanged. When an older
-coordinator lacks StatusDetails, the CLI reads and displays its legacy Status
-using the same existing unique bus owner. Authorization and other failures are
-reported rather than masked by that fallback.
+unconfirmed intent remains `unknown` after recovery.
+The CLI queries StatusDetails using the coordinator's existing unique bus
+owner. Authorization and other failures are reported directly.
+
+Update all RSDM components together and start a fresh graphical session after
+upgrading. Recovery records must match the current format.
 
 Use these commands from the graphical session:
 
@@ -191,7 +189,7 @@ The internal executor verifies generation, invocation, MainPID and process
 membership, then records PID and the kernel's stable pidfs inode ID. Exec keeps
 that process identity and passes the original arguments unchanged. Disabled
 executors run the command directly. Failed identity capture still allows the
-command to run; kernels with anonymous pidfds and legacy records provide no
+command to run; kernels with anonymous pidfds provide no
 original-process ID. This metadata does not itself authorize another cgroup.
 
 If that original process moves into a transient systemd scope, RSDM can capture
@@ -486,8 +484,8 @@ absolute deadline and last result. An ordinary request reserves the largest
 registered application timeout (30 seconds when no apps are registered), plus
 90 seconds, measured from the start of preparation. Repeated requests reuse this
 transaction and deadline; logind may shorten the budget. Recovery uses the saved
-remaining budget rather than restarting it. Legacy records without a saved
-deadline retain the existing five-second recovery fallback.
+remaining budget rather than restarting it. Recovery outside an active shutdown
+has a five-second budget.
 
 Before a graceful action, the application record stores its transaction ID,
 InvocationID, method and dispatch intent. An unconfirmed reply preserves that
@@ -497,15 +495,14 @@ claims. XSMP records distinguish the save from `Die`: before `Die`, a separate
 intent is persisted for the same transaction and InvocationID. A sent or
 unconfirmed `Die` blocks another graceful close after cancellation or recovery.
 A cancelled save can start again in a new transaction only when the record
-proves that `Die` was not sent. Legacy records without this evidence remain
-conservative; `quit_started=true` is treated as possibly dispatched. StatusDetails
-reports an outstanding `Die` intent even when the preceding save was sent.
+proves that `Die` was not sent. StatusDetails reports an outstanding `Die` intent
+even when the preceding save was sent.
 
 Application preparation records retain `clean`, `forced`, `cancelled` or
 `unknown`, bound to the transaction and InvocationID. Before escalation, its
 intent is persisted so recovery cannot later report a clean exit. `clean`
 means the invocation exited without escalation; it does not guarantee saved
-data. Unknown legacy dispatch remains `unknown`. Completed app records are
+data. Completed app records are
 archived privately under the generation's `results` directory before removal.
 Reaping and cleanup take the result writer's record lease and recheck the
 InvocationID before archival, so stale cleanup cannot remove a replacement
@@ -518,7 +515,7 @@ limited to 256 KiB, including D-Bus encoding overhead. Oversized or NUL-containi
 payloads are rejected before coordinator admission or recovery-record changes.
 The CLI checks launch/finalize payloads before sending them.
 
-Admission allows 64 unfinished Launch/Finalize/Status requests. Stop, Cancel,
+Admission allows 64 unfinished Launch/Finalize/Attach/StatusDetails requests. Stop, Cancel,
 and XSMP preparation have independent limits of 4, 2, and 2 so launch traffic
 cannot consume their slots. Excess calls receive D-Bus `LimitsExceeded` and
 may be retried after outstanding work finishes. Slots remain held through

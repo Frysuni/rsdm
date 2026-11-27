@@ -37,7 +37,7 @@ pub(super) async fn send(manager: &UserManager, runtime: &Runtime, peer: &mut Pe
         } else if matches!(request, Request::Die) && !app.dispatch.as_ref().is_some_and(|dispatch|
             dispatch.transaction_id.as_deref() == transaction_id && dispatch.invocation_id == peer.invocation
             && dispatch.method == crate::app_dispatch::Method::Xsmp && dispatch.state == crate::app_dispatch::State::Sent
-            && matches!(dispatch.xsmp_die_state, Some(crate::app_dispatch::State::Intent | crate::app_dispatch::State::Sent)))
+            && matches!(dispatch.xsmp_die_state, crate::app_dispatch::State::Intent | crate::app_dispatch::State::Sent))
         {
             cancel(peer);
             return Ok(false);

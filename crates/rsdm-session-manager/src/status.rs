@@ -1,4 +1,4 @@
-//! Detailed diagnostics have their own wire format; legacy status stays unchanged.
+//! Detailed session diagnostics.
 
 use serde::{Deserialize, Serialize};
 use zbus::Type;
@@ -51,18 +51,11 @@ impl SessionStatusDetails {
             provider: "none".into(), phase: "inactive".into(), xsmp_available: false, apps: Vec::new(),
         }, capabilities: Vec::new(), limitations: vec!["No session manager coordinator is running.".into()], preparations: Vec::new() }
     }
-
-    pub(super) fn legacy(status: SessionStatus) -> Self {
-        if status.phase == "disabled" { return Self::disabled(); }
-        let state = if status.phase == "closed" { "inactive" } else if status.provider == "partial" { "partial" } else { "full" };
-        Self { enabled: true, state: state.into(), status, capabilities: Vec::new(),
-            limitations: vec!["This coordinator does not report detailed capabilities or preparation results.".into()], preparations: Vec::new() }
-    }
 }
 
 pub(super) fn preparation(app: &AppRecord) -> Option<PreparationStatus> {
     let prepared = app.preparation.as_ref()?;
-    let escalated = prepared.confirmed_escalation();
+    let escalated = prepared.escalated;
     let outcome = match prepared.outcome {
         Outcome::Clean | Outcome::Forced if !escalated && prepared.uncertain_escalation() => Outcome::Unknown,
         outcome => outcome,
@@ -72,9 +65,14 @@ pub(super) fn preparation(app: &AppRecord) -> Option<PreparationStatus> {
         unit: app.unit.clone(), invocation_id: app.invocation_id.clone(),
         transaction_id: prepared.transaction_id.clone().unwrap_or_default(),
         method: dispatch.map_or("unknown", |dispatch| method(dispatch.method)).into(),
-        dispatch_state: dispatch.map_or("unknown", |dispatch| match dispatch.xsmp_die_state
-            .filter(|state| matches!(state, State::Intent | State::Sent)).unwrap_or(dispatch.state) {
-            State::Intent => "intent", State::Sent => "sent", State::NotSent => "not_sent", State::Cancelled => "cancelled",
+        dispatch_state: dispatch.map_or("unknown", |dispatch| {
+            let state = match dispatch.xsmp_die_state {
+                State::Intent | State::Sent => dispatch.xsmp_die_state,
+                _ => dispatch.state,
+            };
+            match state {
+                State::Intent => "intent", State::Sent => "sent", State::NotSent => "not_sent", State::Cancelled => "cancelled",
+            }
         }).into(),
         result: match outcome { Outcome::Clean => "clean", Outcome::Forced => "forced", Outcome::Cancelled => "cancelled", Outcome::Unknown => "unknown" }.into(),
         escalated,

@@ -68,7 +68,7 @@ async fn foreign_processes_invocations_and_retired_generations_cannot_capture_an
 }
 
 #[test]
-fn legacy_records_have_no_authority_over_an_escaped_process() {
+fn records_without_process_identity_have_no_authority_over_an_escaped_process() {
     let app = crate::helper_start_fixture::app();
     let serialized = toml::to_string(&app).unwrap();
     assert!(!serialized.contains("original_process"));

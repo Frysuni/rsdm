@@ -61,7 +61,7 @@ impl Fixture {
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
         fs::create_dir(directory.join("apps")).unwrap();
         fs::set_permissions(directory.join("apps"), fs::Permissions::from_mode(0o700)).unwrap();
-        let runtime = Runtime { path: directory.clone(), generation: GENERATION.into() };
+        let runtime = Runtime::for_test(directory.clone(), GENERATION.into());
         let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
             zbus::connection::Builder::unix_stream(server_socket.into_std().unwrap()).p2p()

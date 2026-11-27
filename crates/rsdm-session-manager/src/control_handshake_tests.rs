@@ -68,7 +68,7 @@ impl Fixture {
         fs::create_dir(&directory).unwrap();
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
         fs::create_dir(directory.join("apps")).unwrap();
-        let runtime = Runtime { path: directory.clone(), generation: GENERATION.into() };
+        let runtime = Runtime::for_test(directory.clone(), GENERATION.into());
         runtime.save_app(&super::super::runtime::AppRecord {
             unit: UNIT.into(), invocation_id: vec![1; 16], policy: ShutdownPolicy::default(),
             deadline_usec: None, quit_started: false, dispatch: None, window_close_sent: false, original_process: None, migrated_scope: None, lifetime_process: None, preparation: None,
@@ -119,7 +119,10 @@ async fn shared_user_scopes_and_services_require_live_pinned_cgroup_membership()
 }
 
 impl Drop for Fixture {
-    fn drop(&mut self) { let _ = fs::remove_dir_all(&self.directory); }
+    fn drop(&mut self) {
+        let _ = fs::remove_file(self.runtime.path.with_extension("disabled"));
+        let _ = fs::remove_dir_all(&self.directory);
+    }
 }
 
 fn current_group() -> String {

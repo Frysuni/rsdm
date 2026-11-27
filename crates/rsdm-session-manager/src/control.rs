@@ -202,14 +202,6 @@ impl Endpoint {
         self.request(permit, |reply| Request::Cancel { generation, reply }).await
     }
 
-    async fn status(
-        &self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
-    ) -> zbus::fdo::Result<SessionStatus> {
-        let permit = self.admission.acquire(Class::Regular)?;
-        self.authorize(connection, &header).await?;
-        self.request(permit, Request::Status).await
-    }
-
     async fn status_details(
         &self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<super::status::SessionStatusDetails> {

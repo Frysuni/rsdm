@@ -10,10 +10,10 @@ const CHILD: &str = "RSDM_DISABLED_ENTRY_TEST_CHILD";
 async fn disabled_entries_run_in_a_fresh_process_without_access_to_a_bus() {
     if std::env::var_os(CHILD).is_some() {
         let cfg = SessionManagerConfig { enabled: false, ..SessionManagerConfig::default() };
-        let status = status(&cfg).await.unwrap();
+        let details = status_details(&cfg).await.unwrap();
+        let status = &details.status;
         assert_eq!(status.phase, "disabled");
         assert!(status.generation.is_empty() && status.apps.is_empty() && !status.xsmp_available);
-        let details = status_details(&cfg).await.unwrap();
         assert!(!details.enabled && details.state == "disabled");
         assert!(details.capabilities.is_empty() && details.preparations.is_empty());
         assert_eq!(stop("invalid action", &cfg).await.unwrap().result, "disabled");

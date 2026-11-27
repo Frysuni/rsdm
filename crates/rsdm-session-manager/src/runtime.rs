@@ -35,22 +35,15 @@ pub(super) struct SessionRecord {
     pub anchor_unit: String,
     pub compositor_unit: Option<String>,
     pub compositor_invocation: Vec<u8>,
-    #[serde(default)]
     pub coordinator_unit: Option<(String, Vec<u8>)>,
     pub provider: String,
     pub owns_targets: bool,
     pub phase: SessionPhase,
-    #[serde(default)]
     pub disabled: bool,
-    #[serde(default)]
     pub config_path: Option<PathBuf>,
-    #[serde(default)]
     pub exported_environment: Vec<(String, String)>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub previous_environment: Vec<(String, String)>,
-    #[serde(default)]
     pub shutdown_deadline_usec: Option<u64>,
-    #[serde(default)]
     pub shutdown_transaction: Option<super::shutdown_transaction::ShutdownTransaction>,
 }
 
@@ -74,6 +67,13 @@ pub(super) struct Runtime {
 }
 
 impl Runtime {
+    #[cfg(test)]
+    pub(super) fn for_test(path: PathBuf, generation: String) -> Self {
+        let runtime = Self { path, generation };
+        disable::initialize(&runtime).unwrap();
+        runtime
+    }
+
     pub fn create(generation: &str) -> Result<Self, SessionError> {
         let base = runtime_directory()?;
         Self::create_at(&base, generation)
@@ -148,7 +148,7 @@ impl Runtime {
     }
 
     pub fn save_app(&self, record: &AppRecord) -> Result<(), SessionError> {
-        record.policy.validate().map_err(|error| SessionError::State(error.into()))?;
+        record.validate()?;
         write_record(&self.app_path(&record.unit)?, record)
     }
 
@@ -157,7 +157,7 @@ impl Runtime {
         if record.unit != unit {
             return Err(SessionError::State("app record identity mismatch".into()));
         }
-        record.policy.validate().map_err(|error| SessionError::State(error.into()))?;
+        record.validate()?;
         Ok(record)
     }
 

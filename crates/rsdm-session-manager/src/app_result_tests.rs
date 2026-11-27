@@ -64,16 +64,13 @@ async fn a_saved_escalation_intent_prevents_a_later_recovery_from_claiming_a_cle
 }
 
 #[tokio::test]
-async fn legacy_unknown_dispatch_and_unpinned_invocations_never_become_clean() {
+async fn unpinned_invocations_never_become_clean() {
     let fixture = Fixture::new();
-    for invocation in [vec![1; 16], Vec::new()] {
-        let mut app = fixture.app.clone();
-        app.invocation_id = invocation;
-        app.quit_started = true;
-        fixture.runtime.save_app(&app).unwrap();
-        begin(&fixture.runtime, &app, None, &Deadline::default()).await.unwrap();
-        assert_eq!(finish(&fixture.runtime, &app, None, Outcome::Clean, &Deadline::default()).await.unwrap(), Outcome::Unknown);
-    }
+    let mut app = fixture.app.clone();
+    app.invocation_id.clear();
+    fixture.runtime.save_app(&app).unwrap();
+    begin(&fixture.runtime, &app, None, &Deadline::default()).await.unwrap();
+    assert_eq!(finish(&fixture.runtime, &app, None, Outcome::Clean, &Deadline::default()).await.unwrap(), Outcome::Unknown);
 }
 
 #[tokio::test]

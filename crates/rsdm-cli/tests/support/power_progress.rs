@@ -18,11 +18,15 @@ struct SlowSession { calls: Calls, preparing: Arc<AtomicUsize> }
 impl SlowSession {
     fn handshake(&self) -> &str { GENERATION }
 
-    fn status(&self) -> SessionStatus {
+    fn attach(&self) -> SessionStatus { self.status_details().status }
+
+    fn status_details(&self) -> SessionStatusDetails {
         let preparing = self.preparing.load(Ordering::SeqCst) > 0;
-        SessionStatus { generation: GENERATION.into(), login_session_id: "test".into(), desktop_entry_id: "sway".into(),
+        let status = SessionStatus { generation: GENERATION.into(), login_session_id: "test".into(), desktop_entry_id: "sway".into(),
             provider: "managed".into(), phase: if preparing { "preparing" } else { "running" }.into(), xsmp_available: false,
-            apps: vec![("slow-editor.service".into(), "term".into(), 30, if preparing { "quitting" } else { "registered" }.into())] }
+            apps: vec![("slow-editor.service".into(), "term".into(), 30, if preparing { "quitting" } else { "registered" }.into())] };
+        SessionStatusDetails { enabled: true, state: "full".into(), status, capabilities: Vec::new(),
+            limitations: Vec::new(), preparations: Vec::new() }
     }
 
     async fn stop(&self, generation: &str, action: &str) -> StopOutcome {

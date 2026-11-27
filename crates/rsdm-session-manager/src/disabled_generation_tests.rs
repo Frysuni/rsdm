@@ -90,13 +90,10 @@ async fn check_damaged_records(runtime: &Runtime, cfg: &SessionManagerConfig) {
 }
 
 #[test]
-fn legacy_session_records_default_to_enabled() {
+fn session_records_require_explicit_enabled_state() {
     let record = fixture::record();
     let encoded = toml::to_string(&record).unwrap();
     let legacy = encoded.replace("disabled = false\n", "");
     assert_ne!(legacy, encoded);
-    let restored: super::runtime::SessionRecord = toml::from_str(&legacy).unwrap();
-    assert!(!restored.disabled);
-    assert_eq!(restored.identity.generation, record.identity.generation);
-    assert_eq!(restored.compositor_invocation, record.compositor_invocation);
+    assert!(toml::from_str::<super::runtime::SessionRecord>(&legacy).is_err());
 }

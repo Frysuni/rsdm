@@ -88,7 +88,7 @@ services.rsdm.extraConfig = {
 - PAM stacks are generated for login (rsdm) and Lock (rsdm-lock). The keyring setting configures the login stack.
 - Idle is a graphical user service when enabled. The built-in locker requires Lock.
 - With DM disabled the module leaves the boot target, getty and display-manager role alone.
-- Raw values merge recursively after typed options. The deprecated config alias merges before extraConfig. The resulting DM/Lock/Idle enable flags and TTY determine service wiring too.
+- Raw values merge recursively after typed options. The resulting DM/Lock/Idle enable flags and TTY determine service wiring too.
 - Greeter and Lock designs are independent. The module defaults passwordMode to asterisks; the standalone TOML default is hidden. Saved personal Lock settings take precedence for supported visual fields.
 :::
 
@@ -113,9 +113,9 @@ sudo nixos-rebuild switch --flake .#host
 Both channels use the same flake input. Stable is pinned by the release metadata in that input; prereleases do not advance it. The module does not add caches. An explicit package override takes precedence over channel.
 
 ::: details Direct packages and migration
-The flake exposes rsdm-stable and rsdm-unstable (default is stable); rsdm-prebuilt and rsdm-source remain aliases. Source builds enable XSMP. Dependencies use your existing substituters or are built locally.
+The flake exposes rsdm-stable and rsdm-unstable (default is stable). Source builds enable XSMP. Dependencies use your existing substituters or are built locally.
 
-When upgrading an older configuration, remove `services.rsdm.binaryCache.enable` and old RSDM Pages cache settings. Remove the `package` override to use channel selection. When overriding the package with an older release, border style `none` requires RSDM 2.0.0 or later.
+Remove the `package` override to use channel selection.
 :::
 
 ## Recover or remove

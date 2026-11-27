@@ -50,7 +50,7 @@ fn recovery_records_are_private_and_preserve_the_policy() {
 }
 
 #[test]
-fn legacy_app_records_have_no_original_process_or_migrated_scope() {
+fn untracked_process_metadata_is_optional() {
     let serialized = toml::to_string(&app()).unwrap();
     assert!(!serialized.contains("original_process"));
     assert!(!serialized.contains("migrated_scope"));
@@ -62,13 +62,14 @@ fn legacy_app_records_have_no_original_process_or_migrated_scope() {
 }
 
 #[test]
-fn session_environment_ownership_survives_record_round_trips_and_legacy_records() {
+fn session_environment_ownership_survives_record_round_trips() {
     let mut record = crate::helper_start_fixture::record();
     record.exported_environment = vec![("WAYLAND_DISPLAY".into(), "wayland-proposed".into())];
-    let legacy = toml::to_string(&record).unwrap();
-    assert!(!legacy.contains("previous_environment"));
-    let restored: SessionRecord = toml::from_str(&legacy).unwrap();
+    let encoded = toml::to_string(&record).unwrap();
+    assert!(encoded.contains("previous_environment"));
+    let restored: SessionRecord = toml::from_str(&encoded).unwrap();
     assert!(restored.previous_environment.is_empty());
+    assert!(toml::from_str::<SessionRecord>(&encoded.replace("previous_environment = []\n", "")).is_err());
 
     record.previous_environment = vec![("WAYLAND_DISPLAY".into(), "wayland-previous".into())];
     let restored: SessionRecord = toml::from_str(&toml::to_string(&record).unwrap()).unwrap();
@@ -122,6 +123,8 @@ fn an_atomically_replaced_record_does_not_leave_partial_state() {
     runtime.save_app(&record).unwrap();
     record.deadline_usec = Some(42);
     record.quit_started = true;
+    record.dispatch = Some(crate::app_dispatch::Dispatch { transaction_id: None, invocation_id: record.invocation_id.clone(),
+        method: crate::app_dispatch::Method::Term, state: crate::app_dispatch::State::Sent, xsmp_die_state: crate::app_dispatch::State::NotSent });
     runtime.save_app(&record).unwrap();
     let loaded = runtime.app(&record.unit).unwrap();
     assert_eq!(loaded.deadline_usec, Some(42));

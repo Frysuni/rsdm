@@ -41,11 +41,11 @@ pub(super) async fn worker(mode: &str) {
     let dispatch = app.dispatch.as_ref().unwrap();
     assert_eq!(dispatch.state, DispatchState::Sent);
     if mode.ends_with("-owned") {
-        assert_eq!(dispatch.xsmp_die_state, Some(DispatchState::Sent));
+        assert_eq!(dispatch.xsmp_die_state, DispatchState::Sent);
         crate::apps::reset_preparation(&fixture.runtime).await.unwrap();
         assert!(!crate::app_dispatch::claim(&fixture.runtime, &app, Some("next"), crate::app_dispatch::Method::Xsmp, &Deadline::default()).await.unwrap());
     }
-    if mode.ends_with("-lease") { assert_eq!(dispatch.xsmp_die_state, Some(DispatchState::NotSent)); }
+    if mode.ends_with("-lease") { assert_eq!(dispatch.xsmp_die_state, DispatchState::NotSent); }
 }
 
 fn migrate_client(fixture: &Fixture, pid: u32, mode: &str) {

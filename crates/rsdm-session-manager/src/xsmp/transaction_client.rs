@@ -114,7 +114,7 @@ unsafe extern "C" fn die(_connection: SmcConn, data: Data) {
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|encoded| toml::from_str::<crate::runtime::AppRecord>(&encoded).ok())
         .and_then(|app| app.dispatch)
-        .is_some_and(|dispatch| matches!(dispatch.xsmp_die_state, Some(crate::app_dispatch::State::Intent | crate::app_dispatch::State::Sent)));
+        .is_some_and(|dispatch| matches!(dispatch.xsmp_die_state, crate::app_dispatch::State::Intent | crate::app_dispatch::State::Sent));
 }
 
 unsafe extern "C" fn complete(connection: SmcConn, data: Data) {

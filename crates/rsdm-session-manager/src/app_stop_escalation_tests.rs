@@ -44,7 +44,7 @@ async fn cancellation_after_the_saved_intent_restores_a_known_unsent_result() {
     app_result::finish(&fixture.runtime, &app, None, outcome, &fixture.manager.deadline).await.unwrap();
     let preparation = fixture.runtime.app(&app.unit).unwrap().preparation.unwrap();
     assert!(!preparation.escalated);
-    assert_eq!(preparation.escalation_pending, Some(0));
+    assert_eq!(preparation.escalation_pending, 0);
     assert!(fixture.child.try_wait().unwrap().is_none());
 }
 
@@ -59,7 +59,7 @@ async fn empty_process_membership_after_intent_does_not_report_forced_exit() {
     assert_eq!(app_result::finish(&fixture.runtime, &app, None, outcome, &fixture.manager.deadline).await.unwrap(), Outcome::Clean);
     let preparation = fixture.runtime.app(&app.unit).unwrap().preparation.unwrap();
     assert!(!preparation.escalated);
-    assert_eq!(preparation.escalation_pending, Some(0));
+    assert_eq!(preparation.escalation_pending, 0);
     assert!(fixture.child.try_wait().unwrap().is_none());
 }
 
@@ -73,7 +73,7 @@ async fn failed_process_inspection_does_not_invent_a_possible_signal() {
     let preparation = fixture.runtime.app(&app.unit).unwrap().preparation.unwrap();
     assert_eq!(preparation.outcome, Outcome::Unknown);
     assert!(!preparation.escalated);
-    assert_eq!(preparation.escalation_pending, Some(0));
+    assert_eq!(preparation.escalation_pending, 0);
     app_result::begin(&fixture.runtime, &app, Some("recovery"), &fixture.manager.deadline).await.unwrap();
     assert_eq!(app_result::finish(&fixture.runtime, &app, Some("recovery"), Outcome::Clean, &fixture.manager.deadline).await.unwrap(), Outcome::Clean);
     assert!(fixture.child.try_wait().unwrap().is_none());
@@ -88,8 +88,8 @@ async fn a_confirmed_signal_survives_an_error_checking_the_next_batch() {
     let error = crate::app_stop::wait::force_exit(&fixture.manager, &fixture.runtime, &app, &control, &fixture.manager.deadline).await.unwrap_err();
     assert!(error.to_string().contains("second batch inspection failed"));
     let preparation = fixture.runtime.app(&app.unit).unwrap().preparation.unwrap();
-    assert!(preparation.confirmed_escalation());
-    assert_eq!(preparation.escalation_pending, Some(0));
+    assert!(preparation.escalated);
+    assert_eq!(preparation.escalation_pending, 0);
     assert_eq!(app_result::finish(&fixture.runtime, &app, None, Outcome::Clean, &fixture.manager.deadline).await.unwrap(), Outcome::Forced);
     assert_eq!(fixture.child.wait().unwrap().signal(), Some(libc::SIGTERM));
 }

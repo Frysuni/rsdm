@@ -29,7 +29,7 @@ async fn a_confirmed_signal_survives_retry_and_a_later_unsent_attempt() {
     escalation_finished(&fixture.runtime, &fixture.app, Some("retry"), false, &deadline).await.unwrap();
     assert_eq!(finish(&fixture.runtime, &fixture.app, Some("retry"), Outcome::Clean, &deadline).await.unwrap(), Outcome::Forced);
     let app = fixture.runtime.app(&fixture.app.unit).unwrap();
-    assert!(app.preparation.as_ref().unwrap().confirmed_escalation());
+    assert!(app.preparation.as_ref().unwrap().escalated);
     assert_eq!(crate::status::preparation(&app).unwrap().result, "forced");
 }
 
@@ -43,7 +43,7 @@ async fn a_late_signal_confirmation_updates_the_archive_without_recreating_the_a
     escalation_finished(&fixture.runtime, &fixture.app, Some("tx"), true, &deadline).await.unwrap();
     assert!(fixture.runtime.app(&fixture.app.unit).is_err());
     assert_eq!(finish(&fixture.runtime, &fixture.app, Some("tx"), Outcome::Clean, &deadline).await.unwrap(), Outcome::Forced);
-    assert!(fixture.runtime.archived_app(&fixture.app.unit).unwrap().preparation.unwrap().confirmed_escalation());
+    assert!(fixture.runtime.archived_app(&fixture.app.unit).unwrap().preparation.unwrap().escalated);
 }
 
 #[tokio::test]
@@ -63,18 +63,8 @@ async fn a_stale_signal_confirmation_cannot_replace_a_new_preparation_or_invocat
 }
 
 #[test]
-fn legacy_escalation_flags_are_uncertain_and_never_report_a_confirmed_signal() {
-    let fixture = Fixture::new();
-    let legacy: Preparation = toml::from_str("transaction_id = 'legacy'\noutcome = 'forced'\nescalated = true\n").unwrap();
-    let mut app = fixture.app.clone();
-    app.preparation = Some(legacy);
-    let status = crate::status::preparation(&app).unwrap();
-    assert_eq!(status.result, "unknown");
-    assert!(!status.escalated);
-    start(&mut app, Some("retry"));
-    let preparation = app.preparation.unwrap();
-    assert!(!preparation.confirmed_escalation());
-    assert!(preparation.uncertain_escalation());
+fn escalation_records_require_a_pending_count() {
+    assert!(toml::from_str::<Preparation>("outcome = 'forced'\nescalated = true\n").is_err());
 }
 
 #[tokio::test]
@@ -89,8 +79,8 @@ async fn overlapping_attempts_preserve_confirmation_in_either_completion_order()
         escalation_finished(&fixture.runtime, &fixture.app, Some("tx"), !first_sent, &deadline).await.unwrap();
         assert_eq!(finish(&fixture.runtime, &fixture.app, Some("tx"), Outcome::Clean, &deadline).await.unwrap(), Outcome::Forced);
         let preparation = fixture.runtime.app(&fixture.app.unit).unwrap().preparation.unwrap();
-        assert!(preparation.confirmed_escalation());
-        assert_eq!(preparation.escalation_pending, Some(0));
+        assert!(preparation.escalated);
+        assert_eq!(preparation.escalation_pending, 0);
     }
 }
 

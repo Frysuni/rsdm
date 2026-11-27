@@ -35,6 +35,7 @@ impl Runtime {
     }
 
     pub fn archive_app(&self, app: &AppRecord) -> Result<(), SessionError> {
+        app.validate()?;
         let file = self.app_path(&app.unit)?;
         let directory = self.path.join("results");
         match fs::create_dir(&directory) {
@@ -56,7 +57,7 @@ impl Runtime {
         verify_directory(&directory)?;
         let record: AppRecord = read_record(&directory.join(file.file_name().expect("app record has a filename")))?;
         if record.unit != unit { return Err(SessionError::State("archived application identity mismatch".into())); }
-        record.policy.validate().map_err(|error| SessionError::State(error.into()))?;
+        record.validate()?;
         Ok(record)
     }
 }

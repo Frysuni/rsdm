@@ -19,8 +19,7 @@ pub(super) struct Dispatch {
     pub(super) invocation_id: Vec<u8>,
     pub(super) method: Method,
     pub(super) state: State,
-    #[serde(default)]
-    pub(super) xsmp_die_state: Option<State>,
+    pub(super) xsmp_die_state: State,
 }
 
 pub(super) async fn claim(runtime: &Runtime, prepared: &AppRecord, transaction_id: Option<&str>, method: Method, deadline: &Deadline) -> Result<bool, SessionError> {
@@ -44,21 +43,21 @@ pub(super) async fn claim(runtime: &Runtime, prepared: &AppRecord, transaction_i
         if method == Method::WindowClose { app.window_close_sent = true; }
         super::app_result::start(&mut app, transaction_id.as_deref());
         app.dispatch = Some(Dispatch { transaction_id, invocation_id: app.invocation_id.clone(), method, state: State::Intent,
-            xsmp_die_state: (method == Method::Xsmp).then_some(State::NotSent) });
+            xsmp_die_state: State::NotSent });
         runtime.save_app(&app)?;
         Ok(true)
     }).await
 }
 
 fn eligible(app: &AppRecord, transaction_id: Option<&str>, method: Method) -> bool {
-    if app.dispatch.as_ref().is_some_and(|dispatch| matches!(dispatch.xsmp_die_state, Some(State::Intent | State::Sent))) { return false; }
+    if app.dispatch.as_ref().is_some_and(|dispatch| matches!(dispatch.xsmp_die_state, State::Intent | State::Sent)) { return false; }
     if method == Method::WindowClose && app.window_close_sent { return false; }
     if !app.quit_started { return true; }
     let Some(dispatch) = &app.dispatch else { return false; };
     if dispatch.invocation_id != app.invocation_id { return false; }
     if dispatch.state == State::NotSent { return true; }
     method == Method::Xsmp && dispatch.method == Method::Xsmp && dispatch.state == State::Cancelled
-        && dispatch.xsmp_die_state == Some(State::NotSent)
+        && dispatch.xsmp_die_state == State::NotSent
         && transaction_id.is_some() && transaction_id != dispatch.transaction_id.as_deref()
 }
 
@@ -80,10 +79,10 @@ pub(super) async fn claim_xsmp_die(runtime: &Runtime, prepared: &AppRecord, tran
         let Some(dispatch) = &mut app.dispatch else { return Ok(None); };
         if dispatch.method != Method::Xsmp || dispatch.state != State::Sent
             || dispatch.invocation_id != prepared.invocation_id || dispatch.transaction_id != transaction_id
-            || dispatch.xsmp_die_state != Some(State::NotSent)
+            || dispatch.xsmp_die_state != State::NotSent
         { return Ok(None); }
 
-        dispatch.xsmp_die_state = Some(State::Intent);
+        dispatch.xsmp_die_state = State::Intent;
         runtime.save_app(&app)?;
         Ok(Some(session))
     }).await
@@ -101,9 +100,9 @@ pub(super) async fn finish_xsmp_die(runtime: &Runtime, prepared: &AppRecord, tra
         if app.invocation_id != prepared.invocation_id { return Err(SessionError::State("application invocation changed after XSMP Die".into())); }
         if let Some(dispatch) = &mut app.dispatch
             && dispatch.method == Method::Xsmp && dispatch.invocation_id == prepared.invocation_id
-            && dispatch.transaction_id == transaction_id && dispatch.xsmp_die_state == Some(State::Intent)
+            && dispatch.transaction_id == transaction_id && dispatch.xsmp_die_state == State::Intent
         {
-            dispatch.xsmp_die_state = Some(state);
+            dispatch.xsmp_die_state = state;
             runtime.save_app(&app)?;
         }
         Ok(())
@@ -133,7 +132,7 @@ pub(super) async fn finish(runtime: &Runtime, prepared: &AppRecord, transaction_
 pub(super) fn cancel(app: &mut AppRecord) {
     if let Some(dispatch) = &mut app.dispatch {
         if dispatch.method == Method::Xsmp && dispatch.state == State::Sent
-            && dispatch.xsmp_die_state == Some(State::NotSent)
+            && dispatch.xsmp_die_state == State::NotSent
         { dispatch.state = State::Cancelled; }
         if dispatch.state == State::NotSent { app.quit_started = false; }
     }

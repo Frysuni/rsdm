@@ -64,16 +64,11 @@ async fn only_proven_not_sent_dispatch_can_be_replaced_by_a_fallback() {
 }
 
 #[tokio::test]
-async fn legacy_quit_started_and_a_replacement_invocation_never_allow_an_unsafe_replay() {
+async fn incomplete_dispatch_and_replacement_invocations_are_rejected() {
     let fixture = Fixture::new();
-    let mut legacy = fixture.app.clone();
-    legacy.quit_started = true;
-    let encoded = toml::to_string(&legacy).unwrap().replace("window_close_sent = false\n", "");
-    let legacy: AppRecord = toml::from_str(&encoded).unwrap();
-    assert!(legacy.dispatch.is_none());
-    assert!(!legacy.window_close_sent);
-    fixture.runtime.save_app(&legacy).unwrap();
-    assert!(!claim(&fixture.runtime, &fixture.app, Some("new"), Method::WindowClose, &Deadline::default()).await.unwrap());
+    let mut incomplete = fixture.app.clone();
+    incomplete.quit_started = true;
+    assert!(fixture.runtime.save_app(&incomplete).is_err());
     let mut replacement = fixture.app.clone();
     replacement.invocation_id = vec![2; 16];
     fixture.runtime.save_app(&replacement).unwrap();

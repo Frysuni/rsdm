@@ -285,10 +285,4 @@
     default = { };
     description = "Additional rsdm.toml values merged last.";
   };
-
-  config = lib.mkOption {
-    type = toml.type;
-    default = { };
-    description = "Deprecated alias merged before extraConfig.";
-  };
 }

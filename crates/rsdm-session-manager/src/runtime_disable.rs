@@ -17,16 +17,8 @@ pub(super) fn initialize(runtime: &Runtime) -> Result<(), SessionError> {
 
 pub(super) fn mark(runtime: &Runtime) -> Result<(), SessionError> {
     let path = runtime.path.with_extension("disabled");
-    let mut file = match OpenOptions::new().read(true).write(true).create_new(true).mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK).open(&path)
-    {
-        Ok(mut file) => { file.write_all(&[1])?; file },
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            OpenOptions::new().read(true).write(true)
-                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK).open(&path)?
-        }
-        Err(error) => return Err(error.into()),
-    };
+    let mut file = OpenOptions::new().read(true).write(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK).open(&path)?;
     file.seek(SeekFrom::Start(0))?;
     read(&mut file)?;
     // The one-byte slot is allocated before publishing the session. Updating
@@ -38,11 +30,12 @@ pub(super) fn mark(runtime: &Runtime) -> Result<(), SessionError> {
 }
 
 pub(super) fn marked(runtime: &Runtime) -> Result<bool, SessionError> {
-    match open(&runtime.path.with_extension("disabled")) {
-        Ok(mut file) => read(&mut file),
-        Err(SessionError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error),
-    }
+    let mut file = open(&runtime.path.with_extension("disabled")).map_err(|error| match error {
+        SessionError::Io(error) if error.kind() == std::io::ErrorKind::NotFound =>
+            SessionError::State("missing disabled generation marker".into()),
+        error => error,
+    })?;
+    read(&mut file)
 }
 
 fn open(path: &Path) -> Result<File, SessionError> {

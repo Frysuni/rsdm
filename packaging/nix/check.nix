@@ -69,11 +69,11 @@ let
       nixpkgs.lib.hasPrefix "services.rsdm" entry.message
       || nixpkgs.lib.hasPrefix "RSDM" entry.message
     )) cfg.assertions;
-  incompatibleStable = evaluate {
+  stableBorderless = evaluate {
     dm.design.borderStyle = "none";
     lock.design.borderStyle = "none";
   };
-  incompatibleExtraConfig = evaluate {
+  extraConfigBorderless = evaluate {
     extraConfig.lock.design.border_style = "none";
   };
   unstable = evaluate {
@@ -83,7 +83,7 @@ let
   };
   idleOnly = evaluate { dm.enable = false; };
   overriddenTty = evaluate {
-    config.dm.tty.path = "/dev/tty3";
+    dm.tty = "tty3";
     extraConfig.dm.tty.path = "/dev/tty2";
   };
   disabledThroughConfig = evaluate {
@@ -111,12 +111,8 @@ assert stable.services.rsdm.channel == "stable";
 assert stable.services.rsdm.package == self.packages.${system}.rsdm-stable;
 assert rsdmAssertionsHold stable;
 assert rsdmAssertionsHold stableWithOptions;
-assert
-  rsdmAssertionsHold incompatibleStable
-  == nixpkgs.lib.versionAtLeast stable.services.rsdm.package.version "2.0.0";
-assert
-  rsdmAssertionsHold incompatibleExtraConfig
-  == nixpkgs.lib.versionAtLeast stable.services.rsdm.package.version "2.0.0";
+assert rsdmAssertionsHold stableBorderless;
+assert rsdmAssertionsHold extraConfigBorderless;
 assert unstable.services.rsdm.package == self.packages.${system}.rsdm-unstable;
 assert !unstable.services.rsdm.package.allowSubstitutes;
 assert unstable.services.rsdm.dm.design.borderStyle == "none";

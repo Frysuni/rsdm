@@ -9,7 +9,7 @@
   useKwallet,
 }:
 let
-  runtimeConfig = lib.recursiveUpdate (lib.recursiveUpdate baseConfig cfg.config) cfg.extraConfig;
+  runtimeConfig = lib.recursiveUpdate baseConfig cfg.extraConfig;
   ttyPath = runtimeConfig.dm.tty.path;
   ttyName = lib.removePrefix "/dev/" ttyPath;
   displayManagerAlias =
@@ -23,19 +23,6 @@ lib.mkIf cfg.enable {
     {
       assertion = !idleEnabled || lockEnabled || runtimeConfig.idle.lock_command != [ ];
       message = "RSDM idle.enable requires lock.enable or idle.lock_command in the merged configuration.";
-    }
-    {
-      assertion =
-        lib.versionAtLeast (cfg.package.version or "0") "2.0.0"
-        || builtins.all (component: runtimeConfig.${component}.design.border_style != "none") [
-          "dm"
-          "lock"
-        ];
-      message = ''
-        RSDM borderStyle = "none" requires a package version of at least 2.0.0.
-        Use channel = "unstable" or select a border supported by the stable package.
-        This also applies to border_style set through config or extraConfig.
-      '';
     }
   ];
 

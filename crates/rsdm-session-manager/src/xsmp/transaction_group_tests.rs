@@ -23,7 +23,7 @@ pub(super) async fn worker() {
     }
     handle.shutdown(&Deadline::default()).await.unwrap();
     let app = fixture.runtime.app(&unit).unwrap();
-    assert_eq!(app.dispatch.as_ref().unwrap().xsmp_die_state, Some(DispatchState::Sent));
+    assert_eq!(app.dispatch.as_ref().unwrap().xsmp_die_state, DispatchState::Sent);
     crate::apps::reset_preparation(&fixture.runtime).await.unwrap();
     assert!(!crate::app_dispatch::claim(&fixture.runtime, &app, Some("next"), crate::app_dispatch::Method::Xsmp, &Deadline::default()).await.unwrap());
 }

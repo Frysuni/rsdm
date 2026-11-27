@@ -154,7 +154,7 @@ impl Fixture {
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
         fs::create_dir(directory.join("apps")).unwrap();
         fs::set_permissions(directory.join("apps"), fs::Permissions::from_mode(0o700)).unwrap();
-        let runtime = Runtime { path: directory.clone(), generation: GENERATION.into() };
+        let runtime = Runtime::for_test(directory.clone(), GENERATION.into());
         runtime.save_session(&crate::runtime::SessionRecord {
             identity: crate::identity::SessionIdentity { generation: GENERATION.into(), login_session_id: "test".into(),
                 desktop_entry_id: None, uid: unsafe { libc::geteuid() } },
@@ -200,5 +200,8 @@ impl Fixture {
 }
 
 impl Drop for Fixture {
-    fn drop(&mut self) { let _ = fs::remove_dir_all(&self.directory); }
+    fn drop(&mut self) {
+        let _ = fs::remove_file(self.runtime.path.with_extension("disabled"));
+        let _ = fs::remove_dir_all(&self.directory);
+    }
 }

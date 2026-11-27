@@ -8,7 +8,7 @@ async fn session_status_preserves_the_plain_application_list() {
     let output = tools.run(&["session", "status"]);
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout), format!(
-        "managed: running (login test, desktop example, generation {GENERATION})\nRSDM XSMP: unavailable; auto uses the provider's shutdown method\nexample.service: registered, term, 30s\n"));
+        "managed: running (login test, desktop example, generation {GENERATION})\nRSDM XSMP: unavailable; auto uses the provider's shutdown method\nexample.service: registered, term, 30s\nmanager: full\n"));
     assert!(output.stderr.is_empty());
 }
 

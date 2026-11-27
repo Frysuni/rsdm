@@ -5,15 +5,7 @@ use std::time::Duration;
 use rsdm_core::domain::SessionManagerConfig;
 use zbus::{Connection, names::OwnedUniqueName};
 
-use crate::{SessionError, control::{self, SessionStatus}, status::SessionStatusDetails};
-
-pub async fn status(cfg: &SessionManagerConfig) -> Result<SessionStatus, SessionError> {
-    if !cfg.enabled { return Ok(SessionStatus::disabled()); }
-    let Some(connection) = connection().await? else { return Ok(SessionStatusDetails::inactive().status); };
-    let Some(owner) = coordinator_owner(&connection).await? else { return Ok(SessionStatusDetails::inactive().status); };
-    let proxy = zbus::Proxy::new(&connection, owner.as_str(), control::OBJECT_PATH, control::BUS_NAME).await?;
-    Ok(proxy.call("Status", &()).await?)
-}
+use crate::{SessionError, control, status::SessionStatusDetails};
 
 pub async fn status_details(cfg: &SessionManagerConfig) -> Result<SessionStatusDetails, SessionError> {
     if !cfg.enabled { return Ok(SessionStatusDetails::disabled()); }
@@ -37,13 +29,7 @@ async fn connection() -> Result<Option<Connection>, SessionError> {
 async fn query_details(connection: &Connection) -> Result<SessionStatusDetails, SessionError> {
     let Some(owner) = coordinator_owner(connection).await? else { return Ok(SessionStatusDetails::inactive()); };
     let proxy = zbus::Proxy::new(connection, owner.as_str(), control::OBJECT_PATH, control::BUS_NAME).await?;
-    match proxy.call::<_, _, SessionStatusDetails>("StatusDetails", &()).await {
-        Ok(details) => Ok(details),
-        Err(zbus::Error::FDO(error)) if matches!(*error, zbus::fdo::Error::UnknownMethod(_)) => {
-            Ok(SessionStatusDetails::legacy(proxy.call("Status", &()).await?))
-        }
-        Err(error) => Err(error.into()),
-    }
+    Ok(proxy.call("StatusDetails", &()).await?)
 }
 
 async fn coordinator_owner(connection: &Connection) -> Result<Option<OwnedUniqueName>, SessionError> {

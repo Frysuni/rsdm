@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}},
 };
 
-use rsdm_session_manager::{SessionStatus, StopOutcome};
+use rsdm_session_manager::{SessionStatus, SessionStatusDetails, StopOutcome};
 use zbus::OwnedObjectPath;
 
 #[path = "support/terminal.rs"]
@@ -68,7 +68,7 @@ struct Session { calls: Calls, finalize_fails: bool }
 impl Session {
     fn handshake(&self) -> &str { GENERATION }
 
-    fn attach(&self) -> SessionStatus { self.status() }
+    fn attach(&self) -> SessionStatus { self.status_details().status }
 
     fn finalize(&self, generation: &str, _environment: Vec<(String, String)>) -> zbus::fdo::Result<()> {
         self.calls.lock().unwrap().push(format!("finalize {generation}"));
@@ -86,10 +86,12 @@ impl Session {
         self.calls.lock().unwrap().push(format!("cancel {generation}"));
     }
 
-    fn status(&self) -> SessionStatus {
-        SessionStatus { generation: GENERATION.into(), login_session_id: "test".into(), desktop_entry_id: "example".into(),
+    fn status_details(&self) -> SessionStatusDetails {
+        let status = SessionStatus { generation: GENERATION.into(), login_session_id: "test".into(), desktop_entry_id: "example".into(),
             provider: "managed".into(), phase: "running".into(), xsmp_available: false,
-            apps: vec![("example.service".into(), "term".into(), 30, "registered".into())] }
+            apps: vec![("example.service".into(), "term".into(), 30, "registered".into())] };
+        SessionStatusDetails { enabled: true, state: "full".into(), status, capabilities: Vec::new(),
+            limitations: Vec::new(), preparations: Vec::new() }
     }
 
     fn stop(&self, generation: &str, action: &str) -> StopOutcome {
@@ -281,10 +283,13 @@ async fn expired_stop_hook_and_recovery_budgets_skip_the_bus_handshake() {
     }
     // SAFETY: geteuid has no preconditions.
     let uid = unsafe { libc::geteuid() };
+    let marker = session.with_extension("disabled");
+    fs::write(&marker, [0]).unwrap();
+    fs::set_permissions(&marker, fs::Permissions::from_mode(0o600)).unwrap();
     let record = session.join("session.toml");
     let contents = format!("anchor_unit = 'rsdm-session-{GENERATION}.service'\n\
         compositor_invocation = []\nprovider = 'managed'\nowns_targets = false\n\
-        phase = 'preparing'\nshutdown_deadline_usec = 1\n\
+        phase = 'preparing'\ndisabled = false\nexported_environment = []\nprevious_environment = []\nshutdown_deadline_usec = 1\n\
         [identity]\ngeneration = '{GENERATION}'\nlogin_session_id = 'test'\nuid = {uid}\n");
     fs::write(&record, &contents).unwrap();
     fs::set_permissions(&record, fs::Permissions::from_mode(0o600)).unwrap();

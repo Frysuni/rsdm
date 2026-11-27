@@ -28,7 +28,7 @@ async fn competing_die_claims_persist_one_intent_and_block_every_later_graceful_
     let (first, second) = tokio::join!(claim_xsmp_die(&fixture.runtime, &fixture.app, Some("first"), &deadline),
         claim_xsmp_die(&fixture.runtime, &fixture.app, Some("first"), &deadline));
     assert_ne!(first.unwrap().is_some(), second.unwrap().is_some());
-    assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().dispatch.unwrap().xsmp_die_state, Some(State::Intent));
+    assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().dispatch.unwrap().xsmp_die_state, State::Intent);
 
     crate::apps::reset_preparation(&fixture.runtime).await.unwrap();
     transaction(&fixture, "next");
@@ -48,7 +48,7 @@ async fn a_sent_die_remains_claimed_after_cancellation_and_record_reload() {
     let reloaded: AppRecord = toml::from_str(&toml::to_string(&fixture.runtime.app(&fixture.app.unit).unwrap()).unwrap()).unwrap();
     let dispatch = reloaded.dispatch.unwrap();
     assert_eq!(dispatch.state, State::Sent);
-    assert_eq!(dispatch.xsmp_die_state, Some(State::Sent));
+    assert_eq!(dispatch.xsmp_die_state, State::Sent);
     transaction(&fixture, "next");
     assert!(!claim(&fixture.runtime, &fixture.app, Some("next"), Method::Xsmp, &Deadline::default()).await.unwrap());
 }
@@ -65,21 +65,11 @@ async fn a_proven_unsent_die_allows_a_new_save_after_cancellation() {
 }
 
 #[tokio::test]
-async fn legacy_save_records_cannot_prove_that_die_was_never_sent() {
-    for state in [State::Sent, State::Cancelled] {
-        let fixture = saved().await;
-        let mut app = fixture.runtime.app(&fixture.app.unit).unwrap();
-        app.dispatch.as_mut().unwrap().state = state;
-        let encoded = toml::to_string(&app).unwrap().replace("xsmp_die_state = \"not_sent\"\n", "");
-        let legacy: AppRecord = toml::from_str(&encoded).unwrap();
-        assert_eq!(legacy.dispatch.as_ref().unwrap().xsmp_die_state, None);
-        fixture.runtime.save_app(&legacy).unwrap();
-        crate::apps::reset_preparation(&fixture.runtime).await.unwrap();
-        assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().dispatch.unwrap().state, state);
-        assert!(claim_xsmp_die(&fixture.runtime, &fixture.app, Some("first"), &Deadline::default()).await.unwrap().is_none());
-        transaction(&fixture, "next");
-        assert!(!claim(&fixture.runtime, &fixture.app, Some("next"), Method::Xsmp, &Deadline::default()).await.unwrap());
-    }
+async fn xsmp_dispatch_requires_explicit_die_state() {
+    let fixture = saved().await;
+    let app = fixture.runtime.app(&fixture.app.unit).unwrap();
+    let encoded = toml::to_string(&app).unwrap().replace("xsmp_die_state = \"not_sent\"\n", "");
+    assert!(toml::from_str::<AppRecord>(&encoded).is_err());
 }
 
 #[tokio::test]
@@ -92,7 +82,7 @@ async fn stale_transactions_and_replaced_invocations_do_not_acquire_or_overwrite
     assert!(claim_xsmp_die(&fixture.runtime, &fixture.app, Some("first"), &Deadline::default()).await.unwrap().is_none());
     assert!(finish_xsmp_die(&fixture.runtime, &fixture.app, Some("first"), State::Sent, &Deadline::default()).await.is_err());
     assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().invocation_id, replaced.invocation_id);
-    assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().dispatch.unwrap().xsmp_die_state, Some(State::NotSent));
+    assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().dispatch.unwrap().xsmp_die_state, State::NotSent);
 }
 
 #[tokio::test]
@@ -103,7 +93,7 @@ async fn die_cannot_follow_an_unconfirmed_or_cancelled_save() {
         app.dispatch.as_mut().unwrap().state = state;
         fixture.runtime.save_app(&app).unwrap();
         assert!(claim_xsmp_die(&fixture.runtime, &fixture.app, Some("first"), &Deadline::default()).await.unwrap().is_none());
-        assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().dispatch.unwrap().xsmp_die_state, Some(State::NotSent));
+        assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().dispatch.unwrap().xsmp_die_state, State::NotSent);
     }
 }
 
@@ -120,5 +110,5 @@ async fn a_die_claim_waiting_for_a_lease_rechecks_the_transaction() {
     transaction(&fixture, "next");
     drop(lease);
     assert!(pending.await.unwrap().is_none());
-    assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().dispatch.unwrap().xsmp_die_state, Some(State::NotSent));
+    assert_eq!(fixture.runtime.app(&fixture.app.unit).unwrap().dispatch.unwrap().xsmp_die_state, State::NotSent);
 }
