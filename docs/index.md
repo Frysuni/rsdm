@@ -39,8 +39,6 @@ features:
     link: /troubleshooting
 ---
 
-<video src="/rsdm-preview.mp4" autoplay loop muted playsinline controls preload="metadata" aria-label="RSDM screen recording"></video>
-
 ## Choose your distribution
 
 | Distribution | Recommended installation |

@@ -1,5 +1,5 @@
-import { onMounted } from 'vue'
-import { useData } from 'vitepress'
+import { h, onMounted } from 'vue'
+import { useData, withBase } from 'vitepress'
 import DefaultTheme from 'vitepress/theme'
 import { preferredLanguage } from './language'
 import './style.css'
@@ -8,6 +8,21 @@ const languageKey = 'rsdm-wiki-language'
 
 export default {
   extends: DefaultTheme,
+  Layout() {
+    const { localeIndex } = useData()
+
+    return h(DefaultTheme.Layout, null, {
+      'home-hero-image': () => h('a', {
+        class: 'rsdm-hero-preview',
+        href: withBase('/rsdm-preview.mp4'),
+      }, [h('img', {
+        src: withBase('/rsdm-preview.gif'),
+        alt: localeIndex.value === 'ru' ? 'Смотреть запись работы RSDM' : 'Watch the RSDM screen recording',
+        width: 960,
+        height: 600,
+      })]),
+    })
+  },
   setup() {
     const { site, page } = useData()
 

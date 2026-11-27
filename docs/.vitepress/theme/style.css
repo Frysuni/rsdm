@@ -19,3 +19,51 @@
   font-family: var(--vp-font-family-mono);
   letter-spacing: -0.06em;
 }
+
+.VPHome .VPHero.has-image .container {
+  gap: 2rem;
+}
+
+.VPHome .VPHero .image {
+  order: 2;
+  margin: 0;
+  min-height: 0;
+}
+
+.VPHome .VPHero .image-container {
+  width: min(100%, 36rem);
+  height: auto;
+  transform: none;
+}
+
+.rsdm-hero-preview {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 0.75rem;
+}
+
+.rsdm-hero-preview img {
+  width: 100%;
+}
+
+@media (min-width: 60rem) {
+  .VPHome .VPHero.has-image .container {
+    display: grid;
+    grid-template-columns: minmax(0, 1.13fr) minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .VPHome .VPHero.has-image .main {
+    width: auto;
+  }
+
+  .VPHome .VPHero.has-image :is(.name, .text) {
+    font-size: clamp(2.375rem, 4.3vw, 3.5rem);
+  }
+
+  .VPHome .VPHero.has-image .tagline {
+    font-size: clamp(1.25rem, 1.9vw, 1.5rem);
+  }
+}
