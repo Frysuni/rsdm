@@ -39,6 +39,8 @@ features:
     link: /ru/troubleshooting
 ---
 
+<video src="/rsdm-preview.mp4" autoplay loop muted playsinline controls preload="metadata" aria-label="Демонстрация RSDM"></video>
+
 ## Выберите дистрибутив {#choose-your-distribution}
 
 | Дистрибутив | Рекомендуемый способ установки |

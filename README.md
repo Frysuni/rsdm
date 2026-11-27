@@ -12,6 +12,8 @@ themes, application shutdown policies and session-aware power actions.
 The Greeter runs on a Linux virtual terminal; Lock runs inside a compatible
 Wayland session.
 
+[![RSDM screen recording](docs/public/rsdm-preview.gif)](docs/public/rsdm-preview.mp4)
+
 > [!WARNING]
 > RSDM is experimental. Keep a working console login when trying a new
 > display manager. Save your work before testing logout or power actions.
