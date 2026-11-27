@@ -29,6 +29,8 @@ compositor.
   session.
 - Runs on Arch (AUR) and NixOS (flake module). GPL-3.0.
 
+[![RSDM in action with six views covering TTY login and session selection, Greeter design, Wayland locking and idle, Lock settings, registered apps, and reboot progress](docs/public/rsdm-preview.png)](docs/public/rsdm-preview.png)
+
 > [!WARNING]
 > RSDM is still experimental. Expect bugs, incomplete integrations, and breaking changes.
 

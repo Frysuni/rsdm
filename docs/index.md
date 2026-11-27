@@ -39,6 +39,8 @@ features:
     link: /troubleshooting
 ---
 
+[![RSDM in action with six views covering TTY login and session selection, Greeter design, Wayland locking and idle, Lock settings, registered apps, and reboot progress](/rsdm-preview.png)](/rsdm-preview.png)
+
 ## Choose your distribution
 
 - [NixOS](installation/nixos.md) — flake module with stable and unstable channels.
