@@ -166,3 +166,67 @@ fn stalled_reply_readers_cannot_extend_the_authorization_deadline() {
         assert_eq!(report.unwrap(), None);
     }
 }
+
+#[test]
+fn interactive_login_waits_for_all_factors_and_the_mapped_account_decision() {
+    #[derive(Debug)]
+    struct Conversation {
+        events: Vec<String>,
+        deny_account: bool,
+    }
+
+    impl AuthConversation for Conversation {
+        fn respond(&mut self, message: AuthMessage) -> Result<Option<PasswordSecret>, AuthError> {
+            self.events.push(format!("{:?}:{}", message.style, message.text));
+            match (message.style, message.text.as_str()) {
+                (AuthMessageStyle::Info, "Welcome\nMFA required")
+                | (AuthMessageStyle::Error, "Previous attempt expired") => Ok(None),
+                (AuthMessageStyle::Visible, "Account:") => Ok(Some(PasswordSecret::new("alice@realm"))),
+                (AuthMessageStyle::Secret, "Password:") => Ok(Some(PasswordSecret::new("pässword"))),
+                (AuthMessageStyle::Secret, "OTP:") => Ok(Some(PasswordSecret::new("123456"))),
+                _ => panic!("unexpected PAM conversation message"),
+            }
+        }
+
+        fn account_name(&mut self, username: &str) -> Result<(), AuthError> {
+            self.events.push(format!("account:{username}"));
+            if self.deny_account { Err(AuthError::AccountDenied) } else { Ok(()) }
+        }
+    }
+
+    for deny_account in [false, true] {
+        let (report, child_report) = UnixStream::pair().unwrap();
+        let (reply, child_reply) = UnixStream::pair().unwrap();
+        child_reply.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let authorized = [super::super::session_report::AUTHORIZED_TAG, 0, 0, 0, 0];
+        let child = std::thread::spawn(move || {
+            let mut conversation = LeaderConversation { report: child_report.into(), reply: child_reply.into() };
+            for (style, text, expected) in [
+                (AuthMessageStyle::Info, "Welcome\nMFA required", None),
+                (AuthMessageStyle::Visible, "Account:", Some("alice@realm")),
+                (AuthMessageStyle::Secret, "Password:", Some("pässword")),
+                (AuthMessageStyle::Error, "Previous attempt expired", None),
+                (AuthMessageStyle::Secret, "OTP:", Some("123456")),
+            ] {
+                let response = conversation.respond(AuthMessage { style, text: text.into() }).unwrap();
+                assert_eq!(response.as_ref().map(PasswordSecret::expose_secret), expected);
+            }
+            assert_eq!(conversation.account_name("local-alice").is_err(), deny_account);
+            // Even a child claiming success must respect the parent's decision.
+            write_frame(conversation.report.as_raw_fd(), &authorized).unwrap();
+        });
+        let mut conversation = Conversation { events: Vec::new(), deny_account };
+        let result = read_auth_report(report.as_raw_fd(), reply.as_raw_fd(), &mut conversation,
+            Instant::now() + Duration::from_secs(2));
+        drop(report);
+        drop(reply);
+        child.join().unwrap();
+        assert_eq!(conversation.events, [
+            "Info:Welcome\nMFA required", "Visible:Account:", "Secret:Password:",
+            "Error:Previous attempt expired", "Secret:OTP:", "account:local-alice",
+        ]);
+        let expected = if deny_account { super::super::session_report::LeaderReport::AuthFailed.encode() }
+            else { authorized };
+        assert_eq!(result, Some(expected));
+    }
+}
